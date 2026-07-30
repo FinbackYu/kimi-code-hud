@@ -78,7 +78,9 @@ export function getStatusLineCommand(content) {
 /**
  * Return tui.toml content with the status-line command removed. Only
  * command lines inside [status_line] whose value mentions our script (or
- * equals the given command) are removed; other keys are untouched.
+ * equals the given command) are removed; other keys are untouched. When
+ * nothing but blank lines remain in the section, the whole [status_line]
+ * section (header included) is dropped instead of leaving an empty husk.
  * @param {string} content
  * @param {string} command
  * @returns {string}
@@ -87,12 +89,16 @@ export function removeStatusLineCommand(content, command) {
   const lines = (content || '').replace(/\r\n/g, '\n').split('\n');
   const section = findSection(lines, 'status_line');
   if (!section) return content;
-  const out = lines.slice(0, section.start + 1);
+  const kept = [];
   for (let i = section.start + 1; i < section.end; i++) {
     const l = lines[i];
     if (isCommandLine(l) && (l.includes(command) || l.includes('kimi-hud'))) continue;
-    out.push(l);
+    kept.push(l);
   }
-  out.push(...lines.slice(section.end));
-  return out.join('\n');
+  if (kept.every((l) => l.trim() === '')) {
+    const out = [...lines.slice(0, section.start), ...lines.slice(section.end)];
+    while (out.length > 0 && out[out.length - 1].trim() === '') out.pop();
+    return out.length === 0 ? '' : out.join('\n') + '\n';
+  }
+  return [...lines.slice(0, section.start + 1), ...kept, ...lines.slice(section.end)].join('\n');
 }
