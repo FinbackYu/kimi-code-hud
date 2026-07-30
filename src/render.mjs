@@ -112,7 +112,7 @@ function badges(payload, color) {
 
 /**
  * Build the segment list for one layout tier.
- * compact: model:effort │ git:(branch) │ ⚡tps │ window pct+countdown
+ * compact: model <effort> │ git:(branch) │ ⚡tps │ window pct+countdown
  * normal:  + project prefix, thinking suffix, t/s+TTFT, bars, weekly
  * full:    + Context segment, weekly countdown, version
  * (Context only in full — the host's line 2 already shows the numbers)
@@ -124,14 +124,14 @@ function buildSegments(layout, ctx) {
   // Model with thinking suffix, mirroring the host footer: boolean models
   // show " thinking", effort-capable ones " thinking:<effort>" (halfwidth
   // colon, no space — keeps the suffix compact). Compact drops the
-  // "thinking" label and keeps only ":<effort>". The level comes from the
+  // "thinking" label and keeps only " <effort>" (space-separated). The level comes from the
   // session log's config.update events (the status-line payload does not
   // carry thinking state). The model name is painted in the host's primary
   // blue (#4FA8FF), the suffix stays in default text color.
   const level = metrics && typeof metrics.thinkingLevel === 'string' ? metrics.thinkingLevel : null;
   let modelSeg = colorize(color, C.primary, String(payload.model));
   if (level && level !== 'off') {
-    if (layout === 'compact') modelSeg += `:${level}`;
+    if (layout === 'compact') modelSeg += ` ${level}`;
     else modelSeg += level === 'on' ? ' thinking' : ` thinking:${level}`;
   }
   segs.push(modelSeg);
