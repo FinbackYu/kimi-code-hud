@@ -135,3 +135,33 @@ test('model change re-resolves and rewrites the snapshot', () => {
     );
   });
 });
+
+test('snapshot session id cannot escape the snapshot directory', () => {
+  const parent = tmpDir();
+  const snapshotDir = path.join(parent, 'snapshots');
+  const sessionId = 'x/../../escape';
+  const escapedPath = path.join(parent, 'escape.json');
+
+  assert.equal(
+    resolveThinkingLevel({
+      sessionLevel: 'max',
+      model: 'K3',
+      sessionId,
+      snapshotDir,
+      configPath: path.join(parent, 'missing.toml'),
+    }),
+    'max',
+  );
+  assert.equal(fs.existsSync(escapedPath), false);
+  assert.equal(fs.readdirSync(snapshotDir).length, 1);
+  assert.equal(
+    resolveThinkingLevel({
+      sessionLevel: null,
+      model: 'K3',
+      sessionId,
+      snapshotDir,
+      configPath: path.join(parent, 'missing.toml'),
+    }),
+    'max',
+  );
+});

@@ -36,10 +36,10 @@ test('refreshes the block in place when the hook path moved', () => {
   assert.equal(out, `model = "K3-256k"\n\n${BLOCK}\n\n[upgrade]\nchannel = "stable"\n`);
 });
 
-test('recovers from a dangling START marker without END', () => {
-  const input = `model = "K3-256k"\n\n# --- kimi-code-hud hooks START (managed, do not edit) ---\n[[hooks]]\n`;
-  const out = ensureHooksBlock(input, HOOK);
-  assert.equal(out, `model = "K3-256k"\n\n${BLOCK}\n`);
+test('leaves a dangling START marker untouched instead of deleting trailing config', () => {
+  const input = `model = "K3-256k"\n\n# --- kimi-code-hud hooks START (managed, do not edit) ---\n[[hooks]]\nevent = "SessionStart"\n\n[unrelated]\nkeep = true\n`;
+  assert.equal(ensureHooksBlock(input, HOOK), input);
+  assert.equal(removeHooksBlock(input), input);
 });
 
 test('escapes quotes and backslashes in the hook command', () => {

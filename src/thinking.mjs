@@ -57,7 +57,8 @@ function findModelTable(text, modelDisplay) {
  * is pinned per sessionId under ~/.kimi-code-hud/thinking-<sessionId>.json.
  */
 function snapshotPath(snapshotDir, sessionId) {
-  return path.join(snapshotDir, `thinking-${sessionId}.json`);
+  const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, '_');
+  return path.join(snapshotDir, `thinking-${safe}.json`);
 }
 
 function readSnapshot(snapshotDir, sessionId) {

@@ -69,6 +69,15 @@ function loadState(statePath) {
   return { offset: 0, samples: [], lastTtftMs: null, thinkingLevel: null };
 }
 
+function resetStreamState(state) {
+  state.offset = 0;
+  state.samples = [];
+  state.lastTtftMs = null;
+  state.thinkingLevel = null;
+  delete state.thinkingScanV;
+  delete state.thinkingScanDone;
+}
+
 function saveState(statePath, state) {
   try {
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
@@ -155,8 +164,21 @@ export function getMetrics(sessionId, {
     if (!wirePath) return empty;
     const statePath = statePathFor(sessionId, stateDir);
     const state = loadState(statePath);
-    const size = fs.statSync(wirePath).size;
-    if (state.offset > size) state.offset = 0; // truncated / rotated
+    const stat = fs.statSync(wirePath);
+    const size = stat.size;
+    const fileId = `${stat.dev}:${stat.ino}`;
+    let stateChanged = false;
+    // A smaller file was truncated in place; a different device/inode means
+    // log rotation or replacement. In either case, old samples and offsets no
+    // longer describe this stream and must be discarded together.
+    if (state.offset > size || (state.fileId && state.fileId !== fileId)) {
+      resetStreamState(state);
+      stateChanged = true;
+    }
+    if (state.fileId !== fileId) {
+      state.fileId = fileId;
+      stateChanged = true;
+    }
     // One-time backfill: sessions whose offset predates thinking-level
     // tracking would otherwise never see their initial config.update.
     // Versioned marker: v2 also matches the newer `thinkingEffort` key and
@@ -182,7 +204,7 @@ export function getMetrics(sessionId, {
       }
       state.thinkingScanV = THINKING_SCAN_V;
       delete state.thinkingScanDone; // legacy v1 marker
-      saveState(statePath, state);
+      stateChanged = true;
     }
     if (size > state.offset) {
       const fd = fs.openSync(wirePath, 'r');
@@ -195,13 +217,14 @@ export function getMetrics(sessionId, {
         if (lastNl >= 0) {
           processWireChunk(state, text.slice(0, lastNl + 1));
           state.offset += Buffer.byteLength(text.slice(0, lastNl + 1), 'utf8');
+          stateChanged = true;
         }
         // else: no complete line yet, keep offset for next run
       } finally {
         fs.closeSync(fd);
       }
-      saveState(statePath, state);
     }
+    if (stateChanged) saveState(statePath, state);
     return {
       tps: median(state.samples),
       ttftMs: state.lastTtftMs ?? null,

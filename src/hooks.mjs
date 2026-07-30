@@ -25,11 +25,13 @@ function blockLines(hookCommand) {
 function findBlock(lines) {
   const start = lines.findIndex((l) => l.trim() === START);
   if (start === -1) return null;
-  let end = lines.length - 1;
   for (let i = start + 1; i < lines.length; i++) {
-    if (lines[i].trim() === END) { end = i; break; }
+    if (lines[i].trim() === END) return { start, end: i };
   }
-  return { start, end };
+  // Without the END marker the ownership boundary is unknowable. Treat the
+  // file as malformed and leave it untouched rather than deleting user config
+  // that may follow the dangling START marker.
+  return { start, end: null };
 }
 
 /**
@@ -45,6 +47,7 @@ export function ensureHooksBlock(content, hookCommand) {
 
   const block = blockLines(hookCommand);
   const found = findBlock(lines);
+  if (found && found.end === null) return content;
   if (found) {
     lines.splice(found.start, found.end - found.start + 1, ...block);
   } else {
@@ -66,6 +69,7 @@ export function removeHooksBlock(content) {
   const lines = (content || '').replace(/\r\n/g, '\n').split('\n');
   const found = findBlock(lines);
   if (!found) return content;
+  if (found.end === null) return content;
   lines.splice(found.start, found.end - found.start + 1);
   while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
   return lines.length > 0 ? lines.join('\n') + '\n' : '';
