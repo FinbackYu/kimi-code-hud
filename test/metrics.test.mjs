@@ -72,6 +72,16 @@ test('processWireChunk tracks latest thinkingLevel from config.update', () => {
   assert.equal(state.samples.length, 1); // step.end still processed
 });
 
+test('processWireChunk accepts the newer thinkingEffort key', () => {
+  const state = { offset: 0, samples: [], lastTtftMs: null, thinkingLevel: null };
+  const lines = [
+    '{"type":"config.update","modelAlias":"kimi-code/k3-256k","thinkingEffort":"low","time":1}',
+    '{"type":"config.update","thinkingEffort":"max","time":2}',
+  ].join('\n') + '\n';
+  processWireChunk(state, lines);
+  assert.equal(state.thinkingLevel, 'max');
+});
+
 test('findWirePath matches ses_ prefixed and bare dirs', () => {
   const a = makeSession({ withPrefix: true });
   assert.equal(findWirePath(a.id, a.root), a.wirePath);
@@ -137,9 +147,31 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   );
   const m = getMetrics(id, { sessionsRoot: root, stateDir });
   assert.equal(m.thinkingLevel, 'high');
-  // Second run must not rescan (thinkingScanDone persisted).
+  // Second run must not rescan (versioned scan marker persisted).
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.thinkingScanDone, true);
+  assert.equal(state.thinkingScanV, 2);
+});
+
+test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    '{"type":"config.update","modelAlias":"kimi-code/k3-256k","thinkingEffort":"low","time":1}\n' +
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }) + '\n' +
+      '{"type":"config.update","thinkingEffort":"max","time":2}\n',
+  );
+  // v1 state: scan marked done, level never captured, offset past the events.
+  const size = fs.statSync(wirePath).size;
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({ offset: size, samples: [100], lastTtftMs: 500, thinkingLevel: null, thinkingScanDone: true }),
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir });
+  assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.equal(state.thinkingScanV, 2);
+  assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
 });
 
 test('getMetrics returns nulls for unknown sessions', () => {

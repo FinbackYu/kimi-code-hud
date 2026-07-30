@@ -99,10 +99,12 @@ async function render() {
   ensureFreshQuota({ scriptPath: SCRIPT_PATH });
   const quota = readQuotaCache();
   const metrics = getMetrics(payload.sessionId);
-  // thinkingLevel from the session log only exists after an in-session
-  // /effort change; otherwise pin the config.toml resolution per session
-  // (a session's runtime effort is frozen at start, while /effort in other
-  // sessions rewrites the global config).
+  // The wire log's config.update events carry the effort (new hosts:
+  // `thinkingEffort`, including an initial event at session start; older
+  // hosts: `thinkingLevel`, only after an in-session change). The
+  // per-session snapshot fills the gap when the wire has no such event,
+  // so another session's /effort (which rewrites the global config.toml)
+  // never moves this session's display.
   metrics.thinkingLevel = resolveThinkingLevel({
     sessionLevel: metrics.thinkingLevel,
     model: payload.model,
