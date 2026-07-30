@@ -55,7 +55,7 @@ function loadState(statePath) {
   } catch {
     // fall through
   }
-  return { offset: 0, samples: [], lastTtftMs: null };
+  return { offset: 0, samples: [], lastTtftMs: null, thinkingLevel: null };
 }
 
 function saveState(statePath, state) {
@@ -83,6 +83,12 @@ export function processWireChunk(state, text) {
     try {
       row = JSON.parse(line);
     } catch {
+      continue;
+    }
+    if (row?.type === 'config.update') {
+      // Latest thinking level wins ("on"/"off" for boolean models, or a
+      // concrete effort like "high"/"max" for effort-capable ones).
+      if (typeof row.thinkingLevel === 'string') state.thinkingLevel = row.thinkingLevel;
       continue;
     }
     if (row?.type !== 'context.append_loop_event') continue;
@@ -127,7 +133,7 @@ export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
   stateDir = HUD_DIR,
 } = {}) {
-  const empty = { tps: null, ttftMs: null };
+  const empty = { tps: null, ttftMs: null, thinkingLevel: null };
   try {
     if (!sessionId) return empty;
     const wirePath = findWirePath(sessionId, sessionsRoot);
@@ -136,6 +142,29 @@ export function getMetrics(sessionId, {
     const state = loadState(statePath);
     const size = fs.statSync(wirePath).size;
     if (state.offset > size) state.offset = 0; // truncated / rotated
+    // One-time backfill: sessions whose offset predates thinkingLevel
+    // tracking would otherwise never see their initial config.update.
+    // The substring prefilter keeps this fast even on multi-MB logs.
+    if (state.thinkingLevel == null && state.thinkingScanDone !== true) {
+      try {
+        const text = fs.readFileSync(wirePath, 'utf8');
+        for (const line of text.split('\n')) {
+          if (!line.includes('"thinkingLevel"')) continue;
+          try {
+            const row = JSON.parse(line);
+            if (row?.type === 'config.update' && typeof row.thinkingLevel === 'string') {
+              state.thinkingLevel = row.thinkingLevel;
+            }
+          } catch {
+            // keep scanning
+          }
+        }
+      } catch {
+        // stay silent
+      }
+      state.thinkingScanDone = true;
+      saveState(statePath, state);
+    }
     if (size > state.offset) {
       const fd = fs.openSync(wirePath, 'r');
       try {
@@ -154,7 +183,11 @@ export function getMetrics(sessionId, {
       }
       saveState(statePath, state);
     }
-    return { tps: median(state.samples), ttftMs: state.lastTtftMs ?? null };
+    return {
+      tps: median(state.samples),
+      ttftMs: state.lastTtftMs ?? null,
+      thinkingLevel: state.thinkingLevel ?? null,
+    };
   } catch {
     return empty;
   }

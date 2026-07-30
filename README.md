@@ -8,7 +8,7 @@ A zero-dependency custom status line (HUD) for **Kimi Code CLI** — shows model
 <!-- ![screenshot](docs/screenshot.png) -->
 
 ```
-K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
+K3 thinking: high │ kimi-code-hud git:(main*) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
 ```
 
 ---
@@ -52,10 +52,12 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 
 ```
 compact: K3 │ git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 │ 5h ███░░░░░░░ 31%
-normal:  K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
-full:    K3 thinking │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0
+normal:  K3 thinking: high │ kimi-code-hud git:(main*) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
+full:    K3 thinking: high │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0
 ```
 
+- 模型后缀显示 thinking 状态：布尔模型为 ` thinking`，支持 effort 的模型为 ` thinking: <effort>`（数据来自会话日志的 `config.update` 事件，status line payload 不含此字段）；compact 档省略后缀；
+- normal 档不含 Context 段（宿主第二行已有精确数值），compact/full 档保留柱+百分比+token 数；
 - `permissionMode` 为 yolo/auto 时行首加 `[yolo]`（琥珀黄，对齐宿主默认）/`[auto]`（亮红，便于区分）徽章，plan 模式加 `[plan]`（蓝色）；`[swarm]`（青色）已实现，但当前宿主 status line payload 尚未携带 `swarmMode` 字段，上游补齐后自动生效；
 - 柱条按用量分级着色：<60% 绿、<85% 黄、≥85% 红；
 - 输出超过 200 字符自动降级 full→normal→compact。
@@ -80,7 +82,7 @@ access token 仅从 `~/.kimi-code/credentials/kimi-code.json` **本地读取**�
 
 **没有配额段？** 缓存首次生成前整段省略（不显示"加载中"）。可手动 `node bin/kimi-hud.mjs --refresh-quota` 后重试；该命令静默执行，检查 `~/.kimi-code-hud/quota.json` 是否生成。
 
-**为什么第一行和第二行都有 context 数字？** Footer 第二行永远由宿主绘制，插件无法接管；第一行的 Context 段自带柱、百分比和 token 数，保证单行信息自足，两行数值一致、互为冗余。
+**Context 段在哪些档显示？** compact/full 档自带柱、百分比和 token 数；normal 档不显示，直接看宿主第二行的 `context: N% (tokens/max)`（该行永远由宿主绘制，插件无法接管）。
 
 ---
 
@@ -119,7 +121,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 - `KIMI_HUD_LAYOUT` env var overrides the config file
 - `NO_COLOR` or `KIMI_HUD_NO_COLOR`: disable all ANSI colors
 
-See the layout table above. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is implemented but the host status-line payload does not expose `swarmMode` yet — it activates automatically once upstream adds it. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
+The model suffix shows thinking state: ` thinking` for boolean models, ` thinking: <effort>` for effort-capable ones (sourced from `config.update` events in the session log; the status-line payload does not carry it); compact omits the suffix. The normal layout drops the Context segment (the host's line 2 already shows the exact numbers); compact/full keep bar + percentage + token counts. See the layout table above. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is implemented but the host status-line payload does not expose `swarmMode` yet — it activates automatically once upstream adds it. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
 
 ### Uninstall
 
@@ -141,7 +143,7 @@ The access token is **read locally** from `~/.kimi-code/credentials/kimi-code.js
 
 **No quota segment?** The whole section is omitted until the first cache exists (no "loading" placeholder). Run `node bin/kimi-hud.mjs --refresh-quota` (silent) and check `~/.kimi-code-hud/quota.json`.
 
-**Why do both lines show context numbers?** Footer line 2 is always drawn by the host and cannot be taken over; the Context segment on line 1 carries the bar, percentage and token counts so the HUD line is self-sufficient — the two lines simply agree.
+**Which layouts show the Context segment?** compact/full carry the bar, percentage and token counts; normal omits it — read the host-drawn line 2 (`context: N% (tokens/max)`), which can never be taken over by a plugin.
 
 ## Development
 

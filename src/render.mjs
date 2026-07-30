@@ -108,16 +108,25 @@ function badges(payload, color) {
 
 /**
  * Build the segment list for one layout tier.
- * compact: model │ git:(branch) │ ctx bar+%+tokens │ ⚡tps │ window bars
- * normal:  + project prefix on git segment, t/s+TTFT, window countdowns, weekly
- * full:    + weekly countdown, version
+ * compact: model │ git:(branch) │ Context bar+%+tokens │ ⚡tps │ window bars
+ * normal:  + project prefix, thinking suffix, t/s+TTFT, countdowns, weekly
+ *          (no Context segment — the host's line 2 shows the numbers)
+ * full:    + Context segment, weekly countdown, version
  */
 function buildSegments(layout, ctx) {
   const { payload, quota, metrics, gitDirty, color, now } = ctx;
   const segs = [];
 
-  const plan = !!payload.planMode;
-  segs.push(layout === 'full' && plan ? `${payload.model} thinking` : String(payload.model));
+  // Model with thinking suffix, mirroring the host footer: boolean models
+  // show " thinking", effort-capable ones " thinking: <effort>". The level
+  // comes from the session log's config.update events (the status-line
+  // payload does not carry thinking state).
+  const level = metrics && typeof metrics.thinkingLevel === 'string' ? metrics.thinkingLevel : null;
+  let modelSeg = String(payload.model);
+  if (layout !== 'compact' && level && level !== 'off') {
+    modelSeg += level === 'on' ? ' thinking' : ` thinking: ${level}`;
+  }
+  segs.push(modelSeg);
 
   // Project + git in Claude HUD style: "my-project git:(main*)". Compact
   // drops the project name; without a branch the project stands alone.
@@ -130,23 +139,26 @@ function buildSegments(layout, ctx) {
     segs.push(project);
   }
 
-  // Context usage: bar + exact percentage + token counts, so line 1 is
-  // self-sufficient (no need to cross-check the host's line 2 numbers).
-  let ctxFrac = 0;
-  const hasCounts =
-    typeof payload.contextTokens === 'number' &&
-    typeof payload.maxContextTokens === 'number' &&
-    payload.maxContextTokens > 0;
-  if (hasCounts) {
-    ctxFrac = payload.contextTokens / payload.maxContextTokens;
-  } else if (typeof payload.contextUsage === 'number') {
-    ctxFrac = payload.contextUsage;
+  // Context usage: bar + exact percentage + token counts, so the line is
+  // self-sufficient. Shown in compact/full; normal drops it (the host's
+  // line 2 carries the exact numbers there).
+  if (layout !== 'normal') {
+    let ctxFrac = 0;
+    const hasCounts =
+      typeof payload.contextTokens === 'number' &&
+      typeof payload.maxContextTokens === 'number' &&
+      payload.maxContextTokens > 0;
+    if (hasCounts) {
+      ctxFrac = payload.contextTokens / payload.maxContextTokens;
+    } else if (typeof payload.contextUsage === 'number') {
+      ctxFrac = payload.contextUsage;
+    }
+    let ctxSeg = `Context ${bar(ctxFrac, color)} ${Math.round(ctxFrac * 100)}%`;
+    if (hasCounts) {
+      ctxSeg += ` (${formatTokens(payload.contextTokens)}/${formatTokens(payload.maxContextTokens)})`;
+    }
+    segs.push(ctxSeg);
   }
-  let ctxSeg = `Context ${bar(ctxFrac, color)} ${Math.round(ctxFrac * 100)}%`;
-  if (hasCounts) {
-    ctxSeg += ` (${formatTokens(payload.contextTokens)}/${formatTokens(payload.maxContextTokens)})`;
-  }
-  segs.push(ctxSeg);
 
   // Speed segment (omitted when no samples yet, e.g. fresh session)
   if (metrics && typeof metrics.tps === 'number') {
