@@ -58,7 +58,7 @@ full:    K3 thinking: high │ kimi-code-hud git:(main*) │ Context ███�
 
 - 模型后缀显示 thinking 状态：布尔模型为 ` thinking`，支持 effort 的模型为 ` thinking: <effort>`（status line payload 不含此字段；优先取会话日志 `config.update` 事件——只在会话内切换过 effort 时才有记录，否则回退解析 `~/.kimi-code/config.toml` 的 `[thinking]` 与模型表）；compact 档省略后缀；
 - normal 档不含 Context 段（宿主第二行已有精确数值），compact/full 档保留柱+百分比+token 数；
-- `permissionMode` 为 yolo/auto 时行首加 `[yolo]`（琥珀黄，对齐宿主默认）/`[auto]`（亮红，便于区分）徽章，plan 模式加 `[plan]`（蓝色）；`[swarm]`（青色）已实现，但当前宿主 status line payload 尚未携带 `swarmMode` 字段，上游补齐后自动生效；
+- 行首徽章与权限模式对齐：`[yolo]`（琥珀黄，对齐宿主默认）/`[auto]`（亮红，便于区分）/`[manual]`（暗灰占位，保持行首对齐），plan 模式加 `[plan]`（蓝色）；`[swarm]`（青色）已实现，但当前宿主 status line payload 尚未携带 `swarmMode` 字段，上游补齐后自动生效；
 - 柱条按用量分级着色：<60% 绿、<85% 黄、≥85% 红；
 - 输出超过 200 字符自动降级 full→normal→compact。
 
@@ -121,7 +121,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 - `KIMI_HUD_LAYOUT` env var overrides the config file
 - `NO_COLOR` or `KIMI_HUD_NO_COLOR`: disable all ANSI colors
 
-The model suffix shows thinking state: ` thinking` for boolean models, ` thinking: <effort>` for effort-capable ones (the status-line payload does not carry it; prefer `config.update` events from the session log — only written after an in-session effort change — falling back to the `[thinking]` and model tables in `~/.kimi-code/config.toml`); compact omits the suffix. The normal layout drops the Context segment (the host's line 2 already shows the exact numbers); compact/full keep bar + percentage + token counts. See the layout table above. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is implemented but the host status-line payload does not expose `swarmMode` yet — it activates automatically once upstream adds it. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
+The model suffix shows thinking state: ` thinking` for boolean models, ` thinking: <effort>` for effort-capable ones (the status-line payload does not carry it; prefer `config.update` events from the session log — only written after an in-session effort change — falling back to the `[thinking]` and model tables in `~/.kimi-code/config.toml`); compact omits the suffix. The normal layout drops the Context segment (the host's line 2 already shows the exact numbers); compact/full keep bar + percentage + token counts. See the layout table above. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast), `[manual]` (muted gray placeholder that keeps the left edge aligned) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is implemented but the host status-line payload does not expose `swarmMode` yet — it activates automatically once upstream adds it. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
 
 ### Uninstall
 
