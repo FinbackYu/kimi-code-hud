@@ -81,6 +81,17 @@ test('findWirePath matches ses_ prefixed and bare dirs', () => {
   assert.equal(findWirePath('ses_' + a.id, a.root), a.wirePath);
 });
 
+test('findWirePath matches session_ prefixed dirs (newer hosts)', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-ses-'));
+  const id = 'def456';
+  const dir = path.join(root, 'wd_1', `session_${id}`, 'agents', 'main');
+  fs.mkdirSync(dir, { recursive: true });
+  const wirePath = path.join(dir, 'wire.jsonl');
+  fs.writeFileSync(wirePath, '');
+  assert.equal(findWirePath(id, root), wirePath);
+  assert.equal(findWirePath(`session_${id}`, root), wirePath);
+});
+
 test('getMetrics reads incrementally and survives truncation', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));

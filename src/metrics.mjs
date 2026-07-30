@@ -10,16 +10,24 @@ const MIN_STREAM_MS = 50;
 
 /**
  * Locate the wire.jsonl for a session id. The payload sessionId may or may
- * not carry the "ses_" prefix, and session dirs live one level below
- * ~/.kimi-code/sessions/<wd_*>. Returns null when not found.
+ * not carry a prefix, session dirs live one level below
+ * ~/.kimi-code/sessions/<wd_*>, and the dir prefix changed from "ses_" to
+ * "session_" in newer hosts — all spellings are tried. Returns null when
+ * not found.
  * @param {string} sessionId
  * @param {string} [sessionsRoot]
  * @returns {string|null}
  */
 export function findWirePath(sessionId, sessionsRoot = SESSIONS_ROOT) {
   if (!sessionId || typeof sessionId !== 'string') return null;
-  const bare = sessionId.startsWith('ses_') ? sessionId.slice(4) : sessionId;
-  const candidates = [`ses_${bare}`, bare];
+  let bare = sessionId;
+  for (const prefix of ['ses_', 'session_']) {
+    if (bare.startsWith(prefix)) {
+      bare = bare.slice(prefix.length);
+      break;
+    }
+  }
+  const candidates = [`ses_${bare}`, `session_${bare}`, bare];
   let wdDirs;
   try {
     wdDirs = fs.readdirSync(sessionsRoot, { withFileTypes: true });
