@@ -50,9 +50,9 @@ export function bar(frac, color) {
 }
 
 /**
- * Format a reset countdown from an ISO timestamp: "↻ 2h18m" / "↻ 3d2h",
- * "↻ reset" when already past, null when unknown. The space after ↻ keeps
- * the ambiguous-width glyph's ink from overlapping the countdown digits in
+ * Format a reset countdown from an ISO timestamp: "~2h18m" / "~3d2h",
+ * "~reset" when already past, null when unknown. The marker is plain ASCII:
+ * ↻ (U+21BB) is East-Asian Ambiguous width and overlaps the digits in
  * terminals/fonts that draw it wider than one cell.
  * @param {string|null} resetAt
  * @param {number} [now]
@@ -63,14 +63,14 @@ export function formatCountdown(resetAt, now = Date.now()) {
   const t = Date.parse(resetAt);
   if (Number.isNaN(t)) return null;
   const diff = t - now;
-  if (diff <= 0) return '↻ reset';
+  if (diff <= 0) return '~reset';
   const mins = Math.floor(diff / 60000);
   const d = Math.floor(mins / 1440);
   const h = Math.floor((mins % 1440) / 60);
   const m = mins % 60;
-  if (d > 0) return `↻ ${d}d${h}h`;
-  if (h > 0) return `↻ ${h}h${m}m`;
-  return `↻ ${m}m`;
+  if (d > 0) return `~${d}d${h}h`;
+  if (h > 0) return `~${h}h${m}m`;
+  return `~${m}m`;
 }
 
 function formatTtft(ms) {
