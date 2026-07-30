@@ -8,7 +8,7 @@ A zero-dependency custom status line (HUD) for **Kimi Code CLI** — shows model
 <!-- ![screenshot](docs/screenshot.png) -->
 
 ```
-K3 │ kimi-code-hud │ main* │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
+K3 │ kimi-code-hud git:(main*) │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
 ```
 
 ---
@@ -51,9 +51,9 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 三档布局：
 
 ```
-compact: K3 │ main* │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 │ 5h ███░░░░░░░ 31%
-normal:  K3 │ kimi-code-hud │ main* │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
-full:    K3 thinking │ kimi-code-hud │ main* │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0
+compact: K3 │ git:(main*) │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 │ 5h ███░░░░░░░ 31%
+normal:  K3 │ kimi-code-hud git:(main*) │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
+full:    K3 thinking │ kimi-code-hud git:(main*) │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0
 ```
 
 - `permissionMode` 为 yolo/auto 时行首加 `[yolo]`/`[auto]` 徽章，plan 模式加 `[plan]`；
