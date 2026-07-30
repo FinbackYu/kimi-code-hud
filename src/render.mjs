@@ -93,8 +93,8 @@ function badges(payload, color) {
 
 /**
  * Build the segment list for one layout tier.
- * compact: model │ git │ ctx bar+%+tokens │ ⚡tps │ window bars
- * normal:  + project, t/s+TTFT, window countdowns, weekly
+ * compact: model │ git:(branch) │ ctx bar+%+tokens │ ⚡tps │ window bars
+ * normal:  + project prefix on git segment, t/s+TTFT, window countdowns, weekly
  * full:    + weekly countdown, version
  */
 function buildSegments(layout, ctx) {
@@ -104,12 +104,15 @@ function buildSegments(layout, ctx) {
   const plan = !!payload.planMode;
   segs.push(layout === 'full' && plan ? `${payload.model} thinking` : String(payload.model));
 
-  if (layout !== 'compact' && payload.cwd) {
-    segs.push(path.basename(payload.cwd) || payload.cwd);
-  }
-
+  // Project + git in Claude HUD style: "my-project git:(main*)". Compact
+  // drops the project name; without a branch the project stands alone.
+  const project =
+    layout !== 'compact' && payload.cwd ? path.basename(payload.cwd) || payload.cwd : null;
   if (payload.gitBranch) {
-    segs.push(`${payload.gitBranch}${gitDirty ? '*' : ''}`);
+    const git = `git:(${payload.gitBranch}${gitDirty ? '*' : ''})`;
+    segs.push(project ? `${project} ${git}` : git);
+  } else if (project) {
+    segs.push(project);
   }
 
   // Context usage: bar + exact percentage + token counts, so line 1 is
