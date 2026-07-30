@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { readPayload } from '../src/payload.mjs';
 import { isGitDirty } from '../src/git.mjs';
 import { getMetrics } from '../src/metrics.mjs';
+import { resolveThinkingLevel } from '../src/thinking.mjs';
 import { readQuotaCache, ensureFreshQuota, refreshQuota, HUD_DIR } from '../src/quota.mjs';
 import { renderHud } from '../src/render.mjs';
 import { setStatusLineCommand, removeStatusLineCommand } from '../src/toml.mjs';
@@ -94,6 +95,13 @@ async function render() {
   ensureFreshQuota({ scriptPath: SCRIPT_PATH });
   const quota = readQuotaCache();
   const metrics = getMetrics(payload.sessionId);
+  // thinkingLevel from the session log only exists after an in-session
+  // /effort change; fall back to the [thinking] + model tables in
+  // config.toml so the suffix shows from the very first step.
+  metrics.thinkingLevel = resolveThinkingLevel({
+    sessionLevel: metrics.thinkingLevel,
+    model: payload.model,
+  });
   const gitDirty = payload.gitBranch ? isGitDirty(payload.cwd) : false;
   const lines = renderHud({
     payload,
