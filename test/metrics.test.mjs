@@ -59,6 +59,19 @@ test('processWireChunk computes TPS and keeps last 5 samples', () => {
   assert.equal(state.lastTtftMs, 900);
 });
 
+test('processWireChunk tracks latest thinkingLevel from config.update', () => {
+  const state = { offset: 0, samples: [], lastTtftMs: null, thinkingLevel: null };
+  const lines = [
+    '{"type":"config.update","thinkingLevel":"on","time":1}',
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }),
+    '{"type":"config.update","modelAlias":"kimi-code/k3","time":2}',  // no level: keep previous
+    '{"type":"config.update","thinkingLevel":"high","time":3}',
+  ].join('\n') + '\n';
+  processWireChunk(state, lines);
+  assert.equal(state.thinkingLevel, 'high');
+  assert.equal(state.samples.length, 1); // step.end still processed
+});
+
 test('findWirePath matches ses_ prefixed and bare dirs', () => {
   const a = makeSession({ withPrefix: true });
   assert.equal(findWirePath(a.id, a.root), a.wirePath);
@@ -97,10 +110,31 @@ test('getMetrics reads incrementally and survives truncation', () => {
   assert.ok(m.tps !== null);
 });
 
+test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    '{"type":"config.update","thinkingLevel":"high","time":1}\n' +
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }) + '\n',
+  );
+  // Simulate a state file whose offset already passed the config.update.
+  const size = fs.statSync(wirePath).size;
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({ offset: size, samples: [100], lastTtftMs: 500 }),
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir });
+  assert.equal(m.thinkingLevel, 'high');
+  // Second run must not rescan (thinkingScanDone persisted).
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.equal(state.thinkingScanDone, true);
+});
+
 test('getMetrics returns nulls for unknown sessions', () => {
   const m = getMetrics('nope', {
     sessionsRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-empty-')),
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-')),
   });
-  assert.deepEqual(m, { tps: null, ttftMs: null });
+  assert.deepEqual(m, { tps: null, ttftMs: null, thinkingLevel: null });
 });
