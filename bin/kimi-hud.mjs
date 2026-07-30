@@ -19,18 +19,22 @@ import { readQuotaCache, ensureFreshQuota, refreshQuota, HUD_DIR } from '../src/
 import { renderHud } from '../src/render.mjs';
 import { managedPluginDisabled } from '../src/plugin-state.mjs';
 import { setStatusLineCommand, removeStatusLineCommand } from '../src/toml.mjs';
+import { ensureHooksBlock, removeHooksBlock } from '../src/hooks.mjs';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
+const HOOK_SCRIPT_PATH = path.join(path.dirname(SCRIPT_PATH), '..', 'hooks', 'sync-status-line.mjs');
 const CONFIG_PATH = path.join(HUD_DIR, 'config.json');
 const TUI_TOML_PATH = process.env.KIMI_HUD_TUI_TOML
   || path.join(os.homedir(), '.kimi-code', 'tui.toml');
+const CONFIG_TOML_PATH = process.env.KIMI_HUD_CONFIG_TOML
+  || path.join(os.homedir(), '.kimi-code', 'config.toml');
 
 const HELP = `kimi-code-hud — custom status line for Kimi Code CLI
 
 Usage:
   kimi-code-hud                  render the status line (reads JSON from stdin)
-  kimi-code-hud --install        register in ~/.kimi-code/tui.toml
-  kimi-code-hud --uninstall      remove from ~/.kimi-code/tui.toml
+  kimi-code-hud --install        register in ~/.kimi-code/tui.toml (+ self-heal hook)
+  kimi-code-hud --uninstall      remove from ~/.kimi-code/tui.toml (+ the hook)
   kimi-code-hud --refresh-quota  refresh the quota cache (internal, silent)
   kimi-code-hud --help           show this help
 
@@ -56,25 +60,45 @@ function colorEnabled() {
   return !process.env.KIMI_HUD_NO_COLOR && !process.env.NO_COLOR;
 }
 
-function backupToml() {
+function backupFile(filePath) {
   try {
-    if (!fs.existsSync(TUI_TOML_PATH)) return;
+    if (!fs.existsSync(filePath)) return;
     const stamp = new Date().toISOString().slice(0, 19)
       .replace(/[-:]/g, '').replace('T', '-');
-    fs.copyFileSync(TUI_TOML_PATH, `${TUI_TOML_PATH}.${stamp}.bak`);
+    fs.copyFileSync(filePath, `${filePath}.${stamp}.bak`);
   } catch {
     // best effort
   }
+}
+
+// The host rewrites tui.toml on some upgrades (wiping [status_line]) but
+// preserves config.toml [[hooks]], so install/uninstall maintain a managed
+// SessionStart hook there that re-points tui.toml at every session start.
+function syncHooksBlock(installing) {
+  const hookCommand = `node ${HOOK_SCRIPT_PATH}`;
+  let content = '';
+  try { content = fs.readFileSync(CONFIG_TOML_PATH, 'utf8'); } catch { /* new file */ }
+  const next = installing
+    ? ensureHooksBlock(content, hookCommand)
+    : removeHooksBlock(content);
+  if (next === content) return false;
+  backupFile(CONFIG_TOML_PATH);
+  fs.mkdirSync(path.dirname(CONFIG_TOML_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_TOML_PATH, next);
+  return true;
 }
 
 function install() {
   const command = `node ${SCRIPT_PATH}`;
   let content = '';
   try { content = fs.readFileSync(TUI_TOML_PATH, 'utf8'); } catch { /* new file */ }
-  backupToml();
+  backupFile(TUI_TOML_PATH);
   fs.mkdirSync(path.dirname(TUI_TOML_PATH), { recursive: true });
   fs.writeFileSync(TUI_TOML_PATH, setStatusLineCommand(content, command));
   process.stdout.write(`Installed status line command in ${TUI_TOML_PATH}\n`);
+  if (syncHooksBlock(true)) {
+    process.stdout.write(`Registered SessionStart self-heal hook in ${CONFIG_TOML_PATH}\n`);
+  }
   process.stdout.write('重启 Kimi Code 或运行 /reload-tui 生效\n');
 }
 
@@ -82,9 +106,12 @@ function uninstall() {
   const command = `node ${SCRIPT_PATH}`;
   let content = '';
   try { content = fs.readFileSync(TUI_TOML_PATH, 'utf8'); } catch { /* nothing to do */ }
-  backupToml();
+  backupFile(TUI_TOML_PATH);
   fs.writeFileSync(TUI_TOML_PATH, removeStatusLineCommand(content, command));
   process.stdout.write(`Removed status line command from ${TUI_TOML_PATH}\n`);
+  if (syncHooksBlock(false)) {
+    process.stdout.write(`Removed SessionStart hook from ${CONFIG_TOML_PATH}\n`);
+  }
   process.stdout.write('重启 Kimi Code 或运行 /reload-tui 生效\n');
 }
 
