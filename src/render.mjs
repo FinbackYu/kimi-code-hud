@@ -14,6 +14,7 @@ const C = {
   red: `${ESC}31m`,
   brightYellow: `${ESC}93m`,
   brightRed: `${ESC}91m`,
+  muted: `${ESC}90m`, // bright black / gray — placeholder badges
   // Host defaults (dark theme, from kimi-code tui/theme/colors.ts):
   warning: rgb(232, 168, 56), // #E8A838 — auto/yolo badges
   primary: rgb(79, 168, 255), // #4FA8FF — plan badge
@@ -97,8 +98,11 @@ function badges(payload, color) {
   const out = [];
   // Host defaults render auto/yolo in warning amber and plan in primary
   // blue; auto keeps bright red here per user preference to stay distinct.
+  // Manual mode shows a muted [manual] so the line's left edge stays put
+  // when no elevated-permission badge is present.
   if (payload.permissionMode === 'yolo') out.push(colorize(color, C.warning, '[yolo]'));
   else if (payload.permissionMode === 'auto') out.push(colorize(color, C.brightRed, '[auto]'));
+  else out.push(colorize(color, C.muted, '[manual]'));
   if (payload.planMode) out.push(colorize(color, C.primary, '[plan]'));
   // The status-line payload does not carry swarmMode yet; rendered as soon
   // as the host exposes it (accent cyan, same as the built-in footer).
