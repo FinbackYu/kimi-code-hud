@@ -26,7 +26,7 @@ K3 thinking:high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5
 ```
 
 - 安装后**重启或开新会话**生效：插件声明的 `SessionStart` hook 会把 `tui.toml` 的 `[status_line]` 指向插件托管副本（`~/.kimi-code/plugins/managed/kimi-code-hud/`），并在每次会话启动时自动修复该条目；
-- 开关：在 `/plugins` 面板选中后按 `Space`，或运行 `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`。禁用或移除后，状态栏在下次刷新（约 1 秒内）自动回退为内置布局；
+- 开关：在 `/plugins` 面板选中后按 `Space`，或运行 `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`。禁用或移除后约 1 秒内，托管副本会自动从 `tui.toml` 清除自己的 `[status_line]` 条目并停止渲染（宿主会缓存最后一帧自定义状态栏，需 `/reload-tui` 或新会话才回退为内置布局）；重新启用后，下个会话的 SessionStart hook 会自动把条目写回；
 - 如果你已经在 `[status_line]` 配置了自己的其他命令，hook 不会覆盖它。
 
 **方式二：手动安装（git checkout）**
@@ -43,11 +43,10 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 ### 更新
 
 - **重装即更新**：再跑一遍 `/plugins install https://github.com/FinbackYu/kimi-code-hud`。托管副本原地替换，状态栏约 1 秒内自动用上新版本，无需 `/reload-tui` 或新会话。
-- **更新徽章（自建 marketplace）**：运行 `/plugins marketplace https://finbackyu.github.io/kimi-code-hud/marketplace.json` 打开目录；当仓库发布了比本地更新的 release 时，Installed 页会显示 `update 本地 → 最新` 徽章，选中按 Enter 即更新。该命令只影响本次浏览的目录来源，不替换官方 marketplace。
 
 ### 卸载
 
-插件方式安装：`/plugins remove kimi-code-hud`（按官方行为托管副本仍留在磁盘上，但安装记录已删除，状态栏会立即回退内置布局）。
+插件方式安装：`/plugins remove kimi-code-hud`（按官方行为托管副本仍留在磁盘上、安装记录被删除；托管副本下次运行时自动清除 `tui.toml` 里的条目，`/reload-tui` 或新会话后回退内置布局）。
 
 手动方式安装：
 
@@ -71,11 +70,17 @@ normal:  [manual] K3 thinking:high │ kimi-code-hud git:(main*) │ ctx 62% │
 full:    [manual] K3 thinking:high │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m │ wk ██░░░░░░░░ 25% ~3d2h │ v0.31.0
 ```
 
+/goal 模式下，模式徽章与模型之间插入 goal 徽章（三档都显示，与宿主默认 footer 的槽位顺序一致）：
+
+```
+[manual] [goal ● active · 4m · 7 turns] K3 thinking:high │ …
+```
+
 - 模型名以宿主主蓝色（dark 主题 `#4FA8FF`，即对话中链接/行内代码的蓝）显示；模型后缀显示 thinking 状态：布尔模型为 ` thinking`，支持 effort 的模型为 ` thinking:<effort>`（status line payload 不含此字段；优先取会话日志 `config.update` 事件——新版宿主键为 `thinkingEffort`，会话启动即有初始记录；旧版为 `thinkingLevel`，只在会话内切换过 effort 时记录。两者都没有时按会话快照固定取值，快照存 `~/.kimi-code-hud/thinking-<sessionId>.json`；快照不存在时才回退解析 `~/.kimi-code/config.toml` 的 `[thinking]` 与模型表并写入快照——这样其他会话执行 `/effort` 改写全局配置后，本会话显示不会跟着变）；compact 档去掉 `thinking` 标签、只保留空格分隔的 `<effort>` 后缀（如 `K3 high`）；
+- goal 徽章：格式与宿主默认 footer 一致（`[goal ● <status> · <计时> · <轮数>]`；设了 turn 预算显示 `3/10 turns`；圆点 active 蓝 / blocked 琥珀 / paused 暗灰）。status line payload 不含 goal 字段，状态从会话日志 `wire.jsonl` 的 `goal.create`/`goal.update`/`goal.clear`/`forked` op 重建（与 TPS 同一次增量扫描）；active 时按 `wallClockResumedAt` 每秒走动计时，goal 完成或清除后徽章消失；
 - 配额段：normal/full 档为柱+百分比+重置倒计时；compact 档去掉柱体，保留百分比和倒计时；周配额（wk）只在 normal/full 档显示；
 - Context 段所有档都上第一行：compact/normal 档为着色的 `ctx N%`（宿主第二行右对齐的精确数值容易错过）；full 档为柱+百分比+token 数。宿主第二行的 `context: N% (tokens/max)` 永远由宿主绘制、无法接管，精确 token 数看那里；
 - 行首徽章与权限模式对齐：`[yolo]`（琥珀黄，对齐宿主默认）/`[auto]`（亮红，便于区分）/`[manual]`（暗灰占位，保持行首对齐），plan 模式加 `[plan]`（蓝色）；`[swarm]`（青色）已实现，但当前宿主 status line payload 尚未携带 `swarmMode` 字段，上游补齐后自动生效；
-- goal 模式徽章 `[goal ● active · 4m · 7 turns]`：宿主 payload 不含 goal 字段，改为从主 agent wire 的 `goal.create`/`goal.update`/`goal.clear` 事件重建；圆点按状态着色（active 绿 / paused 黄 / blocked 红），active 期间墙钟按最后事件时间外推；目标完成或清除后徽章消失（与宿主 `formatGoalBadge` 行为一致）。预算（turnBudget 等）不落地到磁盘，无法显示 `7/20` 中的上限；
 - 柱条按用量分级着色：<60% 绿、<85% 黄、≥85% 红；
 - 输出超过 200 字符自动降级 full→normal→compact。
 
@@ -85,15 +90,14 @@ Kimi Code 的 `~/.kimi-code/tui.toml` 支持 `[status_line]` 自定义命令：
 
 - 每次刷新（每秒最多一次）宿主通过 stdin 传入一个 JSON 快照（model、cwd、gitBranch、permissionMode、planMode、contextTokens 等字段）；
 - 命令 stdout 的**第一行**接管底部 Footer 第一行（第二行固定由宿主绘制 `context: N%`，插件无法接管）；
-- 命令须在 **300ms** 内完成，失败/超时/空输出时宿主静默回退内置布局——所以本脚本对所有错误静默降级、绝不打印日志；唯一的非零退出是有意为之：当脚本是"已禁用/已移除插件的托管副本"时，非零退出让宿主回退内置布局（插件开关即由此实现）。
+- 命令须在 **300ms** 内完成，失败/超时/空输出时宿主静默回退内置布局——所以本脚本对所有错误静默降级、绝不打印日志；唯一的非零退出是有意为之：当脚本是"已禁用/已移除插件的托管副本"时，它会先自我清除 `tui.toml` 里的条目再非零退出（宿主在条目仍存在时会一直重播最后一帧，仅非零退出不足以交还状态栏），`/reload-tui` 或新会话后回退内置布局（插件开关即由此实现）。
 
 三段数据来源：
 
 | 段 | 来源 |
 |---|---|
 | 模型 / 分支 / Context | stdin 快照 + `git status --porcelain`（150ms 超时） |
-| TPS / TTFT | 增量解析会话目录下**所有** `agents/*/wire.jsonl`（main + 全部 subagent；旧版 `ses_<id>` 前缀兼容）的 `step.end` 事件，样本带事件时间戳并按 agent 分桶，只取最近 10 分钟内的最多 5 个做中位数——resume 接续、长时间空闲、compact 之后不会混入陈旧样本。多个 agent 同时活跃（swarm/subagent，2 分钟内有样本或有请求在飞）时显示**舰队总速度 + agent 数 + 平均速度**（`⚡ 305 t/s (12 agents @25)`），TTFT 取活跃 agent 的中位数（单个卡住的 agent 不会污染显示）。模型正在生成时（`llm.request` 无后续 `step.end`，compaction 请求除外）速度段显示每秒跳动的 `gen Ns` 实时计时（per-agent byte offset 存 `~/.kimi-code-hud/metrics-<sessionId>.json`，每秒只读新增字节） |
-| goal 徽章 | 主 agent wire 的 `goal.create` / `goal.update` / `goal.clear` 事件增量重建 |
+| TPS / TTFT / thinking / goal | 增量解析会话目录下**所有** `agents/*/wire.jsonl`（main + 全部 subagent；旧版 `ses_<id>` 前缀兼容）的 `step.end` 事件、`config.update` 与 `goal.*`/`forked` op，样本带事件时间戳并按 agent 分桶，只取最近 10 分钟内的最多 5 个做中位数——resume 接续、长时间空闲、compact 之后不会混入陈旧样本。多个 agent 同时活跃（swarm/subagent，2 分钟内有样本或有请求在飞）时显示**舰队总速度 + agent 数 + 平均速度**（`⚡ 305 t/s (12 agents @25)`），TTFT 取活跃 agent 的中位数（单个卡住的 agent 不会污染显示）。模型正在生成时（`llm.request` 无后续 `step.end`，compaction 请求除外）速度段显示每秒跳动的 `gen Ns` 实时计时（per-agent byte offset 存 `~/.kimi-code-hud/metrics-<sessionId>.json`，每秒只读新增字节） |
 | 配额（5h/wk） | `GET https://api.kimi.com/coding/v1/usages`，60 秒 TTL 缓存于 `~/.kimi-code-hud/quota.json`，过期时热路径用过期缓存渲染并 spawn 后台刷新，绝不阻塞 |
 
 ### 隐私与安全
@@ -110,7 +114,7 @@ access token 仅从 `~/.kimi-code/credentials/kimi-code.json` **本地读取**�
 
 **Context 段在哪些档显示？** 所有档：compact/normal 档显示 `ctx N%`（按用量着色），full 档额外有柱和精确 token 数。宿主第二行的 `context: N% (tokens/max)` 永远由宿主绘制（插件无法接管），两份显示并存是有意为之。
 
-**goal 模式徽章哪来数据？** status line payload 不含 goal 字段，HUD 从主 agent wire 的 `goal.*` 事件增量重建状态。不显示预算上限（`7/20 turns` 中的 20）——预算只存在于宿主进程内存，不落地磁盘。
+**goal 模式徽章哪来数据？** status line payload 不含 goal 字段，HUD 从主 agent wire 的 `goal.create`/`goal.update`/`goal.clear`/`forked` op 增量重建状态（与 TPS 同一次扫描）。设了 turn 预算时显示 `3/10 turns`——预算写在 `goal.create` op 的 `budgetLimits` 里。
 
 ## Development
 

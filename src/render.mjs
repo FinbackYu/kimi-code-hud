@@ -1,5 +1,7 @@
 import path from 'node:path';
 
+import { formatGoalBadge } from './goal.mjs';
+
 const ESC = '\x1b[';
 const RESET = `${ESC}0m`;
 
@@ -108,7 +110,7 @@ function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-function badges(payload, color, goal, now) {
+function badges(payload, color) {
   const out = [];
   // Host defaults render auto/yolo in warning amber and plan in primary
   // blue; auto keeps bright red here per user preference to stay distinct.
@@ -121,26 +123,6 @@ function badges(payload, color, goal, now) {
   // The status-line payload does not carry swarmMode yet; rendered as soon
   // as the host exposes it (accent cyan, same as the built-in footer).
   if (payload.swarmMode) out.push(colorize(color, C.accent, '[swarm]'));
-  // Goal badge, mirroring the host's formatGoalBadge. The payload has no
-  // goal fields either, so metrics.mjs reconstructs this from the main
-  // wire's goal.update events. While active the wall clock keeps running
-  // between events, so extrapolate from the last status event's timestamp.
-  if (goal && (goal.status === 'active' || goal.status === 'paused' || goal.status === 'blocked')) {
-    const dot = goal.status === 'active' ? C.green : goal.status === 'paused' ? C.brightYellow : C.brightRed;
-    let wall = typeof goal.wallClockMs === 'number' ? goal.wallClockMs : 0;
-    if (goal.status === 'active' && typeof goal.at === 'number') {
-      wall += Math.max(0, now - goal.at);
-    }
-    const labelParts = [`${goal.status} · ${formatElapsed(wall)}`];
-    if (typeof goal.turnsUsed === 'number') {
-      labelParts.push(`${goal.turnsUsed} ${goal.turnsUsed === 1 ? 'turn' : 'turns'}`);
-    }
-    out.push(
-      colorize(color, C.muted, '[goal ')
-      + colorize(color, dot, '●')
-      + colorize(color, C.muted, ` ${labelParts.join(' · ')}]`),
-    );
-  }
   return out;
 }
 
@@ -160,6 +142,26 @@ function contextInfo(payload) {
     return { frac: payload.contextUsage, hasCounts: false };
   }
   return null;
+}
+
+/**
+ * Goal badge, mirroring the built-in footer's goal slot (`mode → goal →
+ * model`): colored status dot (active = primary blue, blocked = warning
+ * amber, paused = muted) inside muted brackets. The status-line payload
+ * carries no goal field; the state comes from the wire journal's goal ops.
+ * Shown in every layout tier — a live goal is too important to drop.
+ */
+function goalBadge(goal, color, now) {
+  const badge = formatGoalBadge(goal, now);
+  if (!badge) return null;
+  const dotColor =
+    badge.status === 'active' ? C.primary : badge.status === 'blocked' ? C.warning : C.muted;
+  if (!color) return badge.text;
+  // Repaint the dot (always the 7th char: "[goal ●") and mute the rest.
+  const dotIdx = badge.text.indexOf('●');
+  const before = badge.text.slice(0, dotIdx);
+  const after = badge.text.slice(dotIdx + 1);
+  return `${C.muted}${before}${RESET}${dotColor}●${RESET}${C.muted}${after}${RESET}`;
 }
 
 /**
@@ -283,7 +285,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, ttftMs}
+ * @param {object|null} ctx.metrics {tps, ttftMs, thinkingLevel, goal}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] full|normal|compact
  * @param {boolean} [ctx.color]
@@ -297,7 +299,9 @@ export function renderHud(ctx) {
   const startIdx = Math.max(0, LAYOUT_ORDER.indexOf(ctx.layout || 'normal'));
   for (let i = startIdx; i < LAYOUT_ORDER.length; i++) {
     const layout = LAYOUT_ORDER[i];
-    const prefix = badges(payload, color, ctx.metrics && ctx.metrics.goal, now);
+    const prefix = badges(payload, color);
+    const goal = goalBadge(ctx.metrics?.goal, color, now);
+    if (goal) prefix.push(goal);
     const segs = buildSegments(layout, { ...ctx, payload, color, now });
     const line = [...prefix, segs.join(' │ ')].filter(Boolean).join(' ');
     if (stripAnsi(line).length <= MAX_WIDTH || layout === 'compact') return [line];

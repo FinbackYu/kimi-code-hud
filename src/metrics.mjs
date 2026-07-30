@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { HUD_DIR } from './quota.mjs';
+import { applyGoalOp } from './goal.mjs';
 
 export const SESSIONS_ROOT = path.join(os.homedir(), '.kimi-code', 'sessions');
 
@@ -16,9 +17,9 @@ const ACTIVE_WINDOW_MS = 2 * 60 * 1000;
 // Bound the persisted per-agent sample array; only the freshest MAX_SAMPLES
 // are used.
 const MAX_STORED_SAMPLES = 20;
-// Backfill scan version; bump when the config.update key set changes so
-// existing state files re-scan once (v2: added `thinkingEffort`).
-const THINKING_SCAN_V = 2;
+// Backfill scan version; bump when the tracked key set changes so existing
+// state files re-scan once (v2: added `thinkingEffort`; v3: goal ops).
+const BACKFILL_SCAN_V = 3;
 // State format version; v4: per-agent sample buckets (v3 pooled them).
 const STATE_V = 4;
 
@@ -124,8 +125,8 @@ function emptyState() {
  * - v1/v2: single-wire offset becomes agents.main; untimestamped numeric
  *   samples are kept with t=0 so they expire immediately.
  * - v3: pooled top-level samples/counters move into the main bucket.
- * Pre-v3 files also get a one-time goal backfill flag because their main
- * offset already sits past earlier goal.* events.
+ * Backfill markers (backfillScanV / legacy thinkingScanV) carry over so a
+ * bump of BACKFILL_SCAN_V re-scans every pre-existing state exactly once.
  */
 function loadState(statePath) {
   try {
@@ -161,10 +162,10 @@ function loadState(statePath) {
         main.samples = s.samples.filter((v) => typeof v === 'number').map((v) => ({ v, t: 0 }));
       }
       main.lastTtftMs = typeof s.lastTtftMs === 'number' ? s.lastTtftMs : null;
-      migrated.legacyGoalBackfill = true;
     }
     migrated.thinkingLevel = typeof s.thinkingLevel === 'string' ? s.thinkingLevel : null;
-    if (typeof s.thinkingScanV === 'number') migrated.thinkingScanV = s.thinkingScanV;
+    if (typeof s.backfillScanV === 'number') migrated.backfillScanV = s.backfillScanV;
+    else if (typeof s.thinkingScanV === 'number') migrated.backfillScanV = s.thinkingScanV;
     if (s.goal && typeof s.goal === 'object') migrated.goal = s.goal;
     return migrated;
   } catch {
@@ -183,6 +184,16 @@ function saveState(statePath, state) {
   }
 }
 
+/** True when a raw line might carry a backfill-tracked key (cheap prefilter). */
+function isBackfillLine(line) {
+  return (
+    line.includes('"thinkingEffort"') ||
+    line.includes('"thinkingLevel"') ||
+    line.includes('"type":"goal.') ||
+    line.includes('"type":"forked"')
+  );
+}
+
 /**
  * Feed a text chunk of wire.jsonl lines into the metrics state.
  * Only complete lines (terminated by \n) are consumed; the caller tracks
@@ -190,6 +201,7 @@ function saveState(statePath, state) {
  * Speed samples are timestamped with the wire row's own `time` and bucketed
  * per agent, so swarm totals/averages can be computed per agent and stale
  * samples (resume/idle/compaction) can be expired at read time.
+ * Thinking level and goal ops are main-agent only.
  * @param {object} state mutated in place
  * @param {string} text complete lines only
  * @param {string} [agent] which agent's wire this chunk comes from
@@ -235,41 +247,16 @@ export function processWireChunk(state, text, agent = 'main') {
       if (level) state.thinkingLevel = level;
       continue;
     }
-    if (row?.type === 'goal.create') {
-      // A fresh goal replaces any previous one: reset the counters so a
-      // completed goal's turns/tokens never leak into the new badge.
+    if (
+      row?.type === 'goal.create'
+      || row?.type === 'goal.update'
+      || row?.type === 'goal.clear'
+      || row?.type === 'forked'
+    ) {
+      // Goal mode is main-agent only; the badge state reducer lives in
+      // goal.mjs (status, turns, optional turn budget, wall-clock anchors).
       if (agent !== 'main') continue;
-      state.goal = {
-        status: null,
-        objective: typeof row.objective === 'string' ? row.objective : null,
-        wallClockMs: null,
-        turnsUsed: null,
-        tokensUsed: null,
-        at: rowTime,
-      };
-      continue;
-    }
-    if (row?.type === 'goal.clear') {
-      if (agent !== 'main') continue;
-      state.goal = null;
-      continue;
-    }
-    if (row?.type === 'goal.update') {
-      // Goal mode is main-agent only. The status-line payload carries no
-      // goal fields, so the badge is reconstructed from these wire events:
-      // status transitions set status/wallClockMs, and frequent
-      // turnsUsed/tokensUsed heartbeats keep the counters current.
-      if (agent !== 'main') continue;
-      if (!state.goal) {
-        state.goal = { status: null, wallClockMs: null, turnsUsed: null, tokensUsed: null, at: null };
-      }
-      if (typeof row.status === 'string') {
-        state.goal.status = row.status;
-        if (typeof row.wallClockMs === 'number') state.goal.wallClockMs = row.wallClockMs;
-        state.goal.at = rowTime;
-      }
-      if (typeof row.turnsUsed === 'number') state.goal.turnsUsed = row.turnsUsed;
-      if (typeof row.tokensUsed === 'number') state.goal.tokensUsed = row.tokensUsed;
+      state.goal = applyGoalOp(state.goal ?? null, row);
       continue;
     }
     if (row?.type !== 'context.append_loop_event') continue;
@@ -310,14 +297,14 @@ export function median(arr) {
 }
 
 /**
- * One-time scan of the whole main wire for lines matching `substr`,
- * feeding them through processWireChunk. Used for backfills after a state
- * format bump. The substring prefilter keeps this fast on multi-MB logs.
+ * One-time scan of the whole main wire for backfill-tracked lines (thinking
+ * level, goal ops), feeding them through processWireChunk. The substring
+ * prefilter keeps this fast on multi-MB logs.
  */
-function backfillScan(state, wirePath, substr) {
+function backfillScan(state, wirePath) {
   try {
     const text = fs.readFileSync(wirePath, 'utf8');
-    const hits = text.split('\n').filter((l) => l.includes(substr));
+    const hits = text.split('\n').filter(isBackfillLine);
     if (hits.length) processWireChunk(state, hits.join('\n') + '\n', 'main');
   } catch {
     // stay silent
@@ -379,40 +366,17 @@ export function getMetrics(sessionId, {
     // main first so its config.update/goal events apply deterministically.
     wires.sort((a, b) => (a.agent === 'main' ? -1 : b.agent === 'main' ? 1 : a.agent.localeCompare(b.agent)));
 
-    // One-time backfill for states written before thinking tracking
-    // (v2 also matches the newer `thinkingEffort` key).
+    // One-time backfill for states written before a tracked key existed
+    // (v2: thinkingEffort; v3: goal ops). The main offset already sits
+    // past those events, so the whole main wire is re-scanned once.
     const mainWire = wires.find((w) => w.agent === 'main');
-    if ((state.thinkingScanV ?? 0) < THINKING_SCAN_V) {
-      if (mainWire) {
-        try {
-          const text = fs.readFileSync(mainWire.path, 'utf8');
-          for (const line of text.split('\n')) {
-            if (!line.includes('"thinkingEffort"') && !line.includes('"thinkingLevel"')) continue;
-            try {
-              const row = JSON.parse(line);
-              if (row?.type !== 'config.update') continue;
-              const level = typeof row.thinkingEffort === 'string' ? row.thinkingEffort
-                : typeof row.thinkingLevel === 'string' ? row.thinkingLevel : null;
-              if (level) state.thinkingLevel = level;
-            } catch {
-              // keep scanning
-            }
-          }
-        } catch {
-          // stay silent
-        }
-      }
-      state.thinkingScanV = THINKING_SCAN_V;
+    if ((state.backfillScanV ?? 0) < BACKFILL_SCAN_V) {
+      if (mainWire) backfillScan(state, mainWire.path);
+      state.backfillScanV = BACKFILL_SCAN_V;
+      delete state.thinkingScanV; // legacy v1/v2 marker
       delete state.thinkingScanDone; // legacy v1 marker
       stateChanged = true;
     }
-
-    // One-time goal backfill for states migrated from pre-v3: their main
-    // offset already sits past earlier goal.create/goal.update events.
-    if (state.legacyGoalBackfill && mainWire) {
-      backfillScan(state, mainWire.path, '"goal.');
-    }
-    delete state.legacyGoalBackfill;
 
     for (const { agent, path: wirePath } of wires) {
       const stat = fs.statSync(wirePath);
@@ -424,7 +388,9 @@ export function getMetrics(sessionId, {
       if (isNew) stateChanged = true;
       // A smaller file was truncated in place; a different device/inode
       // means rotation/replacement. Old samples describe a different
-      // stream, so discard them together with this agent's offset.
+      // stream, so discard them together with this agent's offset. On the
+      // main wire the derived goal/thinking state resets as well — the
+      // next backfill re-derives it from the new stream.
       if (a.offset > size || (a.fileId && a.fileId !== fileId)) {
         a.offset = 0;
         a.samples = [];
@@ -432,6 +398,11 @@ export function getMetrics(sessionId, {
         a.lastSampleAt = null;
         a.lastRequestAt = null;
         a.lastStepEndAt = null;
+        if (agent === 'main') {
+          state.goal = null;
+          state.thinkingLevel = null;
+          state.backfillScanV = 0;
+        }
         stateChanged = true;
       }
       if (a.fileId !== fileId) {
@@ -504,7 +475,7 @@ export function getMetrics(sessionId, {
       activeAgents,
       ttftMs: median(activeTtfts),
       thinkingLevel: state.thinkingLevel ?? null,
-      goal: state.goal && state.goal.status ? state.goal : null,
+      goal: state.goal ?? null,
       generatingSince,
     };
   } catch {

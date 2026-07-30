@@ -1,6 +1,6 @@
 {
   "name": "kimi-code-hud",
-  "version": "0.2.4",
+  "version": "0.2.6",
   "description": "Zero-dependency custom status line (HUD) for Kimi Code CLI",
   "type": "module",
   "bin": {

@@ -116,34 +116,41 @@ test('processWireChunk ignores thinking/goal events from subagent wires', () => 
   assert.equal(state.goal, null);
 });
 
-test('processWireChunk reconstructs goal state from goal events', () => {
+test('processWireChunk rebuilds goal state via the goal.mjs reducer', () => {
   const state = makeState();
   const t0 = NOW - 60_000;
   const lines = [
     JSON.stringify({ type: 'goal.create', goalId: 'g1', objective: 'do it', time: t0 }),
     goalUpdate({ status: 'active', wallClockMs: 1000, actor: 'user' }, t0 + 1000),
     goalUpdate({ turnsUsed: 3 }, t0 + 2000),
-    goalUpdate({ tokensUsed: 12345 }, t0 + 3000),
   ].join('\n') + '\n';
   processWireChunk(state, lines, 'main');
-  assert.equal(state.goal.status, 'active');
-  assert.equal(state.goal.wallClockMs, 1000);
-  assert.equal(state.goal.turnsUsed, 3);
-  assert.equal(state.goal.tokensUsed, 12345);
-  assert.equal(state.goal.at, t0 + 1000);
+  assert.deepEqual(state.goal, {
+    status: 'active',
+    turnsUsed: 3,
+    wallClockMs: 1000,
+    wallClockResumedAt: t0,
+    turnBudget: null,
+  });
 
-  // A new goal resets the counters of the previous one.
+  // A new goal replaces the previous one, picking up the turn budget.
   processWireChunk(
     state,
-    JSON.stringify({ type: 'goal.create', goalId: 'g2', objective: 'next', time: t0 + 4000 }) + '\n',
+    JSON.stringify({ type: 'goal.create', goalId: 'g2', budgetLimits: { turnBudget: 10 }, time: t0 + 4000 }) + '\n',
     'main',
   );
-  assert.equal(state.goal.turnsUsed, null);
-  assert.equal(state.goal.tokensUsed, null);
-  assert.equal(state.goal.status, null);
+  assert.equal(state.goal.turnsUsed, 0);
+  assert.equal(state.goal.turnBudget, 10);
 
-  // goal.clear drops the badge entirely.
+  // goal.clear and forked both drop the badge state entirely.
   processWireChunk(state, JSON.stringify({ type: 'goal.clear', time: t0 + 5000 }) + '\n', 'main');
+  assert.equal(state.goal, null);
+  processWireChunk(
+    state,
+    JSON.stringify({ type: 'goal.create', goalId: 'g3', time: t0 + 6000 }) + '\n'
+      + JSON.stringify({ type: 'forked', time: t0 + 7000 }) + '\n',
+    'main',
+  );
   assert.equal(state.goal, null);
 });
 
@@ -313,11 +320,10 @@ test('getMetrics surfaces goal state reconstructed from wire events', () => {
   let m = getMetrics(id, opts);
   assert.deepEqual(m.goal, {
     status: 'active',
-    objective: 'x',
-    wallClockMs: 4000,
     turnsUsed: 7,
-    tokensUsed: null,
-    at: NOW - 4000,
+    wallClockMs: 4000,
+    wallClockResumedAt: NOW - 5000,
+    turnBudget: null,
   });
 
   fs.appendFileSync(wirePath, goalUpdate({ status: 'complete', wallClockMs: 9000, actor: 'model' }) + '\n');
@@ -347,10 +353,12 @@ test('getMetrics migrates legacy v2 state and backfills goal', () => {
   );
   const m = getMetrics(id, { sessionsRoot: root, stateDir });
   assert.equal(m.goal.status, 'active');       // goal backfilled despite past offset
-  assert.equal(m.goal.objective, 'legacy');
+  assert.equal(m.goal.turnsUsed, 0);           // goal.create resets the counters
   assert.equal(m.tps, null);                   // untimestamped legacy samples expire
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
   assert.equal(state.v, 4);
+  assert.equal(state.backfillScanV, 3);         // unified backfill marker persisted
+  assert.equal(state.thinkingScanV, undefined); // legacy marker dropped
   assert.equal(state.agents.main.offset, size); // legacy offset preserved as main's
 });
 
@@ -372,7 +380,7 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   assert.equal(m.thinkingLevel, 'high');
   // Second run must not rescan (versioned scan marker persisted).
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.thinkingScanV, 2);
+  assert.equal(state.backfillScanV, 3);
 });
 
 test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
@@ -393,7 +401,7 @@ test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', ()
   const m = getMetrics(id, { sessionsRoot: root, stateDir });
   assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.thinkingScanV, 2);
+  assert.equal(state.backfillScanV, 3);
   assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
 });
 

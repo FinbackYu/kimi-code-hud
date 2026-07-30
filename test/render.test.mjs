@@ -167,34 +167,37 @@ test('swarm badge renders in accent cyan when payload exposes swarmMode', () => 
   assert.ok(plain.startsWith('[manual] [swarm] '));
 });
 
-test('goal badge mirrors the host footer: status, wall clock, turns', () => {
-  const goal = { status: 'active', wallClockMs: 4 * 60_000, turnsUsed: 7, at: NOW - 60_000 };
-  const [line] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, goal } }));
-  // active: last event's 4m plus one elapsed minute since the event
-  assert.ok(line.startsWith('[manual] [goal ● active · 5m · 7 turns] '));
-});
-
-test('goal badge freezes the wall clock while paused and hides when done', () => {
-  const paused = { status: 'paused', wallClockMs: 4 * 60_000, turnsUsed: 1, at: NOW - 60_000 };
-  const [line] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, goal: paused } }));
-  assert.ok(line.startsWith('[manual] [goal ● paused · 4m · 1 turn] '));
-
-  for (const status of ['complete', 'stopped', null]) {
-    const [done] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, goal: { status, at: NOW } } }));
-    assert.ok(done.startsWith('[manual] K3'));
-    assert.ok(!done.includes('[goal'));
+test('goal badge sits between mode badges and model, in every tier', () => {
+  const goal = { status: 'active', turnsUsed: 7, wallClockMs: 0, wallClockResumedAt: NOW - 4 * 60_000 };
+  for (const layout of ['compact', 'normal', 'full']) {
+    const [line] = renderHud(baseCtx({
+      layout,
+      metrics: { tps: 47, ttftMs: 1300, goal },
+    }));
+    assert.ok(
+      line.startsWith('[manual] [goal ● active · 4m · 7 turns] K3'),
+      `${layout}: ${line}`,
+    );
   }
+  // No goal -> no badge.
+  const [plain] = renderHud(baseCtx({ layout: 'normal' }));
+  assert.ok(plain.startsWith('[manual] K3'));
 });
 
-test('goal badge colors the status dot: green active, yellow paused, red blocked', () => {
-  const mk = (status) => renderHud(baseCtx({
+test('goal badge colors: dot by status, brackets muted', () => {
+  const goal = { status: 'active', turnsUsed: 1, wallClockMs: 0, wallClockResumedAt: NOW };
+  const [line] = renderHud(baseCtx({ color: true, metrics: { goal } }));
+  assert.ok(line.includes('\x1b[38;2;79;168;255m●')); // active: primary blue
+  const [blocked] = renderHud(baseCtx({
     color: true,
-    metrics: { tps: 47, ttftMs: 1300, goal: { status, wallClockMs: 0, at: NOW } },
-  }))[0];
-  assert.ok(mk('active').includes('\x1b[32m●\x1b[0m'));
-  assert.ok(mk('paused').includes('\x1b[93m●\x1b[0m'));
-  assert.ok(mk('blocked').includes('\x1b[91m●\x1b[0m'));
-  assert.ok(mk('active').includes('\x1b[90m[goal \x1b[0m'));
+    metrics: { goal: { ...goal, status: 'blocked', wallClockResumedAt: null } },
+  }));
+  assert.ok(blocked.includes('\x1b[38;2;232;168;56m●')); // blocked: warning amber
+  const [paused] = renderHud(baseCtx({
+    color: true,
+    metrics: { goal: { ...goal, status: 'paused', wallClockResumedAt: null } },
+  }));
+  assert.ok(paused.includes('\x1b[90m●')); // paused: muted
 });
 
 test('speed segment ticks live while generating, static TTFT when idle', () => {

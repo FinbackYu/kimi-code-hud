@@ -26,7 +26,7 @@ In the Kimi Code TUI, run:
 ```
 
 - **Restart or start a new session** to activate: the plugin's `SessionStart` hook points `tui.toml`'s `[status_line]` at the plugin's managed copy (`~/.kimi-code/plugins/managed/kimi-code-hud/`) and repairs that entry on every session start;
-- Toggle: select it in the `/plugins` panel and press `Space`, or run `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`. After disabling or removing, the status line falls back to the built-in layout on the next refresh (within ~1s);
+- Toggle: select it in the `/plugins` panel and press `Space`, or run `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`. Within ~1s of disabling or removing, the managed copy strips its own `[status_line]` entry from `tui.toml` and stops rendering (the host replays the last custom frame, so `/reload-tui` or a new session is needed to see the built-in layout); when re-enabled, the SessionStart hook writes the entry back on the next session start;
 - If you already configured your own `[status_line]` command, the hook leaves it untouched.
 
 **Option 2: manual install (git checkout)**
@@ -43,11 +43,10 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 ### Update
 
 - **Reinstall to update**: run `/plugins install https://github.com/FinbackYu/kimi-code-hud` again. The managed copy is replaced in place and the status line picks up the new version within ~1 second — no `/reload-tui` or new session needed.
-- **Update badge (self-hosted marketplace)**: run `/plugins marketplace https://finbackyu.github.io/kimi-code-hud/marketplace.json` to browse the catalog; when the repo has published a newer release than your local install, the Installed tab shows an `update local → latest` badge — select it and press Enter to update. This command only affects the catalog for that browsing session and does not replace the official marketplace.
 
 ### Uninstall
 
-Plugin install: `/plugins remove kimi-code-hud` (per upstream behavior the managed copy stays on disk, but with the install record gone the status line falls back to the built-in layout immediately).
+Plugin install: `/plugins remove kimi-code-hud` (per upstream behavior the managed copy stays on disk while the install record is deleted; the managed copy strips its own `tui.toml` entry on its next run, and `/reload-tui` or a new session brings back the built-in layout).
 
 Manual install:
 
@@ -71,7 +70,15 @@ normal:  [manual] K3 thinking:high │ kimi-code-hud git:(main*) │ ctx 62% │
 full:    [manual] K3 thinking:high │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m │ wk ██░░░░░░░░ 25% ~3d2h │ v0.31.0
 ```
 
-The model name is painted in the host's primary blue (dark theme `#4FA8FF`, the blue used for links and inline code in the conversation). The model suffix shows thinking state: ` thinking` for boolean models, ` thinking:<effort>` for effort-capable ones (the status-line payload does not carry it; prefer `config.update` events from the session log — new hosts write `thinkingEffort`, including an initial event at session start, older hosts wrote `thinkingLevel` only after an in-session change. When neither exists, pin the value per session in `~/.kimi-code-hud/thinking-<sessionId>.json`; only when no snapshot exists does it fall back to the `[thinking]` and model tables in `~/.kimi-code/config.toml` and write the snapshot — so another session running `/effort`, which rewrites the global config, no longer changes what this session shows); compact drops the `thinking` label and keeps only the space-separated `<effort>` suffix (e.g. `K3 high`). Quota segments show bar + percentage + reset countdown in normal/full; compact drops the bar and keeps percentage + countdown; the weekly (wk) segment appears only in normal/full. The Context segment is on line 1 in every tier — compact/normal show a usage-colored `ctx N%` (the host's right-aligned line 2 is easy to miss), full keeps bar + percentage + token counts; the host-drawn line 2 (`context: N% (tokens/max)`) can never be taken over, so the exact numbers live there. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast), `[manual]` (muted gray placeholder that keeps the left edge aligned) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is implemented but the host status-line payload does not expose `swarmMode` yet — it activates automatically once upstream adds it. In goal mode a `[goal ● active · 4m · 7 turns]` badge mirrors the host's `formatGoalBadge`: the payload carries no goal fields, so state is rebuilt from the main wire's `goal.create`/`goal.update`/`goal.clear` events; the dot is green/yellow/red for active/paused/blocked, the wall clock is extrapolated between events while active, and the badge disappears once the goal completes or clears. Budget caps (the `20` in `7/20 turns`) live only in host memory and are never persisted, so they cannot be shown. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
+In /goal mode a goal badge is inserted between the mode badges and the model (shown in every tier, matching the built-in footer's slot order):
+
+```
+[manual] [goal ● active · 4m · 7 turns] K3 thinking:high │ …
+```
+
+The goal badge mirrors the built-in footer's format (`[goal ● <status> · <elapsed> · <turns>]`, `3/10 turns` when a turn budget is set; dot: active blue / blocked amber / paused muted). The status-line payload carries no goal field, so the state is rebuilt from the session log's `goal.create`/`goal.update`/`goal.clear`/`forked` ops in `wire.jsonl` (same incremental scan as TPS); an active goal ticks every second from `wallClockResumedAt`, and the badge disappears once the goal completes or is cleared.
+
+The model name is painted in the host's primary blue (dark theme `#4FA8FF`, the blue used for links and inline code in the conversation). The model suffix shows thinking state: ` thinking` for boolean models, ` thinking:<effort>` for effort-capable ones (the status-line payload does not carry it; prefer `config.update` events from the session log — new hosts write `thinkingEffort`, including an initial event at session start, older hosts wrote `thinkingLevel` only after an in-session change. When neither exists, pin the value per session in `~/.kimi-code-hud/thinking-<sessionId>.json`; only when no snapshot exists does it fall back to the `[thinking]` and model tables in `~/.kimi-code/config.toml` and write the snapshot — so another session running `/effort`, which rewrites the global config, no longer changes what this session shows); compact drops the `thinking` label and keeps only the space-separated `<effort>` suffix (e.g. `K3 high`). Quota segments show bar + percentage + reset countdown in normal/full; compact drops the bar and keeps percentage + countdown; the weekly (wk) segment appears only in normal/full. The Context segment is on line 1 in every tier — compact/normal show a usage-colored `ctx N%` (the host's right-aligned line 2 is easy to miss), full keeps bar + percentage + token counts; the host-drawn line 2 (`context: N% (tokens/max)`) can never be taken over, so the exact numbers live there. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast), `[manual]` (muted gray placeholder that keeps the left edge aligned) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is implemented but the host status-line payload does not expose `swarmMode` yet — it activates automatically once upstream adds it. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
 
 ### How it works
 
@@ -79,15 +86,14 @@ Kimi Code's `~/.kimi-code/tui.toml` accepts a `[status_line]` custom command:
 
 - On each refresh (at most once per second) the host pipes a JSON snapshot to stdin (`model`, `cwd`, `gitBranch`, `permissionMode`, `planMode`, `contextTokens`, ...);
 - The **first line** of the command's stdout takes over footer line 1 (line 2 is always drawn by the host as `context: N%` and cannot be taken over);
-- The command must finish within **300ms**; on failure/timeout/empty output the host silently falls back to the built-in layout — so this script degrades silently on every error path and never logs anything. The single deliberate non-zero exit is when the script is the managed copy of a disabled/removed plugin, which hands the line back to the built-in layout (that is how the plugin on/off switch works).
+- The command must finish within **300ms**; on failure/timeout/empty output the host silently falls back to the built-in layout — so this script degrades silently on every error path and never logs anything. The single deliberate non-zero exit is when the script is the managed copy of a disabled/removed plugin: it strips its own `tui.toml` entry first, then exits non-zero (a bare non-zero exit is not enough — the host replays the last good frame as long as the entry remains), and `/reload-tui` or a new session restores the built-in layout (that is how the plugin on/off switch works).
 
 Data sources:
 
 | Segment | Source |
 |---|---|
 | model / branch / Context | stdin snapshot + `git status --porcelain` (150ms timeout) |
-| TPS / TTFT | incremental parsing of `step.end` events in **all** `agents/*/wire.jsonl` of the session (main + every subagent; legacy `ses_<id>` also supported). Samples carry the event timestamp and are bucketed per agent: only the freshest 5 within the last 10 minutes feed each agent's median, so resume continuations, long idle gaps and compactions never mix in stale numbers. With several agents active at once (swarm/subagent runs — a sample within 2 minutes or a request in flight) the segment shows the **fleet total plus head count and per-agent average** (`⚡ 305 t/s (12 agents @25)`), and TTFT is the median across active agents so one stuck agent cannot poison the display. While the model is generating (an `llm.request` with no later `step.end`, compaction requests excluded) the segment swaps TTFT for a live `gen Ns` ticker that updates every refresh (per-agent byte offsets persisted in `~/.kimi-code-hud/metrics-<sessionId>.json`; only new bytes are read each second) |
-| goal badge | rebuilt incrementally from the main wire's `goal.create` / `goal.update` / `goal.clear` events |
+| TPS / TTFT / thinking / goal | incremental parsing of `step.end` events, `config.update` and `goal.*`/`forked` ops in **all** `agents/*/wire.jsonl` of the session (main + every subagent; legacy `ses_<id>` also supported). Samples carry the event timestamp and are bucketed per agent: only the freshest 5 within the last 10 minutes feed each agent's median, so resume continuations, long idle gaps and compactions never mix in stale numbers. With several agents active at once (swarm/subagent runs — a sample within 2 minutes or a request in flight) the segment shows the **fleet total plus head count and per-agent average** (`⚡ 305 t/s (12 agents @25)`), and TTFT is the median across active agents so one stuck agent cannot poison the display. While the model is generating (an `llm.request` with no later `step.end`, compaction requests excluded) the segment swaps TTFT for a live `gen Ns` ticker that updates every refresh (per-agent byte offsets persisted in `~/.kimi-code-hud/metrics-<sessionId>.json`; only new bytes are read each second) |
 | quota (5h/wk) | `GET https://api.kimi.com/coding/v1/usages`, cached 60s in `~/.kimi-code-hud/quota.json`; when stale, the hot path renders the stale cache and spawns a detached background refresh — never blocking |
 
 ### Privacy & security
@@ -104,7 +110,7 @@ The access token is **read locally** from `~/.kimi-code/credentials/kimi-code.js
 
 **Which layouts show the Context segment?** All of them: compact/normal show `ctx N%` (usage-colored), full adds the bar and exact token counts. The host-drawn line 2 (`context: N% (tokens/max)`) can never be taken over by a plugin, so both displays coexist on purpose.
 
-**Where does the goal badge get its data?** The status-line payload carries no goal fields, so the HUD rebuilds goal state incrementally from the main wire's `goal.*` events. Budget caps (the `20` in `7/20 turns`) are not shown — they exist only in the host process memory and are never written to disk.
+**Where does the goal badge get its data?** The status-line payload carries no goal fields, so the HUD rebuilds goal state incrementally from the main wire's `goal.create`/`goal.update`/`goal.clear`/`forked` ops (same scan as TPS). With a turn budget set the badge shows `3/10 turns` — budgets ride on the `goal.create` op's `budgetLimits`.
 
 ## Development
 
