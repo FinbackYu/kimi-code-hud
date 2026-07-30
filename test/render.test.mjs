@@ -47,10 +47,10 @@ test('bar renders 10 cells graded by usage', () => {
 });
 
 test('formatCountdown formats d/h/m and reset states', () => {
-  assert.equal(formatCountdown('2026-07-30T12:18:00Z', NOW), '↻2h18m');
-  assert.equal(formatCountdown('2026-08-02T12:00:00Z', NOW), '↻3d2h');
-  assert.equal(formatCountdown('2026-07-30T10:45:00Z', NOW), '↻45m');
-  assert.equal(formatCountdown('2026-07-30T09:00:00Z', NOW), '↻reset');
+  assert.equal(formatCountdown('2026-07-30T12:18:00Z', NOW), '↻ 2h18m');
+  assert.equal(formatCountdown('2026-08-02T12:00:00Z', NOW), '↻ 3d2h');
+  assert.equal(formatCountdown('2026-07-30T10:45:00Z', NOW), '↻ 45m');
+  assert.equal(formatCountdown('2026-07-30T09:00:00Z', NOW), '↻ reset');
   assert.equal(formatCountdown(null, NOW), null);
   assert.equal(formatCountdown('garbage', NOW), null);
 });
@@ -61,7 +61,7 @@ test('compact layout: model, git, speed, window pct + countdown', () => {
   assert.equal(parts[0], '[manual] K3');
   assert.equal(parts[1], 'git:(main*)');
   assert.equal(parts[2], '⚡ 47');
-  assert.equal(parts[3], '5h 31% ↻2h18m');
+  assert.equal(parts[3], '5h 31% ↻ 2h18m');
   assert.equal(parts.length, 4); // no Context, no project, no bar, no wk, no version
 });
 
@@ -69,7 +69,7 @@ test('normal layout drops Context, adds project, t/s+TTFT, countdown and weekly'
   const [line] = renderHud(baseCtx({ layout: 'normal' }));
   assert.equal(
     line,
-    '[manual] K3 │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%',
+    '[manual] K3 │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻ 2h18m │ wk ██░░░░░░░░ 25%',
   );
 });
 
@@ -77,7 +77,7 @@ test('full layout adds Context, weekly countdown, version', () => {
   const [line] = renderHud(baseCtx({ layout: 'full', payload: basePayload({ planMode: true }) }));
   assert.equal(
     line,
-    '[manual] [plan] K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0',
+    '[manual] [plan] K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻ 2h18m │ wk ██░░░░░░░░ 25% ↻ 3d2h │ v0.31.0',
   );
 });
 
