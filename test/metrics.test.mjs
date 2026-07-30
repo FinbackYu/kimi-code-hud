@@ -175,7 +175,7 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   assert.equal(m.thinkingLevel, 'high');
   // Second run must not rescan (versioned scan marker persisted).
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.thinkingScanV, 2);
+  assert.equal(state.backfillScanV, 3);
 });
 
 test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
@@ -196,7 +196,7 @@ test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', ()
   const m = getMetrics(id, { sessionsRoot: root, stateDir });
   assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.thinkingScanV, 2);
+  assert.equal(state.backfillScanV, 3);
   assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
 });
 
@@ -205,5 +205,5 @@ test('getMetrics returns nulls for unknown sessions', () => {
     sessionsRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-empty-')),
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-')),
   });
-  assert.deepEqual(m, { tps: null, ttftMs: null, thinkingLevel: null });
+  assert.deepEqual(m, { tps: null, ttftMs: null, thinkingLevel: null, goal: null });
 });

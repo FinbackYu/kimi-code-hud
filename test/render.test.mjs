@@ -165,3 +165,36 @@ test('swarm badge renders in accent cyan when payload exposes swarmMode', () => 
   const [plain] = renderHud(baseCtx({ payload: basePayload({ swarmMode: true }) }));
   assert.ok(plain.startsWith('[manual] [swarm] '));
 });
+
+test('goal badge sits between mode badges and model, in every tier', () => {
+  const goal = { status: 'active', turnsUsed: 7, wallClockMs: 0, wallClockResumedAt: NOW - 4 * 60_000 };
+  for (const layout of ['compact', 'normal', 'full']) {
+    const [line] = renderHud(baseCtx({
+      layout,
+      metrics: { tps: 47, ttftMs: 1300, goal },
+    }));
+    assert.ok(
+      line.startsWith('[manual] [goal ● active · 4m · 7 turns] K3'),
+      `${layout}: ${line}`,
+    );
+  }
+  // No goal -> no badge.
+  const [plain] = renderHud(baseCtx({ layout: 'normal' }));
+  assert.ok(plain.startsWith('[manual] K3'));
+});
+
+test('goal badge colors: dot by status, brackets muted', () => {
+  const goal = { status: 'active', turnsUsed: 1, wallClockMs: 0, wallClockResumedAt: NOW };
+  const [line] = renderHud(baseCtx({ color: true, metrics: { goal } }));
+  assert.ok(line.includes('\x1b[38;2;79;168;255m●')); // active: primary blue
+  const [blocked] = renderHud(baseCtx({
+    color: true,
+    metrics: { goal: { ...goal, status: 'blocked', wallClockResumedAt: null } },
+  }));
+  assert.ok(blocked.includes('\x1b[38;2;232;168;56m●')); // blocked: warning amber
+  const [paused] = renderHud(baseCtx({
+    color: true,
+    metrics: { goal: { ...goal, status: 'paused', wallClockResumedAt: null } },
+  }));
+  assert.ok(paused.includes('\x1b[90m●')); // paused: muted
+});
