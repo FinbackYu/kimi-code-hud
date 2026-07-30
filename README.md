@@ -8,7 +8,7 @@ A zero-dependency custom status line (HUD) for **Kimi Code CLI** — shows model
 <!-- ![screenshot](docs/screenshot.png) -->
 
 ```
-K3 │ kimi-code-hud git:(main*) │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
+K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
 ```
 
 ---
@@ -27,7 +27,7 @@ Kimi Code 的 `~/.kimi-code/tui.toml` 支持 `[status_line]` 自定义命令：
 
 | 段 | 来源 |
 |---|---|
-| 模型 / 分支 / ctx | stdin 快照 + `git status --porcelain`（150ms 超时） |
+| 模型 / 分支 / Context | stdin 快照 + `git status --porcelain`（150ms 超时） |
 | TPS / TTFT | 增量解析 `~/.kimi-code/sessions/*/ses_<id>/agents/main/wire.jsonl` 的 `step.end` 事件（byte offset 存 `~/.kimi-code-hud/metrics-<sessionId>.json`，每秒只读新增字节） |
 | 配额（5h/wk） | `GET https://api.kimi.com/coding/v1/usages`，60 秒 TTL 缓存于 `~/.kimi-code-hud/quota.json`，过期时热路径用过期缓存渲染并 spawn 后台刷新，绝不阻塞 |
 
@@ -51,12 +51,12 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 三档布局：
 
 ```
-compact: K3 │ git:(main*) │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 │ 5h ███░░░░░░░ 31%
-normal:  K3 │ kimi-code-hud git:(main*) │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
-full:    K3 thinking │ kimi-code-hud git:(main*) │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0
+compact: K3 │ git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 │ 5h ███░░░░░░░ 31%
+normal:  K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
+full:    K3 thinking │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0
 ```
 
-- `permissionMode` 为 yolo/auto 时行首加 `[yolo]`/`[auto]` 徽章，plan 模式加 `[plan]`；
+- `permissionMode` 为 yolo/auto 时行首加 `[yolo]`（琥珀黄，对齐宿主默认）/`[auto]`（亮红，便于区分）徽章，plan 模式加 `[plan]`（蓝色）；`[swarm]`（青色）已实现，但当前宿主 status line payload 尚未携带 `swarmMode` 字段，上游补齐后自动生效；
 - 柱条按用量分级着色：<60% 绿、<85% 黄、≥85% 红；
 - 输出超过 200 字符自动降级 full→normal→compact。
 
@@ -80,7 +80,7 @@ access token 仅从 `~/.kimi-code/credentials/kimi-code.json` **本地读取**�
 
 **没有配额段？** 缓存首次生成前整段省略（不显示"加载中"）。可手动 `node bin/kimi-hud.mjs --refresh-quota` 后重试；该命令静默执行，检查 `~/.kimi-code-hud/quota.json` 是否生成。
 
-**为什么第一行和第二行都有 context 数字？** Footer 第二行永远由宿主绘制，插件无法接管；第一行的 ctx 段自带柱、百分比和 token 数，保证单行信息自足，两行数值一致、互为冗余。
+**为什么第一行和第二行都有 context 数字？** Footer 第二行永远由宿主绘制，插件无法接管；第一行的 Context 段自带柱、百分比和 token 数，保证单行信息自足，两行数值一致、互为冗余。
 
 ---
 
@@ -98,7 +98,7 @@ Data sources:
 
 | Segment | Source |
 |---|---|
-| model / branch / ctx | stdin snapshot + `git status --porcelain` (150ms timeout) |
+| model / branch / Context | stdin snapshot + `git status --porcelain` (150ms timeout) |
 | TPS / TTFT | incremental parsing of `step.end` events in `~/.kimi-code/sessions/*/ses_<id>/agents/main/wire.jsonl` (byte offset persisted in `~/.kimi-code-hud/metrics-<sessionId>.json`; only new bytes are read each second) |
 | quota (5h/wk) | `GET https://api.kimi.com/coding/v1/usages`, cached 60s in `~/.kimi-code-hud/quota.json`; when stale, the hot path renders the stale cache and spawns a detached background refresh — never blocking |
 
@@ -119,7 +119,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 - `KIMI_HUD_LAYOUT` env var overrides the config file
 - `NO_COLOR` or `KIMI_HUD_NO_COLOR`: disable all ANSI colors
 
-See the layout table above. Badges `[yolo]`/`[auto]`/`[plan]` appear at the line start; bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
+See the layout table above. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is implemented but the host status-line payload does not expose `swarmMode` yet — it activates automatically once upstream adds it. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
 
 ### Uninstall
 
@@ -141,7 +141,7 @@ The access token is **read locally** from `~/.kimi-code/credentials/kimi-code.js
 
 **No quota segment?** The whole section is omitted until the first cache exists (no "loading" placeholder). Run `node bin/kimi-hud.mjs --refresh-quota` (silent) and check `~/.kimi-code-hud/quota.json`.
 
-**Why do both lines show context numbers?** Footer line 2 is always drawn by the host and cannot be taken over; the ctx segment on line 1 carries the bar, percentage and token counts so the HUD line is self-sufficient — the two lines simply agree.
+**Why do both lines show context numbers?** Footer line 2 is always drawn by the host and cannot be taken over; the Context segment on line 1 carries the bar, percentage and token counts so the HUD line is self-sufficient — the two lines simply agree.
 
 ## Development
 

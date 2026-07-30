@@ -55,12 +55,12 @@ test('formatCountdown formats d/h/m and reset states', () => {
   assert.equal(formatCountdown('garbage', NOW), null);
 });
 
-test('compact layout: model, git, ctx bar, speed, window bars only', () => {
+test('compact layout: model, git, Context bar, speed, window bars only', () => {
   const [line] = renderHud(baseCtx({ layout: 'compact' }));
   const parts = line.split(' │ ');
   assert.equal(parts[0], 'K3');
   assert.equal(parts[1], 'git:(main*)');
-  assert.equal(parts[2], 'ctx ██████░░░░ 62% (159K/256K)');
+  assert.equal(parts[2], 'Context ██████░░░░ 62% (159K/256K)');
   assert.equal(parts[3], '⚡47');
   assert.equal(parts[4], '5h ███░░░░░░░ 31%');
   assert.equal(parts.length, 5); // no project, no wk, no countdowns, no version
@@ -70,7 +70,7 @@ test('normal layout adds project, t/s+TTFT, countdown and weekly', () => {
   const [line] = renderHud(baseCtx({ layout: 'normal' }));
   assert.equal(
     line,
-    'K3 │ kimi-code-hud git:(main*) │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%',
+    'K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%',
   );
 });
 
@@ -78,7 +78,7 @@ test('full layout adds weekly countdown, version, thinking suffix', () => {
   const [line] = renderHud(baseCtx({ layout: 'full', payload: basePayload({ planMode: true }) }));
   assert.equal(
     line,
-    '[plan] K3 thinking │ kimi-code-hud git:(main*) │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0',
+    '[plan] K3 thinking │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0',
   );
 });
 
@@ -98,15 +98,15 @@ test('optional segments drop cleanly', () => {
     metrics: { tps: null, ttftMs: null },
     gitDirty: false,
   }));
-  assert.equal(line, 'K3 │ kimi-code-hud │ ctx ██████░░░░ 62% (159K/256K)');
+  assert.equal(line, 'K3 │ kimi-code-hud │ Context ██████░░░░ 62% (159K/256K)');
 });
 
-test('ctx fraction prefers exact token counts', () => {
+test('Context fraction prefers exact token counts', () => {
   const [line] = renderHud(baseCtx({
     layout: 'full',
     payload: basePayload({ contextTokens: 10485, maxContextTokens: 262144, contextUsage: 0.9 }),
   }));
-  assert.ok(line.includes('ctx ░░░░░░░░░░ 4% (10K/256K)'));
+  assert.ok(line.includes('Context ░░░░░░░░░░ 4% (10K/256K)'));
 });
 
 test('falls back to contextUsage when token counts are missing', () => {
@@ -114,7 +114,7 @@ test('falls back to contextUsage when token counts are missing', () => {
     layout: 'full',
     payload: basePayload({ contextTokens: undefined, maxContextTokens: undefined, contextUsage: 0.5 }),
   }));
-  assert.ok(line.includes('ctx █████░░░░░ 50%'));
+  assert.ok(line.includes('Context █████░░░░░ 50%'));
 });
 
 test('width defense downgrades full -> compact', () => {
@@ -127,16 +127,26 @@ test('width defense downgrades full -> compact', () => {
   assert.ok(!line.includes('v0.31.0')); // downgraded away from full
 });
 
-test('color badges: yolo yellow, auto bright red, plan bright yellow', () => {
+test('color badges: yolo warning amber, auto bright red, plan primary blue', () => {
   const [line] = renderHud(baseCtx({
     color: true,
     payload: basePayload({ permissionMode: 'yolo', planMode: true }),
   }));
-  assert.ok(line.includes('\x1b[33m[yolo]\x1b[0m'));
-  assert.ok(line.includes('\x1b[93m[plan]\x1b[0m'));
+  assert.ok(line.includes('\x1b[38;2;232;168;56m[yolo]\x1b[0m'));
+  assert.ok(line.includes('\x1b[38;2;79;168;255m[plan]\x1b[0m'));
   const [auto] = renderHud(baseCtx({
     color: true,
     payload: basePayload({ permissionMode: 'auto' }),
   }));
   assert.ok(auto.includes('\x1b[91m[auto]\x1b[0m'));
+});
+
+test('swarm badge renders in accent cyan when payload exposes swarmMode', () => {
+  const [line] = renderHud(baseCtx({
+    color: true,
+    payload: basePayload({ swarmMode: true }),
+  }));
+  assert.ok(line.includes('\x1b[38;2;91;192;190m[swarm]\x1b[0m'));
+  const [plain] = renderHud(baseCtx({ payload: basePayload({ swarmMode: true }) }));
+  assert.ok(plain.startsWith('[swarm] '));
 });
