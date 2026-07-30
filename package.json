@@ -7,7 +7,7 @@
     "kimi-code-hud": "bin/kimi-hud.mjs"
   },
   "scripts": {
-    "test": "node --test 'test/**/*.test.mjs'"
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"

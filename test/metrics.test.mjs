@@ -126,9 +126,35 @@ test('getMetrics reads incrementally and survives truncation', () => {
   // truncation resets the offset
   fs.writeFileSync(wirePath, stepEnd({ output: 60, streamMs: 1000, ttftMs: 100 }) + '\n');
   m = getMetrics(id, opts);
+  assert.equal(m.tps, 60);
   assert.equal(m.ttftMs, 100);
   assert.equal(m.samples, undefined); // result only exposes tps/ttftMs
-  assert.ok(m.tps !== null);
+});
+
+test('getMetrics discards stale samples when a rotated file grows past the old offset', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir };
+
+  fs.writeFileSync(
+    wirePath,
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 1200 }) + '\n' +
+      stepEnd({ output: 300, streamMs: 1000, ttftMs: 800 }) + '\n',
+  );
+  assert.equal(getMetrics(id, opts).tps, 200);
+
+  const replacement = `${wirePath}.next`;
+  fs.writeFileSync(
+    replacement,
+    stepEnd({ output: 600, streamMs: 1000, ttftMs: 700 }) + '\n' +
+      stepEnd({ output: 700, streamMs: 1000, ttftMs: 600 }) + '\n' +
+      stepEnd({ output: 800, streamMs: 1000, ttftMs: 500 }) + '\n',
+  );
+  fs.renameSync(replacement, wirePath);
+
+  const m = getMetrics(id, opts);
+  assert.equal(m.tps, 700);
+  assert.equal(m.ttftMs, 500);
 });
 
 test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => {
