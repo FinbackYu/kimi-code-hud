@@ -1,0 +1,22 @@
+{
+  "name": "kimi-code-hud",
+  "version": "0.1.0",
+  "description": "Zero-dependency custom status line (HUD) for Kimi Code CLI",
+  "type": "module",
+  "bin": {
+    "kimi-code-hud": "bin/kimi-hud.mjs"
+  },
+  "scripts": {
+    "test": "node --test 'test/**/*.test.mjs'"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "keywords": [
+    "kimi-code",
+    "status-line",
+    "hud",
+    "cli"
+  ]
+}
