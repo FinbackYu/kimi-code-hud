@@ -2,12 +2,22 @@ import path from 'node:path';
 
 const ESC = '\x1b[';
 const RESET = `${ESC}0m`;
+
+/** 24-bit truecolor foreground, matching the host's dark-theme hex values. */
+function rgb(r, g, b) {
+  return `${ESC}38;2;${r};${g};${b}m`;
+}
+
 const C = {
   green: `${ESC}32m`,
   yellow: `${ESC}33m`,
   red: `${ESC}31m`,
   brightYellow: `${ESC}93m`,
   brightRed: `${ESC}91m`,
+  // Host defaults (dark theme, from kimi-code tui/theme/colors.ts):
+  warning: rgb(232, 168, 56), // #E8A838 — auto/yolo badges
+  primary: rgb(79, 168, 255), // #4FA8FF — plan badge
+  accent: rgb(91, 192, 190), //  #5BC0BE — swarm badge
 };
 
 const BAR_WIDTH = 10;
@@ -85,9 +95,14 @@ function stripAnsi(s) {
 
 function badges(payload, color) {
   const out = [];
-  if (payload.permissionMode === 'yolo') out.push(colorize(color, C.yellow, '[yolo]'));
+  // Host defaults render auto/yolo in warning amber and plan in primary
+  // blue; auto keeps bright red here per user preference to stay distinct.
+  if (payload.permissionMode === 'yolo') out.push(colorize(color, C.warning, '[yolo]'));
   else if (payload.permissionMode === 'auto') out.push(colorize(color, C.brightRed, '[auto]'));
-  if (payload.planMode) out.push(colorize(color, C.brightYellow, '[plan]'));
+  if (payload.planMode) out.push(colorize(color, C.primary, '[plan]'));
+  // The status-line payload does not carry swarmMode yet; rendered as soon
+  // as the host exposes it (accent cyan, same as the built-in footer).
+  if (payload.swarmMode) out.push(colorize(color, C.accent, '[swarm]'));
   return out;
 }
 
@@ -127,7 +142,7 @@ function buildSegments(layout, ctx) {
   } else if (typeof payload.contextUsage === 'number') {
     ctxFrac = payload.contextUsage;
   }
-  let ctxSeg = `ctx ${bar(ctxFrac, color)} ${Math.round(ctxFrac * 100)}%`;
+  let ctxSeg = `Context ${bar(ctxFrac, color)} ${Math.round(ctxFrac * 100)}%`;
   if (hasCounts) {
     ctxSeg += ` (${formatTokens(payload.contextTokens)}/${formatTokens(payload.maxContextTokens)})`;
   }
