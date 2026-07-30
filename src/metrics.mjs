@@ -7,6 +7,9 @@ export const SESSIONS_ROOT = path.join(os.homedir(), '.kimi-code', 'sessions');
 
 const MAX_SAMPLES = 5;
 const MIN_STREAM_MS = 50;
+// Backfill scan version; bump when the config.update key set changes so
+// existing state files re-scan once (v2: added `thinkingEffort`).
+const THINKING_SCAN_V = 2;
 
 /**
  * Locate the wire.jsonl for a session id. The payload sessionId may or may
@@ -95,8 +98,12 @@ export function processWireChunk(state, text) {
     }
     if (row?.type === 'config.update') {
       // Latest thinking level wins ("on"/"off" for boolean models, or a
-      // concrete effort like "high"/"max" for effort-capable ones).
-      if (typeof row.thinkingLevel === 'string') state.thinkingLevel = row.thinkingLevel;
+      // concrete effort like "high"/"max" for effort-capable ones). New
+      // hosts write `thinkingEffort` (including an initial event at
+      // session start); older hosts wrote `thinkingLevel`.
+      const level = typeof row.thinkingEffort === 'string' ? row.thinkingEffort
+        : typeof row.thinkingLevel === 'string' ? row.thinkingLevel : null;
+      if (level) state.thinkingLevel = level;
       continue;
     }
     if (row?.type !== 'context.append_loop_event') continue;
@@ -150,19 +157,22 @@ export function getMetrics(sessionId, {
     const state = loadState(statePath);
     const size = fs.statSync(wirePath).size;
     if (state.offset > size) state.offset = 0; // truncated / rotated
-    // One-time backfill: sessions whose offset predates thinkingLevel
+    // One-time backfill: sessions whose offset predates thinking-level
     // tracking would otherwise never see their initial config.update.
+    // Versioned marker: v2 also matches the newer `thinkingEffort` key and
+    // re-scans states written by v1 (latest event in the file wins).
     // The substring prefilter keeps this fast even on multi-MB logs.
-    if (state.thinkingLevel == null && state.thinkingScanDone !== true) {
+    if ((state.thinkingScanV ?? 0) < THINKING_SCAN_V) {
       try {
         const text = fs.readFileSync(wirePath, 'utf8');
         for (const line of text.split('\n')) {
-          if (!line.includes('"thinkingLevel"')) continue;
+          if (!line.includes('"thinkingEffort"') && !line.includes('"thinkingLevel"')) continue;
           try {
             const row = JSON.parse(line);
-            if (row?.type === 'config.update' && typeof row.thinkingLevel === 'string') {
-              state.thinkingLevel = row.thinkingLevel;
-            }
+            if (row?.type !== 'config.update') continue;
+            const level = typeof row.thinkingEffort === 'string' ? row.thinkingEffort
+              : typeof row.thinkingLevel === 'string' ? row.thinkingLevel : null;
+            if (level) state.thinkingLevel = level;
           } catch {
             // keep scanning
           }
@@ -170,7 +180,8 @@ export function getMetrics(sessionId, {
       } catch {
         // stay silent
       }
-      state.thinkingScanDone = true;
+      state.thinkingScanV = THINKING_SCAN_V;
+      delete state.thinkingScanDone; // legacy v1 marker
       saveState(statePath, state);
     }
     if (size > state.offset) {
