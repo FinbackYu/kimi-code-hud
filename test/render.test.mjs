@@ -96,9 +96,9 @@ test('model thinking suffix from session thinkingLevel (normal and full)', () =>
 
 test('badges for yolo/auto permission modes', () => {
   const [yolo] = renderHud(baseCtx({ payload: basePayload({ permissionMode: 'yolo' }) }));
-  assert.ok(yolo.startsWith('[yolo] '));
+  assert.ok(yolo.startsWith('[ yolo ] '));
   const [auto] = renderHud(baseCtx({ payload: basePayload({ permissionMode: 'auto' }) }));
-  assert.ok(auto.startsWith('[auto] '));
+  assert.ok(auto.startsWith('[ auto ] '));
   const [manual] = renderHud(baseCtx());
   assert.ok(manual.startsWith('[manual] '));
 });
@@ -144,13 +144,13 @@ test('color badges: yolo warning amber, auto bright red, plan primary blue', () 
     color: true,
     payload: basePayload({ permissionMode: 'yolo', planMode: true }),
   }));
-  assert.ok(line.includes('\x1b[38;2;232;168;56m[yolo]\x1b[0m'));
+  assert.ok(line.includes('\x1b[38;2;232;168;56m[ yolo ]\x1b[0m'));
   assert.ok(line.includes('\x1b[38;2;79;168;255m[plan]\x1b[0m'));
   const [auto] = renderHud(baseCtx({
     color: true,
     payload: basePayload({ permissionMode: 'auto' }),
   }));
-  assert.ok(auto.includes('\x1b[91m[auto]\x1b[0m'));
+  assert.ok(auto.includes('\x1b[91m[ auto ]\x1b[0m'));
   const [man] = renderHud(baseCtx({ color: true }));
   assert.ok(man.includes('\x1b[90m[manual]\x1b[0m'));
 });
