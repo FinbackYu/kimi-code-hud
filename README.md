@@ -8,7 +8,7 @@ A zero-dependency custom status line (HUD) for **Kimi Code CLI** — shows model
 <!-- ![screenshot](docs/screenshot.png) -->
 
 ```
-K3 │ kimi-code-hud │ main* │ ctx ██████░░░░ │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
+K3 │ kimi-code-hud │ main* │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
 ```
 
 ---
@@ -51,9 +51,9 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 三档布局：
 
 ```
-compact: K3 │ main* │ ctx ██████░░░░ │ ⚡47 │ 5h ███░░░░░░░ 31%
-normal:  K3 │ kimi-code-hud │ main* │ ctx ██████░░░░ │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
-full:    K3 thinking │ kimi-code-hud │ main* │ ctx ██████░░░░ 62% │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0
+compact: K3 │ main* │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 │ 5h ███░░░░░░░ 31%
+normal:  K3 │ kimi-code-hud │ main* │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
+full:    K3 thinking │ kimi-code-hud │ main* │ ctx ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0
 ```
 
 - `permissionMode` 为 yolo/auto 时行首加 `[yolo]`/`[auto]` 徽章，plan 模式加 `[plan]`；
@@ -80,7 +80,7 @@ access token 仅从 `~/.kimi-code/credentials/kimi-code.json` **本地读取**�
 
 **没有配额段？** 缓存首次生成前整段省略（不显示"加载中"）。可手动 `node bin/kimi-hud.mjs --refresh-quota` 后重试；该命令静默执行，检查 `~/.kimi-code-hud/quota.json` 是否生成。
 
-**为什么不显示第二行 context 数字？** Footer 第二行永远由宿主绘制，插件无法接管——所以 ctx 精确百分比只在 full 档重复显示。
+**为什么第一行和第二行都有 context 数字？** Footer 第二行永远由宿主绘制，插件无法接管；第一行的 ctx 段自带柱、百分比和 token 数，保证单行信息自足，两行数值一致、互为冗余。
 
 ---
 
@@ -141,7 +141,7 @@ The access token is **read locally** from `~/.kimi-code/credentials/kimi-code.js
 
 **No quota segment?** The whole section is omitted until the first cache exists (no "loading" placeholder). Run `node bin/kimi-hud.mjs --refresh-quota` (silent) and check `~/.kimi-code-hud/quota.json`.
 
-**Why no exact context number on line 2?** Footer line 2 is always drawn by the host and cannot be taken over — the exact ctx percentage is only repeated in the `full` layout.
+**Why do both lines show context numbers?** Footer line 2 is always drawn by the host and cannot be taken over; the ctx segment on line 1 carries the bar, percentage and token counts so the HUD line is self-sufficient — the two lines simply agree.
 
 ## Development
 

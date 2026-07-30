@@ -69,6 +69,15 @@ function pctOf(used, limit) {
   return Math.round((used / limit) * 100);
 }
 
+/** 1024-based token count: 10485 -> "10K", 262144 -> "256K", 1048576 -> "1M". */
+function formatTokens(n) {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return '?';
+  if (n < 1024) return String(Math.round(n));
+  if (n < 1048576) return `${Math.round(n / 1024)}K`;
+  const m = n / 1048576;
+  return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+}
+
 function stripAnsi(s) {
   // eslint-disable-next-line no-control-regex
   return s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -84,9 +93,9 @@ function badges(payload, color) {
 
 /**
  * Build the segment list for one layout tier.
- * compact: model │ git │ ctx bar │ ⚡tps │ window bars
+ * compact: model │ git │ ctx bar+%+tokens │ ⚡tps │ window bars
  * normal:  + project, t/s+TTFT, window countdowns, weekly
- * full:    + ctx %, weekly countdown, version
+ * full:    + weekly countdown, version
  */
 function buildSegments(layout, ctx) {
   const { payload, quota, metrics, gitDirty, color, now } = ctx;
@@ -103,15 +112,23 @@ function buildSegments(layout, ctx) {
     segs.push(`${payload.gitBranch}${gitDirty ? '*' : ''}`);
   }
 
-  // Context usage bar (host line 2 already shows exact numbers, so the
-  // percentage text only appears in full layout).
+  // Context usage: bar + exact percentage + token counts, so line 1 is
+  // self-sufficient (no need to cross-check the host's line 2 numbers).
   let ctxFrac = 0;
-  if (typeof payload.contextTokens === 'number' && typeof payload.maxContextTokens === 'number' && payload.maxContextTokens > 0) {
+  const hasCounts =
+    typeof payload.contextTokens === 'number' &&
+    typeof payload.maxContextTokens === 'number' &&
+    payload.maxContextTokens > 0;
+  if (hasCounts) {
     ctxFrac = payload.contextTokens / payload.maxContextTokens;
   } else if (typeof payload.contextUsage === 'number') {
     ctxFrac = payload.contextUsage;
   }
-  segs.push(`ctx ${bar(ctxFrac, color)}${layout === 'full' ? ` ${Math.round(ctxFrac * 100)}%` : ''}`);
+  let ctxSeg = `ctx ${bar(ctxFrac, color)} ${Math.round(ctxFrac * 100)}%`;
+  if (hasCounts) {
+    ctxSeg += ` (${formatTokens(payload.contextTokens)}/${formatTokens(payload.maxContextTokens)})`;
+  }
+  segs.push(ctxSeg);
 
   // Speed segment (omitted when no samples yet, e.g. fresh session)
   if (metrics && typeof metrics.tps === 'number') {
