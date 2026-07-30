@@ -61,7 +61,7 @@ test('compact layout: model, git, Context bar, speed, window bars only', () => {
   assert.equal(parts[0], '[manual] K3');
   assert.equal(parts[1], 'git:(main*)');
   assert.equal(parts[2], 'Context ██████░░░░ 62% (159K/256K)');
-  assert.equal(parts[3], '⚡47');
+  assert.equal(parts[3], '⚡ 47');
   assert.equal(parts[4], '5h ███░░░░░░░ 31%');
   assert.equal(parts.length, 5); // no project, no wk, no countdowns, no version
 });
@@ -70,7 +70,7 @@ test('normal layout drops Context, adds project, t/s+TTFT, countdown and weekly'
   const [line] = renderHud(baseCtx({ layout: 'normal' }));
   assert.equal(
     line,
-    '[manual] K3 │ kimi-code-hud git:(main*) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%',
+    '[manual] K3 │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%',
   );
 });
 
@@ -78,7 +78,7 @@ test('full layout adds Context, weekly countdown, version', () => {
   const [line] = renderHud(baseCtx({ layout: 'full', payload: basePayload({ planMode: true }) }));
   assert.equal(
     line,
-    '[manual] [plan] K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0',
+    '[manual] [plan] K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0',
   );
 });
 
@@ -86,8 +86,8 @@ test('model thinking suffix from session thinkingLevel (normal and full)', () =>
   const withLevel = (thinkingLevel, layout) =>
     renderHud(baseCtx({ layout, metrics: { tps: 47, ttftMs: 1300, thinkingLevel } }))[0];
   assert.ok(withLevel('on', 'normal').startsWith('[manual] K3 thinking │'));
-  assert.ok(withLevel('high', 'normal').startsWith('[manual] K3 thinking: high │'));
-  assert.ok(withLevel('max', 'full').startsWith('[manual] K3 thinking: max │'));
+  assert.ok(withLevel('high', 'normal').startsWith('[manual] K3 thinking:high │'));
+  assert.ok(withLevel('max', 'full').startsWith('[manual] K3 thinking:max │'));
   assert.ok(withLevel('off', 'normal').startsWith('[manual] K3 │'));
   assert.ok(withLevel(null, 'normal').startsWith('[manual] K3 │'));
   // compact keeps the bare model name

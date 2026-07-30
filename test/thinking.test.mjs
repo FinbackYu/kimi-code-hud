@@ -77,3 +77,61 @@ test('effort model falls back to model default_effort', () => {
     assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }), 'on');
   });
 });
+
+function tmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-snap-'));
+}
+
+test('snapshot pins the level per session across config changes', () => {
+  const snapshotDir = tmpDir();
+  withConfig(CONFIG, (configPath) => {
+    assert.equal(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      'high',
+    );
+    // Another session runs /effort low -> global config rewritten.
+    fs.writeFileSync(configPath, CONFIG.replace('effort = "high"', 'effort = "low"'));
+    // s1 keeps its start-of-session level; a new session sees the new config.
+    assert.equal(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      'high',
+    );
+    assert.equal(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's2', snapshotDir }),
+      'low',
+    );
+  });
+});
+
+test('in-session change updates the snapshot', () => {
+  const snapshotDir = tmpDir();
+  withConfig(CONFIG, (configPath) => {
+    assert.equal(
+      resolveThinkingLevel({ sessionLevel: 'max', model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      'max',
+    );
+    // Later renders without a wire level keep the in-session choice.
+    assert.equal(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      'max',
+    );
+  });
+});
+
+test('model change re-resolves and rewrites the snapshot', () => {
+  const snapshotDir = tmpDir();
+  withConfig(CONFIG, (configPath) => {
+    assert.equal(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      'high',
+    );
+    assert.equal(
+      resolveThinkingLevel({ sessionLevel: null, model: 'kimi-for-coding', configPath, sessionId: 's1', snapshotDir }),
+      'on',
+    );
+    assert.equal(
+      resolveThinkingLevel({ sessionLevel: null, model: 'kimi-for-coding', configPath: '/nonexistent/x', sessionId: 's1', snapshotDir }),
+      'on',
+    );
+  });
+});

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { HUD_DIR } from './quota.mjs';
 
 export const CONFIG_TOML_PATH = path.join(os.homedir(), '.kimi-code', 'config.toml');
 
@@ -49,24 +50,39 @@ function findModelTable(text, modelDisplay) {
 }
 
 /**
- * Resolve the thinking level to display, mirroring the host's fallback
- * chain: in-session change (wire config.update) > [thinking] config >
- * model default_effort > boolean "on".
- *
- * Returns:
- *  - 'off'        thinking disabled (render no suffix)
- *  - 'on'         boolean thinking enabled (render " thinking")
- *  - '<effort>'   concrete effort like "high" (render " thinking: <effort>")
- *
- * @param {object} opts
- * @param {string|null} opts.sessionLevel thinkingLevel from the session log
- * @param {string} opts.model payload model display string
- * @param {string} [opts.configPath]
+ * Per-session snapshot. `/effort` rewrites the global config.toml, but a
+ * session's runtime effort is frozen at session start — without a snapshot,
+ * a session that never switched effort in-session would follow whatever
+ * other sessions later wrote into config.toml. So the first resolved level
+ * is pinned per sessionId under ~/.kimi-code-hud/thinking-<sessionId>.json.
+ */
+function snapshotPath(snapshotDir, sessionId) {
+  return path.join(snapshotDir, `thinking-${sessionId}.json`);
+}
+
+function readSnapshot(snapshotDir, sessionId) {
+  try {
+    const snap = JSON.parse(fs.readFileSync(snapshotPath(snapshotDir, sessionId), 'utf8'));
+    if (snap && typeof snap.level === 'string' && snap.level.length > 0) return snap;
+  } catch { /* no snapshot yet */ }
+  return null;
+}
+
+function writeSnapshot(snapshotDir, sessionId, level, model) {
+  try {
+    fs.mkdirSync(snapshotDir, { recursive: true });
+    fs.writeFileSync(snapshotPath(snapshotDir, sessionId), JSON.stringify({ level, model }));
+  } catch { /* best effort */ }
+}
+
+/**
+ * Resolve the thinking level from config.toml: [thinking] config > model
+ * default_effort > boolean "on".
+ * @param {string} model payload model display string
+ * @param {string} configPath
  * @returns {string}
  */
-export function resolveThinkingLevel({ sessionLevel, model, configPath = CONFIG_TOML_PATH }) {
-  if (typeof sessionLevel === 'string' && sessionLevel.length > 0) return sessionLevel;
-
+function resolveFromConfig(model, configPath) {
   let text = '';
   try {
     text = fs.readFileSync(configPath, 'utf8');
@@ -84,4 +100,42 @@ export function resolveThinkingLevel({ sessionLevel, model, configPath = CONFIG_
 
   const modelDefault = modelTable !== null ? stringValue(modelTable, 'default_effort') : null;
   return globalEffort ?? modelDefault ?? 'on';
+}
+
+/**
+ * Resolve the thinking level to display, mirroring the host's fallback
+ * chain: in-session change (wire config.update) > per-session snapshot >
+ * [thinking] config > model default_effort > boolean "on".
+ *
+ * Returns:
+ *  - 'off'        thinking disabled (render no suffix)
+ *  - 'on'         boolean thinking enabled (render " thinking")
+ *  - '<effort>'   concrete effort like "high" (render " thinking:<effort>")
+ *
+ * @param {object} opts
+ * @param {string|null} opts.sessionLevel thinkingLevel from the session log
+ * @param {string} opts.model payload model display string
+ * @param {string} [opts.configPath]
+ * @param {string|null} [opts.sessionId] enables the per-session snapshot
+ * @param {string} [opts.snapshotDir]
+ * @returns {string}
+ */
+export function resolveThinkingLevel({
+  sessionLevel,
+  model,
+  configPath = CONFIG_TOML_PATH,
+  sessionId = null,
+  snapshotDir = HUD_DIR,
+}) {
+  if (typeof sessionLevel === 'string' && sessionLevel.length > 0) {
+    if (sessionId) writeSnapshot(snapshotDir, sessionId, sessionLevel, model);
+    return sessionLevel;
+  }
+  if (sessionId) {
+    const snap = readSnapshot(snapshotDir, sessionId);
+    if (snap && snap.model === model) return snap.level;
+  }
+  const level = resolveFromConfig(model, configPath);
+  if (sessionId) writeSnapshot(snapshotDir, sessionId, level, model);
+  return level;
 }

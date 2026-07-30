@@ -122,13 +122,14 @@ function buildSegments(layout, ctx) {
   const segs = [];
 
   // Model with thinking suffix, mirroring the host footer: boolean models
-  // show " thinking", effort-capable ones " thinking: <effort>". The level
-  // comes from the session log's config.update events (the status-line
-  // payload does not carry thinking state).
+  // show " thinking", effort-capable ones " thinking:<effort>" (halfwidth
+  // colon, no space — keeps the suffix compact). The level comes from the
+  // session log's config.update events (the status-line payload does not
+  // carry thinking state).
   const level = metrics && typeof metrics.thinkingLevel === 'string' ? metrics.thinkingLevel : null;
   let modelSeg = String(payload.model);
   if (layout !== 'compact' && level && level !== 'off') {
-    modelSeg += level === 'on' ? ' thinking' : ` thinking: ${level}`;
+    modelSeg += level === 'on' ? ' thinking' : ` thinking:${level}`;
   }
   segs.push(modelSeg);
 
@@ -168,10 +169,10 @@ function buildSegments(layout, ctx) {
   if (metrics && typeof metrics.tps === 'number') {
     const tps = Math.round(metrics.tps);
     if (layout === 'compact') {
-      segs.push(`⚡${tps}`);
+      segs.push(`⚡ ${tps}`);
     } else {
       const ttft = formatTtft(metrics.ttftMs);
-      segs.push(`⚡${tps} t/s${ttft ? ` · TTFT ${ttft}` : ''}`);
+      segs.push(`⚡ ${tps} t/s${ttft ? ` · TTFT ${ttft}` : ''}`);
     }
   }
 
