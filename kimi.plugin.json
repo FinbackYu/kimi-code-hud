@@ -1,0 +1,24 @@
+{
+  "name": "kimi-code-hud",
+  "version": "0.2.0",
+  "description": "Zero-dependency HUD status line for Kimi Code CLI: model, thinking, git, context, token speed and quota.",
+  "keywords": [
+    "kimi-code",
+    "status-line",
+    "hud"
+  ],
+  "author": "FinbackYu",
+  "homepage": "https://github.com/FinbackYu/kimi-code-hud",
+  "license": "MIT",
+  "interface": {
+    "displayName": "Kimi Code HUD",
+    "shortDescription": "HUD status line: model, thinking, git, context, speed, quota"
+  },
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "command": "node ./hooks/sync-status-line.mjs",
+      "timeout": 5
+    }
+  ]
+}

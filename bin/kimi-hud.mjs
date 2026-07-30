@@ -2,7 +2,10 @@
 // kimi-code-hud: custom status line (HUD) for Kimi Code CLI.
 // Default mode renders a single status line from the stdin JSON snapshot.
 // The host kills us after 300ms and falls back silently on any failure, so
-// every error path degrades quietly — never exit non-zero, never log.
+// every error path degrades quietly — never log, and never exit non-zero
+// except for one deliberate case: running from a disabled/removed plugin
+// managed copy, where a non-zero exit hands the line back to the builtin
+// status line (that is what makes /plugins disable work).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,6 +17,7 @@ import { getMetrics } from '../src/metrics.mjs';
 import { resolveThinkingLevel } from '../src/thinking.mjs';
 import { readQuotaCache, ensureFreshQuota, refreshQuota, HUD_DIR } from '../src/quota.mjs';
 import { renderHud } from '../src/render.mjs';
+import { managedPluginDisabled } from '../src/plugin-state.mjs';
 import { setStatusLineCommand, removeStatusLineCommand } from '../src/toml.mjs';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -126,6 +130,10 @@ async function main() {
   }
   if (args.includes('--install')) { install(); return; }
   if (args.includes('--uninstall')) { uninstall(); return; }
+  // Plugin on/off switch: when this script is the plugin managed copy and
+  // the plugin is disabled or removed, exit non-zero with no output so the
+  // host falls back to its builtin status line.
+  if (managedPluginDisabled(SCRIPT_PATH)) process.exit(1);
   await render();
 }
 
