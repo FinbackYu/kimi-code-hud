@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setStatusLineCommand } from '../src/toml.mjs';
+import { getStatusLineCommand, setStatusLineCommand } from '../src/toml.mjs';
 
 function main() {
   const pluginRoot = process.env.KIMI_PLUGIN_ROOT
@@ -22,8 +22,10 @@ function main() {
   let content = '';
   try { content = fs.readFileSync(tomlPath, 'utf8'); } catch { /* new file */ }
 
-  const commandLine = content.match(/^\s*command\s*=\s*"([^"]*)"/m);
-  if (commandLine && !commandLine[1].includes('kimi-hud')) return;
+  // Guard only looks at [status_line]'s own command — a `command` key in any
+  // other section (e.g. [editor]) must not trip it.
+  const existing = getStatusLineCommand(content);
+  if (existing !== null && !existing.includes('kimi-hud')) return;
 
   const next = setStatusLineCommand(content, `node ${path.join(pluginRoot, 'bin', 'kimi-hud.mjs')}`);
   if (next === content) return;

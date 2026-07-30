@@ -36,6 +36,19 @@ test('rewrites a previous kimi-hud command to the managed copy', () => {
   assert.equal(out, `[status_line]\ncommand = "node ${pluginRoot}/bin/kimi-hud.mjs"\n`);
 });
 
+test('installs even when another section has its own command key', () => {
+  const { home, pluginRoot, toml } = setup();
+  // Real default tui.toml: [editor] carries `command = ""`, which must not
+  // be mistaken for a foreign status-line command.
+  fs.writeFileSync(toml, '[editor]\ncommand = "" # Empty uses $VISUAL / $EDITOR\n');
+  runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
+  const out = fs.readFileSync(toml, 'utf8');
+  assert.equal(
+    out,
+    `[editor]\ncommand = "" # Empty uses $VISUAL / $EDITOR\n\n[status_line]\ncommand = "node ${pluginRoot}/bin/kimi-hud.mjs"\n`,
+  );
+});
+
 test('leaves a foreign status line command untouched', () => {
   const { home, pluginRoot, toml } = setup();
   const original = '[status_line]\ncommand = "node /Users/test/my-own-statusline.mjs"\n';
