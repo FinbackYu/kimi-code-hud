@@ -55,15 +55,14 @@ test('formatCountdown formats d/h/m and reset states', () => {
   assert.equal(formatCountdown('garbage', NOW), null);
 });
 
-test('compact layout: model, git, Context bar, speed, window bars only', () => {
+test('compact layout: model, git, speed, window bars only', () => {
   const [line] = renderHud(baseCtx({ layout: 'compact' }));
   const parts = line.split(' │ ');
   assert.equal(parts[0], '[manual] K3');
   assert.equal(parts[1], 'git:(main*)');
-  assert.equal(parts[2], 'Context ██████░░░░ 62% (159K/256K)');
-  assert.equal(parts[3], '⚡ 47');
-  assert.equal(parts[4], '5h ███░░░░░░░ 31%');
-  assert.equal(parts.length, 5); // no project, no wk, no countdowns, no version
+  assert.equal(parts[2], '⚡ 47');
+  assert.equal(parts[3], '5h ███░░░░░░░ 31%');
+  assert.equal(parts.length, 4); // no Context, no project, no wk, no countdowns, no version
 });
 
 test('normal layout drops Context, adds project, t/s+TTFT, countdown and weekly', () => {

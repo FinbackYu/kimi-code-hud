@@ -112,10 +112,10 @@ function badges(payload, color) {
 
 /**
  * Build the segment list for one layout tier.
- * compact: model │ git:(branch) │ Context bar+%+tokens │ ⚡tps │ window bars
+ * compact: model │ git:(branch) │ ⚡tps │ window bars
  * normal:  + project prefix, thinking suffix, t/s+TTFT, countdowns, weekly
- *          (no Context segment — the host's line 2 shows the numbers)
  * full:    + Context segment, weekly countdown, version
+ * (Context only in full — the host's line 2 already shows the numbers)
  */
 function buildSegments(layout, ctx) {
   const { payload, quota, metrics, gitDirty, color, now } = ctx;
@@ -145,10 +145,9 @@ function buildSegments(layout, ctx) {
     segs.push(project);
   }
 
-  // Context usage: bar + exact percentage + token counts, so the line is
-  // self-sufficient. Shown in compact/full; normal drops it (the host's
-  // line 2 carries the exact numbers there).
-  if (layout !== 'normal') {
+  // Context usage: bar + exact percentage + token counts. Only full shows
+  // it; compact/normal leave the exact numbers to the host's line 2.
+  if (layout === 'full') {
     let ctxFrac = 0;
     const hasCounts =
       typeof payload.contextTokens === 'number' &&

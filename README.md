@@ -61,13 +61,13 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
 三档布局：
 
 ```
-compact: K3 │ git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 │ 5h ███░░░░░░░ 31%
+compact: K3 │ git:(main*) │ ⚡ 47 │ 5h ███░░░░░░░ 31%
 normal:  K3 thinking:high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25%
 full:    K3 thinking:high │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ↻2h18m │ wk ██░░░░░░░░ 25% ↻3d2h │ v0.31.0
 ```
 
 - 模型名以宿主主蓝色（dark 主题 `#4FA8FF`，即对话中链接/行内代码的蓝）显示；模型后缀显示 thinking 状态：布尔模型为 ` thinking`，支持 effort 的模型为 ` thinking:<effort>`（status line payload 不含此字段；优先取会话日志 `config.update` 事件——新版宿主键为 `thinkingEffort`，会话启动即有初始记录；旧版为 `thinkingLevel`，只在会话内切换过 effort 时记录。两者都没有时按会话快照固定取值，快照存 `~/.kimi-code-hud/thinking-<sessionId>.json`；快照不存在时才回退解析 `~/.kimi-code/config.toml` 的 `[thinking]` 与模型表并写入快照——这样其他会话执行 `/effort` 改写全局配置后，本会话显示不会跟着变）；compact 档省略后缀；
-- normal 档不含 Context 段（宿主第二行已有精确数值），compact/full 档保留柱+百分比+token 数；
+- Context 段只在 full 档显示（柱+百分比+token 数）；compact/normal 档不含，直接看宿主第二行的精确数值；
 - 行首徽章与权限模式对齐：`[yolo]`（琥珀黄，对齐宿主默认）/`[auto]`（亮红，便于区分）/`[manual]`（暗灰占位，保持行首对齐），plan 模式加 `[plan]`（蓝色）；`[swarm]`（青色）已实现，但当前宿主 status line payload 尚未携带 `swarmMode` 字段，上游补齐后自动生效；
 - 柱条按用量分级着色：<60% 绿、<85% 黄、≥85% 红；
 - 输出超过 200 字符自动降级 full→normal→compact。
@@ -100,7 +100,7 @@ access token 仅从 `~/.kimi-code/credentials/kimi-code.json` **本地读取**�
 
 **没有配额段？** 缓存首次生成前整段省略（不显示"加载中"）。可手动 `node bin/kimi-hud.mjs --refresh-quota` 后重试；该命令静默执行，检查 `~/.kimi-code-hud/quota.json` 是否生成。
 
-**Context 段在哪些档显示？** compact/full 档自带柱、百分比和 token 数；normal 档不显示，直接看宿主第二行的 `context: N% (tokens/max)`（该行永远由宿主绘制，插件无法接管）。
+**Context 段在哪些档显示？** 只有 full 档自带柱、百分比和 token 数；compact/normal 档不显示，直接看宿主第二行的 `context: N% (tokens/max)`（该行永远由宿主绘制，插件无法接管）。
 
 ## Development
 
