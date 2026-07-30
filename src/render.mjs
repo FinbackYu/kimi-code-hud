@@ -204,8 +204,9 @@ function buildSegments(layout, ctx) {
 
   // Context usage on line 1 in every tier: the host's line 2 (which it
   // always draws, custom status line or not) is right-aligned and easy to
-  // miss. compact/normal get a compact colored "ctx N%"; full keeps the
-  // bar + exact token counts.
+  // miss. compact/normal get a colored ctx bar only — the percentage and
+  // exact numbers already live on the host's line 2, so repeating them
+  // here would just be noise; full keeps the bar + percentage + counts.
   const ctxInfo = contextInfo(payload);
   if (ctxInfo) {
     const pct = Math.round(ctxInfo.frac * 100);
@@ -216,7 +217,7 @@ function buildSegments(layout, ctx) {
       }
       segs.push(ctxSeg);
     } else {
-      segs.push(colorize(color, levelColor(ctxInfo.frac), `ctx ${pct}%`));
+      segs.push(`ctx ${bar(ctxInfo.frac, color)}`);
     }
   }
 

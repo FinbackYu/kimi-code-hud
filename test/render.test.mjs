@@ -55,22 +55,22 @@ test('formatCountdown formats d/h/m and reset states', () => {
   assert.equal(formatCountdown('garbage', NOW), null);
 });
 
-test('compact layout: model, git, ctx pct, speed, window pct + countdown', () => {
+test('compact layout: model, git, ctx bar, speed, window pct + countdown', () => {
   const [line] = renderHud(baseCtx({ layout: 'compact' }));
   const parts = line.split(' │ ');
   assert.equal(parts[0], '[manual] K3');
   assert.equal(parts[1], 'git:(main*)');
-  assert.equal(parts[2], 'ctx 62%');
+  assert.equal(parts[2], 'ctx ██████░░░░');
   assert.equal(parts[3], '⚡ 47');
   assert.equal(parts[4], '5h 31% ~2h18m');
-  assert.equal(parts.length, 5); // no Context bar, no project, no wk, no version
+  assert.equal(parts.length, 5); // no Context pct/counts, no project, no wk, no version
 });
 
-test('normal layout: compact ctx pct, project, t/s+TTFT, countdown and weekly', () => {
+test('normal layout: ctx bar, project, t/s+TTFT, countdown and weekly', () => {
   const [line] = renderHud(baseCtx({ layout: 'normal' }));
   assert.equal(
     line,
-    '[manual] K3 │ kimi-code-hud git:(main*) │ ctx 62% │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m │ wk ██░░░░░░░░ 25%',
+    '[manual] K3 │ kimi-code-hud git:(main*) │ ctx ██████░░░░ │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m │ wk ██░░░░░░░░ 25%',
   );
 });
 
@@ -237,13 +237,13 @@ test('swarm speed shows fleet total with per-agent average', () => {
   assert.ok(fresh.includes('⚡ gen 3s (5 agents)'));
 });
 
-test('ctx pct segment is usage-graded and omitted without any context data', () => {
+test('ctx bar segment is usage-graded and omitted without any context data', () => {
   const [hot] = renderHud(baseCtx({
     color: true,
     layout: 'normal',
     payload: basePayload({ contextTokens: 230000, maxContextTokens: 262144 }),
   }));
-  assert.ok(hot.includes('\x1b[31mctx 88%\x1b[0m')); // >=85% red
+  assert.ok(hot.includes('ctx \x1b[31m████████░░\x1b[0m')); // 88%: red bar
   const [none] = renderHud(baseCtx({
     payload: basePayload({ contextTokens: undefined, maxContextTokens: undefined, contextUsage: undefined }),
   }));
