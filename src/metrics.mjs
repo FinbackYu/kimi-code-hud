@@ -2,14 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { HUD_DIR } from './quota.mjs';
+import { applyGoalOp } from './goal.mjs';
 
 export const SESSIONS_ROOT = path.join(os.homedir(), '.kimi-code', 'sessions');
 
 const MAX_SAMPLES = 5;
 const MIN_STREAM_MS = 50;
-// Backfill scan version; bump when the config.update key set changes so
-// existing state files re-scan once (v2: added `thinkingEffort`).
-const THINKING_SCAN_V = 2;
+// Backfill scan version; bump when the tracked key set changes so existing
+// state files re-scan once (v2: added `thinkingEffort`; v3: goal ops).
+const BACKFILL_SCAN_V = 3;
 
 /**
  * Locate the wire.jsonl for a session id. The payload sessionId may or may
@@ -66,7 +67,7 @@ function loadState(statePath) {
   } catch {
     // fall through
   }
-  return { offset: 0, samples: [], lastTtftMs: null, thinkingLevel: null };
+  return { offset: 0, samples: [], lastTtftMs: null, thinkingLevel: null, goal: null };
 }
 
 function resetStreamState(state) {
@@ -74,8 +75,10 @@ function resetStreamState(state) {
   state.samples = [];
   state.lastTtftMs = null;
   state.thinkingLevel = null;
-  delete state.thinkingScanV;
-  delete state.thinkingScanDone;
+  state.goal = null;
+  delete state.backfillScanV;
+  delete state.thinkingScanV; // legacy v1/v2 marker
+  delete state.thinkingScanDone; // legacy v1 marker
 }
 
 function saveState(statePath, state) {
@@ -87,6 +90,59 @@ function saveState(statePath, state) {
   } catch {
     // stay silent
   }
+}
+
+/**
+ * Fold one parsed wire row into the metrics state. Handles config.update
+ * (thinking level), goal ops (goal badge state) and step.end loop events
+ * (TPS samples + TTFT).
+ * @param {object} state mutated in place
+ * @param {object} row parsed wire.jsonl line
+ */
+export function processWireRow(state, row) {
+  if (row?.type === 'config.update') {
+    // Latest thinking level wins ("on"/"off" for boolean models, or a
+    // concrete effort like "high"/"max" for effort-capable ones). New
+    // hosts write `thinkingEffort` (including an initial event at
+    // session start); older hosts wrote `thinkingLevel`.
+    const level = typeof row.thinkingEffort === 'string' ? row.thinkingEffort
+      : typeof row.thinkingLevel === 'string' ? row.thinkingLevel : null;
+    if (level) state.thinkingLevel = level;
+    return;
+  }
+  if (
+    row?.type === 'goal.create' ||
+    row?.type === 'goal.update' ||
+    row?.type === 'goal.clear' ||
+    row?.type === 'forked'
+  ) {
+    state.goal = applyGoalOp(state.goal ?? null, row);
+    return;
+  }
+  if (row?.type !== 'context.append_loop_event') return;
+  const ev = row.event;
+  if (!ev || ev.type !== 'step.end') return;
+  if (typeof ev.llmFirstTokenLatencyMs === 'number' && ev.llmFirstTokenLatencyMs >= 0) {
+    state.lastTtftMs = ev.llmFirstTokenLatencyMs;
+  }
+  const out = ev.usage && typeof ev.usage.output === 'number' ? ev.usage.output : 0;
+  const streamMs = typeof ev.llmStreamDurationMs === 'number' ? ev.llmStreamDurationMs : 0;
+  if (out > 0 && streamMs >= MIN_STREAM_MS) {
+    state.samples.push(out / (streamMs / 1000));
+    if (state.samples.length > MAX_SAMPLES) {
+      state.samples.splice(0, state.samples.length - MAX_SAMPLES);
+    }
+  }
+}
+
+/** True when a raw line might carry a backfill-tracked key (cheap prefilter). */
+function isBackfillLine(line) {
+  return (
+    line.includes('"thinkingEffort"') ||
+    line.includes('"thinkingLevel"') ||
+    line.includes('"type":"goal.') ||
+    line.includes('"type":"forked"')
+  );
 }
 
 /**
@@ -105,30 +161,7 @@ export function processWireChunk(state, text) {
     } catch {
       continue;
     }
-    if (row?.type === 'config.update') {
-      // Latest thinking level wins ("on"/"off" for boolean models, or a
-      // concrete effort like "high"/"max" for effort-capable ones). New
-      // hosts write `thinkingEffort` (including an initial event at
-      // session start); older hosts wrote `thinkingLevel`.
-      const level = typeof row.thinkingEffort === 'string' ? row.thinkingEffort
-        : typeof row.thinkingLevel === 'string' ? row.thinkingLevel : null;
-      if (level) state.thinkingLevel = level;
-      continue;
-    }
-    if (row?.type !== 'context.append_loop_event') continue;
-    const ev = row.event;
-    if (!ev || ev.type !== 'step.end') continue;
-    if (typeof ev.llmFirstTokenLatencyMs === 'number' && ev.llmFirstTokenLatencyMs >= 0) {
-      state.lastTtftMs = ev.llmFirstTokenLatencyMs;
-    }
-    const out = ev.usage && typeof ev.usage.output === 'number' ? ev.usage.output : 0;
-    const streamMs = typeof ev.llmStreamDurationMs === 'number' ? ev.llmStreamDurationMs : 0;
-    if (out > 0 && streamMs >= MIN_STREAM_MS) {
-      state.samples.push(out / (streamMs / 1000));
-      if (state.samples.length > MAX_SAMPLES) {
-        state.samples.splice(0, state.samples.length - MAX_SAMPLES);
-      }
-    }
+    processWireRow(state, row);
   }
 }
 
@@ -151,13 +184,13 @@ export function median(arr) {
  * offset when it exceeds the file size. Never throws.
  * @param {string} sessionId
  * @param {object} [opts]
- * @returns {{tps: number|null, ttftMs: number|null}}
+ * @returns {{tps: number|null, ttftMs: number|null, thinkingLevel: string|null, goal: object|null}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
   stateDir = HUD_DIR,
 } = {}) {
-  const empty = { tps: null, ttftMs: null, thinkingLevel: null };
+  const empty = { tps: null, ttftMs: null, thinkingLevel: null, goal: null };
   try {
     if (!sessionId) return empty;
     const wirePath = findWirePath(sessionId, sessionsRoot);
@@ -179,22 +212,18 @@ export function getMetrics(sessionId, {
       state.fileId = fileId;
       stateChanged = true;
     }
-    // One-time backfill: sessions whose offset predates thinking-level
-    // tracking would otherwise never see their initial config.update.
-    // Versioned marker: v2 also matches the newer `thinkingEffort` key and
-    // re-scans states written by v1 (latest event in the file wins).
-    // The substring prefilter keeps this fast even on multi-MB logs.
-    if ((state.thinkingScanV ?? 0) < THINKING_SCAN_V) {
+    // One-time backfill: sessions whose offset predates a tracked key would
+    // otherwise never see earlier events (initial config.update, goal.create).
+    // Versioned marker: v2 matched the newer `thinkingEffort` key; v3 also
+    // folds in goal ops. The substring prefilter keeps this fast even on
+    // multi-MB logs.
+    if ((state.backfillScanV ?? state.thinkingScanV ?? 0) < BACKFILL_SCAN_V) {
       try {
         const text = fs.readFileSync(wirePath, 'utf8');
         for (const line of text.split('\n')) {
-          if (!line.includes('"thinkingEffort"') && !line.includes('"thinkingLevel"')) continue;
+          if (!isBackfillLine(line)) continue;
           try {
-            const row = JSON.parse(line);
-            if (row?.type !== 'config.update') continue;
-            const level = typeof row.thinkingEffort === 'string' ? row.thinkingEffort
-              : typeof row.thinkingLevel === 'string' ? row.thinkingLevel : null;
-            if (level) state.thinkingLevel = level;
+            processWireRow(state, JSON.parse(line));
           } catch {
             // keep scanning
           }
@@ -202,7 +231,8 @@ export function getMetrics(sessionId, {
       } catch {
         // stay silent
       }
-      state.thinkingScanV = THINKING_SCAN_V;
+      state.backfillScanV = BACKFILL_SCAN_V;
+      delete state.thinkingScanV; // legacy v1/v2 marker
       delete state.thinkingScanDone; // legacy v1 marker
       stateChanged = true;
     }
@@ -229,6 +259,7 @@ export function getMetrics(sessionId, {
       tps: median(state.samples),
       ttftMs: state.lastTtftMs ?? null,
       thinkingLevel: state.thinkingLevel ?? null,
+      goal: state.goal ?? null,
     };
   } catch {
     return empty;

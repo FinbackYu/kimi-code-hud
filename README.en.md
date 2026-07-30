@@ -70,6 +70,14 @@ normal:  [manual] K3 thinking:high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s 
 full:    [manual] K3 thinking:high │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m │ wk ██░░░░░░░░ 25% ~3d2h │ v0.31.0
 ```
 
+In /goal mode a goal badge is inserted between the mode badges and the model (shown in every tier, matching the built-in footer's slot order):
+
+```
+[manual] [goal ● active · 4m · 7 turns] K3 thinking:high │ …
+```
+
+The goal badge mirrors the built-in footer's format (`[goal ● <status> · <elapsed> · <turns>]`, `3/10 turns` when a turn budget is set; dot: active blue / blocked amber / paused muted). The status-line payload carries no goal field, so the state is rebuilt from the session log's `goal.create`/`goal.update`/`goal.clear`/`forked` ops in `wire.jsonl` (same incremental scan as TPS); an active goal ticks every second from `wallClockResumedAt`, and the badge disappears once the goal completes or is cleared.
+
 The model name is painted in the host's primary blue (dark theme `#4FA8FF`, the blue used for links and inline code in the conversation). The model suffix shows thinking state: ` thinking` for boolean models, ` thinking:<effort>` for effort-capable ones (the status-line payload does not carry it; prefer `config.update` events from the session log — new hosts write `thinkingEffort`, including an initial event at session start, older hosts wrote `thinkingLevel` only after an in-session change. When neither exists, pin the value per session in `~/.kimi-code-hud/thinking-<sessionId>.json`; only when no snapshot exists does it fall back to the `[thinking]` and model tables in `~/.kimi-code/config.toml` and write the snapshot — so another session running `/effort`, which rewrites the global config, no longer changes what this session shows); compact drops the `thinking` label and keeps only the space-separated `<effort>` suffix (e.g. `K3 high`). Quota segments show bar + percentage + reset countdown in normal/full; compact drops the bar and keeps percentage + countdown; the weekly (wk) segment appears only in normal/full. The Context segment appears only in full (bar + percentage + token counts); compact/normal omit it — read the host-drawn line 2 for the exact numbers there. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast), `[manual]` (muted gray placeholder that keeps the left edge aligned) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is implemented but the host status-line payload does not expose `swarmMode` yet — it activates automatically once upstream adds it. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
 
 ### How it works
@@ -85,7 +93,7 @@ Data sources:
 | Segment | Source |
 |---|---|
 | model / branch / Context | stdin snapshot + `git status --porcelain` (150ms timeout) |
-| TPS / TTFT | incremental parsing of `step.end` events in `~/.kimi-code/sessions/*/session_<id>/agents/main/wire.jsonl` (legacy `ses_<id>` also supported) (byte offset persisted in `~/.kimi-code-hud/metrics-<sessionId>.json`; only new bytes are read each second) |
+| TPS / TTFT / thinking / goal | incremental parsing of `step.end` events, `config.update` and `goal.*` ops in `~/.kimi-code/sessions/*/session_<id>/agents/main/wire.jsonl` (legacy `ses_<id>` also supported) (byte offset persisted in `~/.kimi-code-hud/metrics-<sessionId>.json`; only new bytes are read each second) |
 | quota (5h/wk) | `GET https://api.kimi.com/coding/v1/usages`, cached 60s in `~/.kimi-code-hud/quota.json`; when stale, the hot path renders the stale cache and spawns a detached background refresh — never blocking |
 
 ### Privacy & security

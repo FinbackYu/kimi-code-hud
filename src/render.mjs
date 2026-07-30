@@ -1,5 +1,7 @@
 import path from 'node:path';
 
+import { formatGoalBadge } from './goal.mjs';
+
 const ESC = '\x1b[';
 const RESET = `${ESC}0m`;
 
@@ -113,6 +115,26 @@ function badges(payload, color) {
 }
 
 /**
+ * Goal badge, mirroring the built-in footer's goal slot (`mode → goal →
+ * model`): colored status dot (active = primary blue, blocked = warning
+ * amber, paused = muted) inside muted brackets. The status-line payload
+ * carries no goal field; the state comes from the wire journal's goal ops.
+ * Shown in every layout tier — a live goal is too important to drop.
+ */
+function goalBadge(goal, color, now) {
+  const badge = formatGoalBadge(goal, now);
+  if (!badge) return null;
+  const dotColor =
+    badge.status === 'active' ? C.primary : badge.status === 'blocked' ? C.warning : C.muted;
+  if (!color) return badge.text;
+  // Repaint the dot (always the 7th char: "[goal ●") and mute the rest.
+  const dotIdx = badge.text.indexOf('●');
+  const before = badge.text.slice(0, dotIdx);
+  const after = badge.text.slice(dotIdx + 1);
+  return `${C.muted}${before}${RESET}${dotColor}●${RESET}${C.muted}${after}${RESET}`;
+}
+
+/**
  * Build the segment list for one layout tier.
  * compact: model <effort> │ git:(branch) │ ⚡tps │ window pct+countdown
  * normal:  + project prefix, thinking suffix, t/s+TTFT, bars, weekly
@@ -218,7 +240,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, ttftMs}
+ * @param {object|null} ctx.metrics {tps, ttftMs, thinkingLevel, goal}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] full|normal|compact
  * @param {boolean} [ctx.color]
@@ -233,6 +255,8 @@ export function renderHud(ctx) {
   for (let i = startIdx; i < LAYOUT_ORDER.length; i++) {
     const layout = LAYOUT_ORDER[i];
     const prefix = badges(payload, color);
+    const goal = goalBadge(ctx.metrics?.goal, color, now);
+    if (goal) prefix.push(goal);
     const segs = buildSegments(layout, { ...ctx, payload, color, now });
     const line = [...prefix, segs.join(' │ ')].filter(Boolean).join(' ');
     if (stripAnsi(line).length <= MAX_WIDTH || layout === 'compact') return [line];
