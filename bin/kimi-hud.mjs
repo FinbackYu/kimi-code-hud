@@ -100,11 +100,13 @@ async function render() {
   const quota = readQuotaCache();
   const metrics = getMetrics(payload.sessionId);
   // thinkingLevel from the session log only exists after an in-session
-  // /effort change; fall back to the [thinking] + model tables in
-  // config.toml so the suffix shows from the very first step.
+  // /effort change; otherwise pin the config.toml resolution per session
+  // (a session's runtime effort is frozen at start, while /effort in other
+  // sessions rewrites the global config).
   metrics.thinkingLevel = resolveThinkingLevel({
     sessionLevel: metrics.thinkingLevel,
     model: payload.model,
+    sessionId: payload.sessionId,
   });
   const gitDirty = payload.gitBranch ? isGitDirty(payload.cwd) : false;
   const lines = renderHud({
