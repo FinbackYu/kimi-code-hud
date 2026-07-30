@@ -26,6 +26,10 @@ Use `node:test` with `node:assert/strict`. Name files `test/<module>.test.mjs` a
 
 Write short, imperative commit subjects. History uses both direct subjects (`Add SessionStart self-heal hook`) and Conventional Commit prefixes (`fix: harden state and config handling`). Keep each commit scoped to one behavior. Pull requests should explain the user-visible change, list verification commands, link relevant issues, and include terminal output or screenshots for HUD layout changes.
 
+## Release Workflow
+
+Version bumps touch `package.json` and `kimi.plugin.json` together. After pushing, create a matching GitHub release (`gh release create vX.Y.Z`): the self-hosted `marketplace.json` omits per-entry versions on purpose — the host resolves the latest release tag (`v`-prefix stripped, must be semver) to render update badges in `/plugins marketplace` browsing. No release, no badge.
+
 ## Security & Runtime Constraints
 
 The HUD runs on a hot path with a 300ms host deadline. Avoid blocking network calls, unbounded scans, and new dependencies. Preserve silent fallback behavior: do not print diagnostics during rendering. Never log or cache access tokens. Keep cache writes atomic, sanitize path components, and preserve unrelated TOML settings during install, uninstall, and hook repair.

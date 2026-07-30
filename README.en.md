@@ -40,6 +40,11 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 
 > Do not mix the two: while the plugin is enabled, its hook points `tui.toml` at the managed copy. To go back to a manual install, `/plugins remove kimi-code-hud` first, then re-run `--install`.
 
+### Update
+
+- **Reinstall to update**: run `/plugins install https://github.com/FinbackYu/kimi-code-hud` again. The managed copy is replaced in place and the status line picks up the new version within ~1 second — no `/reload-tui` or new session needed.
+- **Update badge (self-hosted marketplace)**: run `/plugins marketplace https://raw.githubusercontent.com/FinbackYu/kimi-code-hud/main/marketplace.json` to browse the catalog; when the repo has published a newer release than your local install, the Installed tab shows an `update local → latest` badge — select it and press Enter to update. This command only affects the catalog for that browsing session and does not replace the official marketplace.
+
 ### Uninstall
 
 Plugin install: `/plugins remove kimi-code-hud` (per upstream behavior the managed copy stays on disk, but with the install record gone the status line falls back to the built-in layout immediately).
