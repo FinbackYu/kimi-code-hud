@@ -58,6 +58,24 @@ export function setStatusLineCommand(content, command) {
 }
 
 /**
+ * Return the `command` value inside the [status_line] section, or null when
+ * the section or its command line is absent. Other sections' `command` keys
+ * (e.g. [editor]) are ignored.
+ * @param {string} content
+ * @returns {string | null}
+ */
+export function getStatusLineCommand(content) {
+  const lines = (content || '').replace(/\r\n/g, '\n').split('\n');
+  const section = findSection(lines, 'status_line');
+  if (!section) return null;
+  for (let i = section.start + 1; i < section.end; i++) {
+    const m = lines[i].match(/^\s*command\s*=\s*"((?:[^"\\]|\\.)*)"/);
+    if (m) return m[1].replace(/\\(["\\])/g, '$1');
+  }
+  return null;
+}
+
+/**
  * Return tui.toml content with the status-line command removed. Only
  * command lines inside [status_line] whose value mentions our script (or
  * equals the given command) are removed; other keys are untouched.
