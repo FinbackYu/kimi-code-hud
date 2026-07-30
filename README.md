@@ -40,6 +40,11 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 
 > 两种方式不要混用：插件启用期间，hook 会把 `tui.toml` 指向托管副本。想回到手动安装，先 `/plugins remove kimi-code-hud`，再重新 `--install`。
 
+### 更新
+
+- **重装即更新**：再跑一遍 `/plugins install https://github.com/FinbackYu/kimi-code-hud`。托管副本原地替换，状态栏约 1 秒内自动用上新版本，无需 `/reload-tui` 或新会话。
+- **更新徽章（自建 marketplace）**：运行 `/plugins marketplace https://raw.githubusercontent.com/FinbackYu/kimi-code-hud/main/marketplace.json` 打开目录；当仓库发布了比本地更新的 release 时，Installed 页会显示 `update 本地 → 最新` 徽章，选中按 Enter 即更新。该命令只影响本次浏览的目录来源，不替换官方 marketplace。
+
 ### 卸载
 
 插件方式安装：`/plugins remove kimi-code-hud`（按官方行为托管副本仍留在磁盘上，但安装记录已删除，状态栏会立即回退内置布局）。
