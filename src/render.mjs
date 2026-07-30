@@ -125,9 +125,10 @@ function buildSegments(layout, ctx) {
   // show " thinking", effort-capable ones " thinking:<effort>" (halfwidth
   // colon, no space — keeps the suffix compact). The level comes from the
   // session log's config.update events (the status-line payload does not
-  // carry thinking state).
+  // carry thinking state). The model name is painted in the host's primary
+  // blue (#4FA8FF), the suffix stays in default text color.
   const level = metrics && typeof metrics.thinkingLevel === 'string' ? metrics.thinkingLevel : null;
-  let modelSeg = String(payload.model);
+  let modelSeg = colorize(color, C.primary, String(payload.model));
   if (layout !== 'compact' && level && level !== 'off') {
     modelSeg += level === 'on' ? ' thinking' : ` thinking:${level}`;
   }
