@@ -55,14 +55,14 @@ test('formatCountdown formats d/h/m and reset states', () => {
   assert.equal(formatCountdown('garbage', NOW), null);
 });
 
-test('compact layout: model, git, speed, window bars only', () => {
+test('compact layout: model, git, speed, window pct + countdown', () => {
   const [line] = renderHud(baseCtx({ layout: 'compact' }));
   const parts = line.split(' │ ');
   assert.equal(parts[0], '[manual] K3');
   assert.equal(parts[1], 'git:(main*)');
   assert.equal(parts[2], '⚡ 47');
-  assert.equal(parts[3], '5h ███░░░░░░░ 31%');
-  assert.equal(parts.length, 4); // no Context, no project, no wk, no countdowns, no version
+  assert.equal(parts[3], '5h 31% ↻2h18m');
+  assert.equal(parts.length, 4); // no Context, no project, no bar, no wk, no version
 });
 
 test('normal layout drops Context, adds project, t/s+TTFT, countdown and weekly', () => {
@@ -89,8 +89,10 @@ test('model thinking suffix from session thinkingLevel (normal and full)', () =>
   assert.ok(withLevel('max', 'full').startsWith('[manual] K3 thinking:max │'));
   assert.ok(withLevel('off', 'normal').startsWith('[manual] K3 │'));
   assert.ok(withLevel(null, 'normal').startsWith('[manual] K3 │'));
-  // compact keeps the bare model name
-  assert.ok(withLevel('high', 'compact').startsWith('[manual] K3 │'));
+  // compact keeps only ":<effort>" without the "thinking" label
+  assert.ok(withLevel('high', 'compact').startsWith('[manual] K3:high │'));
+  assert.ok(withLevel('on', 'compact').startsWith('[manual] K3:on │'));
+  assert.ok(withLevel('off', 'compact').startsWith('[manual] K3 │'));
 });
 
 test('badges for yolo/auto permission modes', () => {

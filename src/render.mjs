@@ -112,8 +112,8 @@ function badges(payload, color) {
 
 /**
  * Build the segment list for one layout tier.
- * compact: model │ git:(branch) │ ⚡tps │ window bars
- * normal:  + project prefix, thinking suffix, t/s+TTFT, countdowns, weekly
+ * compact: model:effort │ git:(branch) │ ⚡tps │ window pct+countdown
+ * normal:  + project prefix, thinking suffix, t/s+TTFT, bars, weekly
  * full:    + Context segment, weekly countdown, version
  * (Context only in full — the host's line 2 already shows the numbers)
  */
@@ -123,14 +123,16 @@ function buildSegments(layout, ctx) {
 
   // Model with thinking suffix, mirroring the host footer: boolean models
   // show " thinking", effort-capable ones " thinking:<effort>" (halfwidth
-  // colon, no space — keeps the suffix compact). The level comes from the
+  // colon, no space — keeps the suffix compact). Compact drops the
+  // "thinking" label and keeps only ":<effort>". The level comes from the
   // session log's config.update events (the status-line payload does not
   // carry thinking state). The model name is painted in the host's primary
   // blue (#4FA8FF), the suffix stays in default text color.
   const level = metrics && typeof metrics.thinkingLevel === 'string' ? metrics.thinkingLevel : null;
   let modelSeg = colorize(color, C.primary, String(payload.model));
-  if (layout !== 'compact' && level && level !== 'off') {
-    modelSeg += level === 'on' ? ' thinking' : ` thinking:${level}`;
+  if (level && level !== 'off') {
+    if (layout === 'compact') modelSeg += `:${level}`;
+    else modelSeg += level === 'on' ? ' thinking' : ` thinking:${level}`;
   }
   segs.push(modelSeg);
 
@@ -176,15 +178,17 @@ function buildSegments(layout, ctx) {
     }
   }
 
-  // Quota segments (whole section omitted when no cache yet)
+  // Quota segments (whole section omitted when no cache yet). Compact drops
+  // the bar and keeps pct + reset countdown; other tiers show bar + pct,
+  // and all tiers show the countdown when the reset time is known.
   if (quota) {
     for (const w of quota.windows || []) {
       const frac = w.used / w.limit;
-      let s = `${w.label} ${bar(frac, color)} ${pctOf(w.used, w.limit)}%`;
-      if (layout !== 'compact') {
-        const cd = formatCountdown(w.resetAt, now);
-        if (cd) s += ` ${cd}`;
-      }
+      let s = layout === 'compact'
+        ? `${w.label} ${pctOf(w.used, w.limit)}%`
+        : `${w.label} ${bar(frac, color)} ${pctOf(w.used, w.limit)}%`;
+      const cd = formatCountdown(w.resetAt, now);
+      if (cd) s += ` ${cd}`;
       segs.push(s);
     }
     if (layout !== 'compact' && quota.weekly) {
