@@ -44,11 +44,8 @@ function makeSession({ withPrefix = true, agents = ['main'] } = {}) {
 
 function makeState() {
   return {
-    v: 3,
+    v: 4,
     agents: {},
-    samples: [],
-    lastTtftMs: null,
-    lastSampleAt: null,
     thinkingLevel: null,
     goal: null,
   };
@@ -61,7 +58,7 @@ test('median of odd and even samples', () => {
   assert.equal(median([]), null);
 });
 
-test('processWireChunk computes TPS with timestamped samples', () => {
+test('processWireChunk computes TPS with per-agent timestamped samples', () => {
   const state = makeState();
   const lines = [
     '{"type":"other"}',
@@ -72,12 +69,17 @@ test('processWireChunk computes TPS with timestamped samples', () => {
     stepEnd({ output: 50, streamMs: 1000, ttftMs: 500 }),
   ].join('\n') + '\n';
   processWireChunk(state, lines, 'main');
-  assert.equal(state.samples.length, 2);
-  assert.ok(Math.abs(state.samples[0].v - 112 / 2.768) < 1e-9);
-  assert.equal(state.samples[1].v, 50);
-  assert.equal(state.samples[0].t, NOW);
-  assert.equal(state.lastTtftMs, 500);
-  assert.equal(state.lastSampleAt, NOW);
+  const bucket = state.agents.main;
+  assert.equal(bucket.samples.length, 2);
+  assert.ok(Math.abs(bucket.samples[0].v - 112 / 2.768) < 1e-9);
+  assert.equal(bucket.samples[1].v, 50);
+  assert.equal(bucket.samples[0].t, NOW);
+  assert.equal(bucket.lastTtftMs, 500);
+  assert.equal(bucket.lastSampleAt, NOW);
+  // buckets are per agent
+  processWireChunk(state, stepEnd({ output: 200, streamMs: 1000, ttftMs: 100 }) + '\n', 'agent-0');
+  assert.equal(state.agents.main.samples.length, 2);
+  assert.equal(state.agents['agent-0'].samples.length, 1);
 });
 
 test('processWireChunk tracks latest thinkingLevel from config.update', () => {
@@ -90,7 +92,7 @@ test('processWireChunk tracks latest thinkingLevel from config.update', () => {
   ].join('\n') + '\n';
   processWireChunk(state, lines, 'main');
   assert.equal(state.thinkingLevel, 'high');
-  assert.equal(state.samples.length, 1); // step.end still processed
+  assert.equal(state.agents.main.samples.length, 1); // step.end still processed
 });
 
 test('processWireChunk accepts the newer thinkingEffort key', () => {
@@ -221,7 +223,7 @@ test('getMetrics discards stale samples when a rotated file grows past the old o
   assert.equal(m.ttftMs, 500);
 });
 
-test('getMetrics pools step.end samples from subagent wires', () => {
+test('getMetrics aggregates active subagents: fleet total + per-agent average', () => {
   const { root, id, wires } = makeSession({ agents: ['main', 'agent-0', 'agent-1'] });
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   const opts = { sessionsRoot: root, stateDir };
@@ -231,15 +233,36 @@ test('getMetrics pools step.end samples from subagent wires', () => {
   fs.writeFileSync(wires['agent-1'], '{"type":"metadata","protocol_version":"1.4"}\n');
 
   const m = getMetrics(id, opts);
-  assert.equal(m.tps, 200); // median(100 from main, 300 from agent-0)
-  // agent-0's wire is newer alphabetically-last processed sample wins TTFT;
-  // either way it must be fresh:
-  assert.ok(m.ttftMs === 900 || m.ttftMs === 400);
+  assert.equal(m.tps, 200);        // average: median(100, 300)
+  assert.equal(m.tpsTotal, 400);   // fleet total
+  assert.equal(m.activeAgents, 2);
+  assert.equal(m.ttftMs, 650);     // median across active agents: median(900, 400)
 
   // A subagent appearing later is picked up incrementally.
   fs.appendFileSync(wires['agent-1'], stepEnd({ output: 500, streamMs: 1000, ttftMs: 100 }) + '\n');
   const m2 = getMetrics(id, opts);
-  assert.equal(m2.tps, 300); // median(100, 300, 500)
+  assert.equal(m2.tps, 300);       // median(100, 300, 500)
+  assert.equal(m2.tpsTotal, 900);
+  assert.equal(m2.activeAgents, 3);
+  assert.equal(m2.ttftMs, 400);    // median(900, 400, 100)
+});
+
+test('getMetrics reports a single speed when only one agent is active', () => {
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir };
+  // agent-0's only sample is 5 minutes old: fresh enough for the window,
+  // but outside the 2min active window.
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 700, streamMs: 1000, ttftMs: 400, time: NOW - 5 * 60_000 }) + '\n',
+  );
+  fs.writeFileSync(wires.main, stepEnd({ output: 100, streamMs: 1000, ttftMs: 900 }) + '\n');
+  const m = getMetrics(id, opts);
+  assert.equal(m.tps, 100);        // only main is active
+  assert.equal(m.tpsTotal, null);  // no fleet display
+  assert.equal(m.activeAgents, 1);
+  assert.equal(m.ttftMs, 900);     // idle agent's TTFT excluded
 });
 
 test('getMetrics expires samples older than the freshness window (resume/idle)', () => {
@@ -327,7 +350,7 @@ test('getMetrics migrates legacy v2 state and backfills goal', () => {
   assert.equal(m.goal.objective, 'legacy');
   assert.equal(m.tps, null);                   // untimestamped legacy samples expire
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.v, 3);
+  assert.equal(state.v, 4);
   assert.equal(state.agents.main.offset, size); // legacy offset preserved as main's
 });
 
@@ -407,5 +430,8 @@ test('getMetrics returns nulls for unknown sessions', () => {
     sessionsRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-empty-')),
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-')),
   });
-  assert.deepEqual(m, { tps: null, ttftMs: null, thinkingLevel: null, goal: null, generatingSince: null });
+  assert.deepEqual(m, {
+    tps: null, tpsTotal: null, activeAgents: 0, ttftMs: null,
+    thinkingLevel: null, goal: null, generatingSince: null,
+  });
 });

@@ -10,13 +10,17 @@ const MIN_STREAM_MS = 50;
 // Speed samples expire: after a resume / idle gap / compaction the pre-gap
 // numbers describe a different workload and must not leak into the median.
 const SAMPLE_WINDOW_MS = 10 * 60 * 1000;
-// Bound the persisted sample array; only the freshest MAX_SAMPLES are used.
-const MAX_STORED_SAMPLES = 50;
+// An agent counts as active (for the swarm total/average) when it produced
+// a sample within this window or has a request in flight.
+const ACTIVE_WINDOW_MS = 2 * 60 * 1000;
+// Bound the persisted per-agent sample array; only the freshest MAX_SAMPLES
+// are used.
+const MAX_STORED_SAMPLES = 20;
 // Backfill scan version; bump when the config.update key set changes so
 // existing state files re-scan once (v2: added `thinkingEffort`).
 const THINKING_SCAN_V = 2;
-// State format version; v3: per-agent offsets + timestamped samples + goal.
-const STATE_V = 3;
+// State format version; v4: per-agent sample buckets (v3 pooled them).
+const STATE_V = 4;
 
 /**
  * Locate the session directory for a session id. The payload sessionId may
@@ -81,56 +85,91 @@ function statePathFor(sessionId, stateDir) {
   return path.join(stateDir, `metrics-${safe}.json`);
 }
 
-function emptyState() {
+function emptyAgent() {
   return {
-    v: STATE_V,
-    agents: {},
+    offset: 0,
+    fileId: null,
     samples: [],
     lastTtftMs: null,
     lastSampleAt: null,
     lastRequestAt: null,
     lastStepEndAt: null,
+  };
+}
+
+/** Normalize a persisted per-agent bucket in place. */
+function normAgent(a) {
+  if (!a || typeof a !== 'object') return emptyAgent();
+  if (typeof a.offset !== 'number') a.offset = 0;
+  if (typeof a.fileId !== 'string') a.fileId = null;
+  if (!Array.isArray(a.samples)) a.samples = [];
+  if (typeof a.lastTtftMs !== 'number') a.lastTtftMs = null;
+  if (typeof a.lastSampleAt !== 'number') a.lastSampleAt = null;
+  if (typeof a.lastRequestAt !== 'number') a.lastRequestAt = null;
+  if (typeof a.lastStepEndAt !== 'number') a.lastStepEndAt = null;
+  return a;
+}
+
+function emptyState() {
+  return {
+    v: STATE_V,
+    agents: {},
     thinkingLevel: null,
     goal: null,
   };
 }
 
 /**
- * Load the persisted state, migrating pre-v3 files: the legacy single-wire
- * offset becomes agents.main, and untimestamped numeric samples are kept
- * with t=0 so they expire immediately (they predate the window clock).
+ * Load the persisted state, migrating older formats:
+ * - v1/v2: single-wire offset becomes agents.main; untimestamped numeric
+ *   samples are kept with t=0 so they expire immediately.
+ * - v3: pooled top-level samples/counters move into the main bucket.
+ * Pre-v3 files also get a one-time goal backfill flag because their main
+ * offset already sits past earlier goal.* events.
  */
 function loadState(statePath) {
   try {
     const s = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-    if (s && typeof s === 'object') {
-      if ((s.v ?? 0) >= STATE_V && s.agents && typeof s.agents === 'object') {
-        if (!Array.isArray(s.samples)) s.samples = [];
-        s.lastRequestAt = typeof s.lastRequestAt === 'number' ? s.lastRequestAt : null;
-        s.lastStepEndAt = typeof s.lastStepEndAt === 'number' ? s.lastStepEndAt : null;
-        return s;
+    if (!s || typeof s !== 'object') return emptyState();
+    if ((s.v ?? 0) >= STATE_V && s.agents && typeof s.agents === 'object') {
+      for (const name of Object.keys(s.agents)) s.agents[name] = normAgent(s.agents[name]);
+      return s;
+    }
+    const migrated = emptyState();
+    if ((s.v ?? 0) >= 3 && s.agents && typeof s.agents === 'object') {
+      // v3: per-agent offsets already fine; pooled top-level samples and
+      // counters move into the main bucket without touching its offset.
+      for (const [name, a] of Object.entries(s.agents)) {
+        migrated.agents[name] = normAgent(a);
       }
-      // legacy migration (v1/v2)
-      const migrated = emptyState();
+      const m = migrated.agents.main ?? (migrated.agents.main = emptyAgent());
+      if (Array.isArray(s.samples)) m.samples = s.samples;
+      if (typeof s.lastTtftMs === 'number') m.lastTtftMs = s.lastTtftMs;
+      if (typeof s.lastSampleAt === 'number') m.lastSampleAt = s.lastSampleAt;
+      if (typeof s.lastRequestAt === 'number') m.lastRequestAt = s.lastRequestAt;
+      if (typeof s.lastStepEndAt === 'number') m.lastStepEndAt = s.lastStepEndAt;
+    } else {
+      // v1/v2 legacy: single-wire offset becomes the main bucket;
+      // untimestamped numeric samples get t=0 and expire immediately.
+      const main = emptyAgent();
       if (typeof s.offset === 'number' && s.offset > 0) {
-        migrated.agents.main = { offset: s.offset, fileId: s.fileId ?? null };
+        main.offset = s.offset;
+        main.fileId = typeof s.fileId === 'string' ? s.fileId : null;
+        migrated.agents.main = main;
       }
       if (Array.isArray(s.samples)) {
-        migrated.samples = s.samples
-          .filter((v) => typeof v === 'number')
-          .map((v) => ({ v, t: 0 }));
+        main.samples = s.samples.filter((v) => typeof v === 'number').map((v) => ({ v, t: 0 }));
       }
-      migrated.lastTtftMs = typeof s.lastTtftMs === 'number' ? s.lastTtftMs : null;
-      migrated.lastSampleAt = null;
-      migrated.thinkingLevel = typeof s.thinkingLevel === 'string' ? s.thinkingLevel : null;
-      if (typeof s.thinkingScanV === 'number') migrated.thinkingScanV = s.thinkingScanV;
-      migrated.legacyV = s.v ?? 0;
-      return migrated;
+      main.lastTtftMs = typeof s.lastTtftMs === 'number' ? s.lastTtftMs : null;
+      migrated.legacyGoalBackfill = true;
     }
+    migrated.thinkingLevel = typeof s.thinkingLevel === 'string' ? s.thinkingLevel : null;
+    if (typeof s.thinkingScanV === 'number') migrated.thinkingScanV = s.thinkingScanV;
+    if (s.goal && typeof s.goal === 'object') migrated.goal = s.goal;
+    return migrated;
   } catch {
-    // fall through
+    return emptyState();
   }
-  return emptyState();
 }
 
 function saveState(statePath, state) {
@@ -148,13 +187,17 @@ function saveState(statePath, state) {
  * Feed a text chunk of wire.jsonl lines into the metrics state.
  * Only complete lines (terminated by \n) are consumed; the caller tracks
  * the byte offset so an incomplete tail is retried next run.
- * Speed samples are timestamped with the wire row's own `time`, so samples
- * from before a resume/idle gap can be expired at read time.
+ * Speed samples are timestamped with the wire row's own `time` and bucketed
+ * per agent, so swarm totals/averages can be computed per agent and stale
+ * samples (resume/idle/compaction) can be expired at read time.
  * @param {object} state mutated in place
  * @param {string} text complete lines only
  * @param {string} [agent] which agent's wire this chunk comes from
  */
 export function processWireChunk(state, text, agent = 'main') {
+  if (!state.agents || typeof state.agents !== 'object') state.agents = {};
+  const bucket = normAgent(state.agents[agent]);
+  state.agents[agent] = bucket;
   for (const line of text.split('\n')) {
     if (!line) continue;
     let row;
@@ -167,16 +210,16 @@ export function processWireChunk(state, text, agent = 'main') {
     if (row?.type === 'llm.request') {
       // A loop request without a later step.end means the model is
       // generating right now. Compaction requests never produce a
-      // step.end, so they must not mark the session as generating.
-      if (row.kind !== 'compaction' && (state.lastRequestAt === null || rowTime > state.lastRequestAt)) {
-        state.lastRequestAt = rowTime;
+      // step.end, so they must not mark the agent as generating.
+      if (row.kind !== 'compaction' && (bucket.lastRequestAt === null || rowTime > bucket.lastRequestAt)) {
+        bucket.lastRequestAt = rowTime;
       }
       continue;
     }
     if (row?.type === 'full_compaction.complete') {
       // Ends a compaction request's in-flight window (see above).
-      if (state.lastStepEndAt === null || rowTime > state.lastStepEndAt) {
-        state.lastStepEndAt = rowTime;
+      if (bucket.lastStepEndAt === null || rowTime > bucket.lastStepEndAt) {
+        bucket.lastStepEndAt = rowTime;
       }
       continue;
     }
@@ -232,23 +275,23 @@ export function processWireChunk(state, text, agent = 'main') {
     if (row?.type !== 'context.append_loop_event') continue;
     const ev = row.event;
     if (!ev || ev.type !== 'step.end') continue;
-    if (state.lastStepEndAt === null || rowTime > state.lastStepEndAt) {
-      state.lastStepEndAt = rowTime;
+    if (bucket.lastStepEndAt === null || rowTime > bucket.lastStepEndAt) {
+      bucket.lastStepEndAt = rowTime;
     }
     if (typeof ev.llmFirstTokenLatencyMs === 'number' && ev.llmFirstTokenLatencyMs >= 0) {
-      // Chunks are processed main-first then subagents; an older subagent
-      // sample must not overwrite a fresher TTFT.
-      if (state.lastSampleAt === null || rowTime >= state.lastSampleAt) {
-        state.lastTtftMs = ev.llmFirstTokenLatencyMs;
-        state.lastSampleAt = rowTime;
+      // Chunks arrive oldest-first within a wire, but guard anyway: an
+      // older sample must never overwrite a fresher TTFT.
+      if (bucket.lastSampleAt === null || rowTime >= bucket.lastSampleAt) {
+        bucket.lastTtftMs = ev.llmFirstTokenLatencyMs;
+        bucket.lastSampleAt = rowTime;
       }
     }
     const out = ev.usage && typeof ev.usage.output === 'number' ? ev.usage.output : 0;
     const streamMs = typeof ev.llmStreamDurationMs === 'number' ? ev.llmStreamDurationMs : 0;
     if (out > 0 && streamMs >= MIN_STREAM_MS) {
-      state.samples.push({ v: out / (streamMs / 1000), t: rowTime });
-      if (state.samples.length > MAX_STORED_SAMPLES) {
-        state.samples.splice(0, state.samples.length - MAX_STORED_SAMPLES);
+      bucket.samples.push({ v: out / (streamMs / 1000), t: rowTime });
+      if (bucket.samples.length > MAX_STORED_SAMPLES) {
+        bucket.samples.splice(0, bucket.samples.length - MAX_STORED_SAMPLES);
       }
     }
   }
@@ -283,29 +326,38 @@ function backfillScan(state, wirePath, substr) {
 
 /**
  * Incrementally read the session's wire logs (main agent + all subagents)
- * and return current speed metrics, thinking level and goal state.
- * Per-agent byte offsets are persisted so each 1s run only parses newly
- * appended bytes. Subagent step.end samples pool with the main agent's —
- * parallel agents contribute real generated tokens too. Samples older than
- * SAMPLE_WINDOW_MS are dropped at read time, so a resumed session does not
- * inherit speed numbers from its previous life.
+ * and return speed metrics, thinking level and goal state.
+ *
+ * Samples are bucketed per agent. Agents with a request in flight or a
+ * sample newer than ACTIVE_WINDOW_MS count as active: when several are
+ * active (swarm/subagent runs) the result carries the per-agent average
+ * (`tps`), the fleet total (`tpsTotal`) and the head count
+ * (`activeAgents`); TTFT is the median across active agents so one stuck
+ * agent cannot poison the display. Samples older than SAMPLE_WINDOW_MS are
+ * dropped at read time, so a resumed session does not inherit speed
+ * numbers from its previous life.
  * @param {string} sessionId
  * @param {object} [opts]
- * @returns {{tps: number|null, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, generatingSince: number|null}}
+ * @returns {{tps: number|null, tpsTotal: number|null, activeAgents: number, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, generatingSince: number|null}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
   stateDir = HUD_DIR,
   now = Date.now(),
 } = {}) {
-  const empty = { tps: null, ttftMs: null, thinkingLevel: null, goal: null, generatingSince: null };
+  const empty = {
+    tps: null, tpsTotal: null, activeAgents: 0, ttftMs: null,
+    thinkingLevel: null, goal: null, generatingSince: null,
+  };
   try {
     if (!sessionId) return empty;
     const sessionDir = findSessionDir(sessionId, sessionsRoot);
     if (!sessionDir) return empty;
     const statePath = statePathFor(sessionId, stateDir);
     const state = loadState(statePath);
-    let stateChanged = state.legacyV !== undefined;
+    // Migrations in loadState are idempotent, so no forced save here; any
+    // real change below (new agents, offsets, pruning) persists the state.
+    let stateChanged = false;
 
     // Enumerate every agent wire (main + agent-N subagents).
     const agentsDir = path.join(sessionDir, 'agents');
@@ -357,30 +409,29 @@ export function getMetrics(sessionId, {
 
     // One-time goal backfill for states migrated from pre-v3: their main
     // offset already sits past earlier goal.create/goal.update events.
-    if (state.legacyV !== undefined && mainWire) {
+    if (state.legacyGoalBackfill && mainWire) {
       backfillScan(state, mainWire.path, '"goal.');
     }
-    delete state.legacyV;
+    delete state.legacyGoalBackfill;
 
     for (const { agent, path: wirePath } of wires) {
       const stat = fs.statSync(wirePath);
       const size = stat.size;
       const fileId = `${stat.dev}:${stat.ino}`;
-      let a = state.agents[agent];
-      if (!a || typeof a.offset !== 'number') {
-        a = state.agents[agent] = { offset: 0, fileId };
-        stateChanged = true;
-      }
+      const isNew = !state.agents[agent];
+      const a = normAgent(state.agents[agent]);
+      state.agents[agent] = a;
+      if (isNew) stateChanged = true;
       // A smaller file was truncated in place; a different device/inode
       // means rotation/replacement. Old samples describe a different
       // stream, so discard them together with this agent's offset.
       if (a.offset > size || (a.fileId && a.fileId !== fileId)) {
         a.offset = 0;
-        state.samples = [];
-        state.lastTtftMs = null;
-        state.lastSampleAt = null;
-        state.lastRequestAt = null;
-        state.lastStepEndAt = null;
+        a.samples = [];
+        a.lastTtftMs = null;
+        a.lastSampleAt = null;
+        a.lastRequestAt = null;
+        a.lastStepEndAt = null;
         stateChanged = true;
       }
       if (a.fileId !== fileId) {
@@ -407,29 +458,54 @@ export function getMetrics(sessionId, {
       }
     }
 
-    // Drop samples outside the freshness window (resume/idle/compaction
-    // boundaries) and keep the newest MAX_SAMPLES for the median.
-    const fresh = state.samples.filter((s) => s && typeof s.v === 'number' && s.t >= now - SAMPLE_WINDOW_MS);
-    const windowed = fresh.slice(-MAX_SAMPLES);
-    if (fresh.length !== state.samples.length) stateChanged = true;
-    state.samples = fresh;
+    // Aggregate per agent: expire samples outside the freshness window,
+    // then split agents into active (in-flight request or recent sample)
+    // and idle.
+    const activeSpeeds = [];
+    const activeTtfts = [];
+    const freshSpeeds = [];
+    let generatingSince = null;
+    let activeAgents = 0;
+    for (const a of Object.values(state.agents)) {
+      const fresh = a.samples.filter((s) => s && typeof s.v === 'number' && s.t >= now - SAMPLE_WINDOW_MS);
+      if (fresh.length !== a.samples.length) {
+        a.samples = fresh;
+        stateChanged = true;
+      }
+      const speed = median(fresh.slice(-MAX_SAMPLES).map((s) => s.v));
+      if (speed !== null) freshSpeeds.push(speed);
+      const generating = a.lastRequestAt !== null
+        && now - a.lastRequestAt < SAMPLE_WINDOW_MS
+        && (a.lastStepEndAt === null || a.lastRequestAt > a.lastStepEndAt);
+      const recent = fresh.length > 0 && fresh[fresh.length - 1].t >= now - ACTIVE_WINDOW_MS;
+      if (generating && (generatingSince === null || a.lastRequestAt > generatingSince)) {
+        generatingSince = a.lastRequestAt;
+      }
+      if (!generating && !recent) continue;
+      activeAgents += 1;
+      if (speed !== null) activeSpeeds.push(speed);
+      if (a.lastSampleAt !== null && a.lastSampleAt >= now - SAMPLE_WINDOW_MS && a.lastTtftMs !== null) {
+        activeTtfts.push(a.lastTtftMs);
+      }
+    }
 
     if (stateChanged) saveState(statePath, state);
 
-    const ttftFresh = state.lastSampleAt !== null && state.lastSampleAt >= now - SAMPLE_WINDOW_MS;
-    // A loop request newer than the last completed step means the model is
-    // generating right now; the renderer ticks the elapsed time every
-    // refresh so the speed segment stays live during long steps. The window
-    // cap guards against an aborted generation that left no step.end.
-    const generating = state.lastRequestAt !== null
-      && now - state.lastRequestAt < SAMPLE_WINDOW_MS
-      && (state.lastStepEndAt === null || state.lastRequestAt > state.lastStepEndAt);
+    // Active fleet: average + total. Idle: per-agent median of whatever is
+    // still fresh. TTFT is the median across active agents (one stuck
+    // agent, e.g. a provider retry with a 10min first token, cannot poison
+    // the display); fall back to null when nothing active measured one.
+    const tpsAvg = median(activeSpeeds.length ? activeSpeeds : freshSpeeds);
     return {
-      tps: median(windowed.map((s) => s.v)),
-      ttftMs: ttftFresh ? state.lastTtftMs ?? null : null,
+      tps: tpsAvg,
+      tpsTotal: activeAgents > 1 && activeSpeeds.length
+        ? activeSpeeds.reduce((sum, v) => sum + v, 0)
+        : null,
+      activeAgents,
+      ttftMs: median(activeTtfts),
       thinkingLevel: state.thinkingLevel ?? null,
       goal: state.goal && state.goal.status ? state.goal : null,
-      generatingSince: generating ? state.lastRequestAt : null,
+      generatingSince,
     };
   } catch {
     return empty;

@@ -92,7 +92,7 @@ Kimi Code 的 `~/.kimi-code/tui.toml` 支持 `[status_line]` 自定义命令：
 | 段 | 来源 |
 |---|---|
 | 模型 / 分支 / Context | stdin 快照 + `git status --porcelain`（150ms 超时） |
-| TPS / TTFT | 增量解析会话目录下**所有** `agents/*/wire.jsonl`（main + 全部 subagent；旧版 `ses_<id>` 前缀兼容）的 `step.end` 事件，样本带事件时间戳，只取最近 10 分钟内的最多 5 个做中位数——resume 接续、长时间空闲、compact 之后不会混入陈旧样本；TTFT 取最新样本。模型正在生成时（`llm.request` 无后续 `step.end`，compaction 请求除外）速度段显示每秒跳动的 `gen Ns` 实时计时（per-agent byte offset 存 `~/.kimi-code-hud/metrics-<sessionId>.json`，每秒只读新增字节） |
+| TPS / TTFT | 增量解析会话目录下**所有** `agents/*/wire.jsonl`（main + 全部 subagent；旧版 `ses_<id>` 前缀兼容）的 `step.end` 事件，样本带事件时间戳并按 agent 分桶，只取最近 10 分钟内的最多 5 个做中位数——resume 接续、长时间空闲、compact 之后不会混入陈旧样本。多个 agent 同时活跃（swarm/subagent，2 分钟内有样本或有请求在飞）时显示**舰队总速度 + agent 数 + 平均速度**（`⚡ 305 t/s (12 agents @25)`），TTFT 取活跃 agent 的中位数（单个卡住的 agent 不会污染显示）。模型正在生成时（`llm.request` 无后续 `step.end`，compaction 请求除外）速度段显示每秒跳动的 `gen Ns` 实时计时（per-agent byte offset 存 `~/.kimi-code-hud/metrics-<sessionId>.json`，每秒只读新增字节） |
 | goal 徽章 | 主 agent wire 的 `goal.create` / `goal.update` / `goal.clear` 事件增量重建 |
 | 配额（5h/wk） | `GET https://api.kimi.com/coding/v1/usages`，60 秒 TTL 缓存于 `~/.kimi-code-hud/quota.json`，过期时热路径用过期缓存渲染并 spawn 后台刷新，绝不阻塞 |
 

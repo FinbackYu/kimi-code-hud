@@ -222,20 +222,27 @@ function buildSegments(layout, ctx) {
   // While a request is in flight (generatingSince set) the segment swaps
   // the static last-step TTFT for a live "gen <elapsed>" ticker — step.end
   // samples only land when a step finishes, so without it the number looks
-  // frozen during long generations.
+  // frozen during long generations. With several active agents
+  // (swarm/subagents) show the fleet total plus "N agents @avg".
   const genSince = metrics && typeof metrics.generatingSince === 'number' ? metrics.generatingSince : null;
+  const multi = metrics && typeof metrics.tpsTotal === 'number' && metrics.activeAgents > 1;
+  const gen = genSince !== null ? formatElapsed(now - genSince) : null;
   if (metrics && typeof metrics.tps === 'number') {
-    const tps = Math.round(metrics.tps);
-    const gen = genSince !== null ? formatElapsed(now - genSince) : null;
+    const avg = Math.round(metrics.tps);
+    const base = multi
+      ? `⚡ ${Math.round(metrics.tpsTotal)} t/s (${metrics.activeAgents} agents @${avg})`
+      : `⚡ ${avg} t/s`;
     if (layout === 'compact') {
-      segs.push(`⚡ ${tps}${gen ? ` gen ${gen}` : ''}`);
+      const head = multi ? `⚡ ${Math.round(metrics.tpsTotal)} (${metrics.activeAgents}@${avg})` : `⚡ ${avg}`;
+      segs.push(`${head}${gen ? ` gen ${gen}` : ''}`);
     } else {
       const live = gen ? ` · gen ${gen}` : null;
       const ttft = live === null ? formatTtft(metrics.ttftMs) : null;
-      segs.push(`⚡ ${tps} t/s${live ?? ''}${ttft ? ` · TTFT ${ttft}` : ''}`);
+      segs.push(`${base}${live ?? ''}${ttft ? ` · TTFT ${ttft}` : ''}`);
     }
   } else if (genSince !== null) {
-    segs.push(`⚡ gen ${formatElapsed(now - genSince)}`);
+    const n = metrics && metrics.activeAgents > 1 ? ` (${metrics.activeAgents} agents)` : '';
+    segs.push(`⚡ gen ${gen}${n}`);
   }
 
   // Quota segments (whole section omitted when no cache yet). Compact drops

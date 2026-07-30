@@ -214,6 +214,26 @@ test('speed segment ticks live while generating, static TTFT when idle', () => {
   assert.ok(fresh.includes('⚡ gen 3s'));
 });
 
+test('swarm speed shows fleet total with per-agent average', () => {
+  const swarm = { tps: 25, tpsTotal: 305, activeAgents: 12, ttftMs: 1300 };
+  const [line] = renderHud(baseCtx({ metrics: swarm }));
+  assert.ok(line.includes('⚡ 305 t/s (12 agents @25) · TTFT 1.3s'));
+
+  const [gen] = renderHud(baseCtx({ metrics: { ...swarm, generatingSince: NOW - 3000 } }));
+  assert.ok(gen.includes('⚡ 305 t/s (12 agents @25) · gen 3s'));
+
+  const [compact] = renderHud(baseCtx({ layout: 'compact', metrics: swarm }));
+  assert.ok(compact.includes('⚡ 305 (12@25)'));
+
+  // single active agent: no fleet decoration
+  const solo = { tps: 47, tpsTotal: null, activeAgents: 1, ttftMs: 1300 };
+  assert.ok(renderHud(baseCtx({ metrics: solo }))[0].includes('⚡ 47 t/s · TTFT 1.3s'));
+
+  // no samples yet but a swarm is in flight: ticker carries the head count
+  const [fresh] = renderHud(baseCtx({ metrics: { tps: null, tpsTotal: null, activeAgents: 5, generatingSince: NOW - 3000 } }));
+  assert.ok(fresh.includes('⚡ gen 3s (5 agents)'));
+});
+
 test('ctx pct segment is usage-graded and omitted without any context data', () => {
   const [hot] = renderHud(baseCtx({
     color: true,
