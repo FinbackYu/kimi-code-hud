@@ -44,3 +44,19 @@ test('uninstall on a file without the section is a no-op', () => {
   const input = '[theme]\nname = "dark"\n';
   assert.equal(removeStatusLineCommand(input, CMD), input);
 });
+
+test('uninstall drops a trailing section left empty', () => {
+  const input = `[editor]\ncommand = ""\n\n[status_line]\ncommand = "${CMD}"\n`;
+  const out = removeStatusLineCommand(input, CMD);
+  assert.equal(out, '[editor]\ncommand = ""\n');
+});
+
+test('uninstall drops a middle section left empty, keeping neighbours', () => {
+  const input = `[theme]\nname = "dark"\n\n[status_line]\ncommand = "${CMD}"\n\n[other]\nx = 1\n`;
+  const out = removeStatusLineCommand(input, CMD);
+  assert.equal(out, '[theme]\nname = "dark"\n\n[other]\nx = 1\n');
+});
+
+test('uninstall of the only content yields an empty file', () => {
+  assert.equal(removeStatusLineCommand(`[status_line]\ncommand = "${CMD}"\n`, CMD), '');
+});
