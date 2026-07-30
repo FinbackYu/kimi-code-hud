@@ -43,7 +43,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 ### Update
 
 - **Reinstall to update**: run `/plugins install https://github.com/FinbackYu/kimi-code-hud` again. The managed copy is replaced in place and the status line picks up the new version within ~1 second — no `/reload-tui` or new session needed.
-- **Update badge (self-hosted marketplace)**: run `/plugins marketplace https://raw.githubusercontent.com/FinbackYu/kimi-code-hud/main/marketplace.json` to browse the catalog; when the repo has published a newer release than your local install, the Installed tab shows an `update local → latest` badge — select it and press Enter to update. This command only affects the catalog for that browsing session and does not replace the official marketplace.
+- **Update badge (self-hosted marketplace)**: run `/plugins marketplace https://finbackyu.github.io/kimi-code-hud/marketplace.json` to browse the catalog; when the repo has published a newer release than your local install, the Installed tab shows an `update local → latest` badge — select it and press Enter to update. This command only affects the catalog for that browsing session and does not replace the official marketplace.
 
 ### Uninstall
 

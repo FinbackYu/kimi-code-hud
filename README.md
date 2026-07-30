@@ -43,7 +43,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 ### 更新
 
 - **重装即更新**：再跑一遍 `/plugins install https://github.com/FinbackYu/kimi-code-hud`。托管副本原地替换，状态栏约 1 秒内自动用上新版本，无需 `/reload-tui` 或新会话。
-- **更新徽章（自建 marketplace）**：运行 `/plugins marketplace https://raw.githubusercontent.com/FinbackYu/kimi-code-hud/main/marketplace.json` 打开目录；当仓库发布了比本地更新的 release 时，Installed 页会显示 `update 本地 → 最新` 徽章，选中按 Enter 即更新。该命令只影响本次浏览的目录来源，不替换官方 marketplace。
+- **更新徽章（自建 marketplace）**：运行 `/plugins marketplace https://finbackyu.github.io/kimi-code-hud/marketplace.json` 打开目录；当仓库发布了比本地更新的 release 时，Installed 页会显示 `update 本地 → 最新` 徽章，选中按 Enter 即更新。该命令只影响本次浏览的目录来源，不替换官方 marketplace。
 
 ### 卸载
 
