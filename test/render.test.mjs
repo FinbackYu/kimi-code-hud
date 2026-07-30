@@ -89,9 +89,9 @@ test('model thinking suffix from session thinkingLevel (normal and full)', () =>
   assert.ok(withLevel('max', 'full').startsWith('[manual] K3 thinking:max │'));
   assert.ok(withLevel('off', 'normal').startsWith('[manual] K3 │'));
   assert.ok(withLevel(null, 'normal').startsWith('[manual] K3 │'));
-  // compact keeps only ":<effort>" without the "thinking" label
-  assert.ok(withLevel('high', 'compact').startsWith('[manual] K3:high │'));
-  assert.ok(withLevel('on', 'compact').startsWith('[manual] K3:on │'));
+  // compact keeps only " <effort>" without the "thinking" label
+  assert.ok(withLevel('high', 'compact').startsWith('[manual] K3 high │'));
+  assert.ok(withLevel('on', 'compact').startsWith('[manual] K3 on │'));
   assert.ok(withLevel('off', 'compact').startsWith('[manual] K3 │'));
 });
 
