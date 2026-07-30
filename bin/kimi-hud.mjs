@@ -4,8 +4,8 @@
 // The host kills us after 300ms and falls back silently on any failure, so
 // every error path degrades quietly — never log, and never exit non-zero
 // except for one deliberate case: running from a disabled/removed plugin
-// managed copy, where a non-zero exit hands the line back to the builtin
-// status line (that is what makes /plugins disable work).
+// managed copy, where we strip our own [status_line] entry and exit
+// non-zero (that is what makes /plugins disable|remove work).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -162,9 +162,20 @@ async function main() {
   if (args.includes('--install')) { install(); return; }
   if (args.includes('--uninstall')) { uninstall(); return; }
   // Plugin on/off switch: when this script is the plugin managed copy and
-  // the plugin is disabled or removed, exit non-zero with no output so the
-  // host falls back to its builtin status line.
-  if (managedPluginDisabled(SCRIPT_PATH)) process.exit(1);
+  // the plugin is disabled or removed, hand the line back to the builtin
+  // status line. Exiting non-zero alone is not enough — the host's
+  // StatusLineCommandRunner keeps rendering the last good line as long as
+  // our command stays in tui.toml — so strip the entry ourselves; the next
+  // /reload-tui or restart then shows the builtin line. If the plugin is
+  // re-enabled, its SessionStart hook writes the entry back.
+  if (managedPluginDisabled(SCRIPT_PATH)) {
+    try {
+      const content = fs.readFileSync(TUI_TOML_PATH, 'utf8');
+      const next = removeStatusLineCommand(content, `node ${SCRIPT_PATH}`);
+      if (next !== content) fs.writeFileSync(TUI_TOML_PATH, next);
+    } catch { /* best effort */ }
+    process.exit(1);
+  }
   await render();
 }
 

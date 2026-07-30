@@ -26,7 +26,7 @@ In the Kimi Code TUI, run:
 ```
 
 - **Restart or start a new session** to activate: the plugin's `SessionStart` hook points `tui.toml`'s `[status_line]` at the plugin's managed copy (`~/.kimi-code/plugins/managed/kimi-code-hud/`) and repairs that entry on every session start;
-- Toggle: select it in the `/plugins` panel and press `Space`, or run `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`. After disabling or removing, the status line falls back to the built-in layout on the next refresh (within ~1s);
+- Toggle: select it in the `/plugins` panel and press `Space`, or run `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`. Within ~1s of disabling or removing, the managed copy strips its own `[status_line]` entry from `tui.toml` and stops rendering (the host replays the last custom frame, so `/reload-tui` or a new session is needed to see the built-in layout); when re-enabled, the SessionStart hook writes the entry back on the next session start;
 - If you already configured your own `[status_line]` command, the hook leaves it untouched.
 
 **Option 2: manual install (git checkout)**
@@ -46,7 +46,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 
 ### Uninstall
 
-Plugin install: `/plugins remove kimi-code-hud` (per upstream behavior the managed copy stays on disk, but with the install record gone the status line falls back to the built-in layout immediately).
+Plugin install: `/plugins remove kimi-code-hud` (per upstream behavior the managed copy stays on disk while the install record is deleted; the managed copy strips its own `tui.toml` entry on its next run, and `/reload-tui` or a new session brings back the built-in layout).
 
 Manual install:
 
@@ -78,7 +78,7 @@ Kimi Code's `~/.kimi-code/tui.toml` accepts a `[status_line]` custom command:
 
 - On each refresh (at most once per second) the host pipes a JSON snapshot to stdin (`model`, `cwd`, `gitBranch`, `permissionMode`, `planMode`, `contextTokens`, ...);
 - The **first line** of the command's stdout takes over footer line 1 (line 2 is always drawn by the host as `context: N%` and cannot be taken over);
-- The command must finish within **300ms**; on failure/timeout/empty output the host silently falls back to the built-in layout — so this script degrades silently on every error path and never logs anything. The single deliberate non-zero exit is when the script is the managed copy of a disabled/removed plugin, which hands the line back to the built-in layout (that is how the plugin on/off switch works).
+- The command must finish within **300ms**; on failure/timeout/empty output the host silently falls back to the built-in layout — so this script degrades silently on every error path and never logs anything. The single deliberate non-zero exit is when the script is the managed copy of a disabled/removed plugin: it strips its own `tui.toml` entry first, then exits non-zero (a bare non-zero exit is not enough — the host replays the last good frame as long as the entry remains), and `/reload-tui` or a new session restores the built-in layout (that is how the plugin on/off switch works).
 
 Data sources:
 
