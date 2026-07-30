@@ -36,7 +36,7 @@ git clone https://github.com/FinbackYu/kimi-code-hud ~/kimi-code-hud
 node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 ```
 
-`--install` 会先备份 `~/.kimi-code/tui.toml` 为 `tui.toml.<时间戳>.bak`，再在 `[status_line]` 段写入 `command = "node <绝对路径>"`（幂等，已有 `items` 会保留）。**重启 Kimi Code 或运行 `/reload-tui` 生效。**
+`--install` 会先备份 `~/.kimi-code/tui.toml` 为 `tui.toml.<时间戳>.bak`，再在 `[status_line]` 段写入 `command = "node <绝对路径>"`（幂等，已有 `items` 会保留）。同时向 `~/.kimi-code/config.toml` 追加一段受管 `SessionStart` hook（START/END 注释包裹，不碰其他 hooks 和设置）：宿主某些升级会重写 `tui.toml`、抹掉 `[status_line]`（0.30.0→0.31.0 实测发生），而 `config.toml` 的 hooks 在升级中保留，于是每次会话启动时 hook 都会自检并把条目修回。**重启 Kimi Code 或运行 `/reload-tui` 生效。**
 
 > 两种方式不要混用：插件启用期间，hook 会把 `tui.toml` 指向托管副本。想回到手动安装，先 `/plugins remove kimi-code-hud`，再重新 `--install`。
 
@@ -50,7 +50,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
 ```
 
-同样先备份，然后移除 `[status_line]` 中本工具的 `command` 行。
+同样先备份，然后移除 `[status_line]` 中本工具的 `command` 行，并一并移除 `config.toml` 里的自检 hook 块。
 
 ### 配置
 

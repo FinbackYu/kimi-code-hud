@@ -36,7 +36,7 @@ git clone https://github.com/FinbackYu/kimi-code-hud ~/kimi-code-hud
 node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 ```
 
-`--install` backs up `~/.kimi-code/tui.toml` to `tui.toml.<timestamp>.bak`, then writes `command = "node <abs path>"` into `[status_line]` (idempotent; existing `items` are preserved). **Restart Kimi Code or run `/reload-tui` to apply.**
+`--install` backs up `~/.kimi-code/tui.toml` to `tui.toml.<timestamp>.bak`, then writes `command = "node <abs path>"` into `[status_line]` (idempotent; existing `items` are preserved). It also appends a managed `SessionStart` hook block to `~/.kimi-code/config.toml` (wrapped in START/END comments, leaving other hooks and settings alone): some host upgrades rewrite `tui.toml` and wipe `[status_line]` (observed on 0.30.0→0.31.0), while config.toml hooks survive upgrades, so on every session start the hook self-checks and repairs the entry. **Restart Kimi Code or run `/reload-tui` to apply.**
 
 > Do not mix the two: while the plugin is enabled, its hook points `tui.toml` at the managed copy. To go back to a manual install, `/plugins remove kimi-code-hud` first, then re-run `--install`.
 
@@ -50,7 +50,7 @@ Manual install:
 node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
 ```
 
-Backs up first, then removes this tool's `command` line from `[status_line]`.
+Backs up first, then removes this tool's `command` line from `[status_line]` and the self-heal hook block from `config.toml`.
 
 ### Configuration
 
