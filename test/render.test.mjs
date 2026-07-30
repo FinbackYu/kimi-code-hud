@@ -127,11 +127,16 @@ test('width defense downgrades full -> compact', () => {
   assert.ok(!line.includes('v0.31.0')); // downgraded away from full
 });
 
-test('color badges use bright red/yellow', () => {
+test('color badges: yolo yellow, auto bright red, plan bright yellow', () => {
   const [line] = renderHud(baseCtx({
     color: true,
     payload: basePayload({ permissionMode: 'yolo', planMode: true }),
   }));
-  assert.ok(line.includes('\x1b[91m[yolo]\x1b[0m'));
+  assert.ok(line.includes('\x1b[33m[yolo]\x1b[0m'));
   assert.ok(line.includes('\x1b[93m[plan]\x1b[0m'));
+  const [auto] = renderHud(baseCtx({
+    color: true,
+    payload: basePayload({ permissionMode: 'auto' }),
+  }));
+  assert.ok(auto.includes('\x1b[91m[auto]\x1b[0m'));
 });

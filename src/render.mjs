@@ -85,8 +85,8 @@ function stripAnsi(s) {
 
 function badges(payload, color) {
   const out = [];
-  if (payload.permissionMode === 'yolo') out.push(colorize(color, C.brightRed, '[yolo]'));
-  else if (payload.permissionMode === 'auto') out.push(colorize(color, C.brightYellow, '[auto]'));
+  if (payload.permissionMode === 'yolo') out.push(colorize(color, C.yellow, '[yolo]'));
+  else if (payload.permissionMode === 'auto') out.push(colorize(color, C.brightRed, '[auto]'));
   if (payload.planMode) out.push(colorize(color, C.brightYellow, '[plan]'));
   return out;
 }
