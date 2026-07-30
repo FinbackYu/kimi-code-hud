@@ -15,22 +15,6 @@ K3 thinking: high │ kimi-code-hud git:(main*) │ ⚡47 t/s · TTFT 1.3s │ 5
 
 ## 中文
 
-### 原理
-
-Kimi Code 的 `~/.kimi-code/tui.toml` 支持 `[status_line]` 自定义命令：
-
-- 每次刷新（每秒最多一次）宿主通过 stdin 传入一个 JSON 快照（model、cwd、gitBranch、permissionMode、planMode、contextTokens 等字段）；
-- 命令 stdout 的**第一行**接管底部 Footer 第一行（第二行固定由宿主绘制 `context: N%`，插件无法接管）；
-- 命令须在 **300ms** 内完成，失败/超时/空输出时宿主静默回退内置布局——所以本脚本对所有错误静默降级、绝不打印日志；唯一的非零退出是有意为之：当脚本是"已禁用/已移除插件的托管副本"时，非零退出让宿主回退内置布局（插件开关即由此实现）。
-
-三段数据来源：
-
-| 段 | 来源 |
-|---|---|
-| 模型 / 分支 / Context | stdin 快照 + `git status --porcelain`（150ms 超时） |
-| TPS / TTFT | 增量解析 `~/.kimi-code/sessions/*/session_<id>/agents/main/wire.jsonl`（旧版为 `ses_<id>`，两者都兼容）的 `step.end` 事件（byte offset 存 `~/.kimi-code-hud/metrics-<sessionId>.json`，每秒只读新增字节） |
-| 配额（5h/wk） | `GET https://api.kimi.com/coding/v1/usages`，60 秒 TTL 缓存于 `~/.kimi-code-hud/quota.json`，过期时热路径用过期缓存渲染并 spawn 后台刷新，绝不阻塞 |
-
 ### 安装
 
 要求 Node.js ≥ 18（用到全局 `fetch`），无 npm 依赖。
@@ -58,6 +42,18 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 
 > 两种方式不要混用：插件启用期间，hook 会把 `tui.toml` 指向托管副本。想回到手动安装，先 `/plugins remove kimi-code-hud`，再重新 `--install`。
 
+### 卸载
+
+插件方式安装：`/plugins remove kimi-code-hud`（按官方行为托管副本仍留在磁盘上，但安装记录已删除，状态栏会立即回退内置布局）。
+
+手动方式安装：
+
+```bash
+node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
+```
+
+同样先备份，然后移除 `[status_line]` 中本工具的 `command` 行。
+
 ### 配置
 
 - `~/.kimi-code-hud/config.json`：`{"layout":"compact"|"normal"|"full"}`（默认 `normal`）
@@ -78,17 +74,21 @@ full:    K3 thinking: high │ kimi-code-hud git:(main*) │ Context ███�
 - 柱条按用量分级着色：<60% 绿、<85% 黄、≥85% 红；
 - 输出超过 200 字符自动降级 full→normal→compact。
 
-### 卸载
+### 原理
 
-插件方式安装：`/plugins remove kimi-code-hud`（按官方行为托管副本仍留在磁盘上，但安装记录已删除，状态栏会立即回退内置布局）。
+Kimi Code 的 `~/.kimi-code/tui.toml` 支持 `[status_line]` 自定义命令：
 
-手动方式安装：
+- 每次刷新（每秒最多一次）宿主通过 stdin 传入一个 JSON 快照（model、cwd、gitBranch、permissionMode、planMode、contextTokens 等字段）；
+- 命令 stdout 的**第一行**接管底部 Footer 第一行（第二行固定由宿主绘制 `context: N%`，插件无法接管）；
+- 命令须在 **300ms** 内完成，失败/超时/空输出时宿主静默回退内置布局——所以本脚本对所有错误静默降级、绝不打印日志；唯一的非零退出是有意为之：当脚本是"已禁用/已移除插件的托管副本"时，非零退出让宿主回退内置布局（插件开关即由此实现）。
 
-```bash
-node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
-```
+三段数据来源：
 
-同样先备份，然后移除 `[status_line]` 中本工具的 `command` 行。
+| 段 | 来源 |
+|---|---|
+| 模型 / 分支 / Context | stdin 快照 + `git status --porcelain`（150ms 超时） |
+| TPS / TTFT | 增量解析 `~/.kimi-code/sessions/*/session_<id>/agents/main/wire.jsonl`（旧版为 `ses_<id>`，两者都兼容）的 `step.end` 事件（byte offset 存 `~/.kimi-code-hud/metrics-<sessionId>.json`，每秒只读新增字节） |
+| 配额（5h/wk） | `GET https://api.kimi.com/coding/v1/usages`，60 秒 TTL 缓存于 `~/.kimi-code-hud/quota.json`，过期时热路径用过期缓存渲染并 spawn 后台刷新，绝不阻塞 |
 
 ### 隐私与安全
 
@@ -107,22 +107,6 @@ access token 仅从 `~/.kimi-code/credentials/kimi-code.json` **本地读取**�
 ---
 
 ## English
-
-### How it works
-
-Kimi Code's `~/.kimi-code/tui.toml` accepts a `[status_line]` custom command:
-
-- On each refresh (at most once per second) the host pipes a JSON snapshot to stdin (`model`, `cwd`, `gitBranch`, `permissionMode`, `planMode`, `contextTokens`, ...);
-- The **first line** of the command's stdout takes over footer line 1 (line 2 is always drawn by the host as `context: N%` and cannot be taken over);
-- The command must finish within **300ms**; on failure/timeout/empty output the host silently falls back to the built-in layout — so this script degrades silently on every error path and never logs anything. The single deliberate non-zero exit is when the script is the managed copy of a disabled/removed plugin, which hands the line back to the built-in layout (that is how the plugin on/off switch works).
-
-Data sources:
-
-| Segment | Source |
-|---|---|
-| model / branch / Context | stdin snapshot + `git status --porcelain` (150ms timeout) |
-| TPS / TTFT | incremental parsing of `step.end` events in `~/.kimi-code/sessions/*/session_<id>/agents/main/wire.jsonl` (legacy `ses_<id>` also supported) (byte offset persisted in `~/.kimi-code-hud/metrics-<sessionId>.json`; only new bytes are read each second) |
-| quota (5h/wk) | `GET https://api.kimi.com/coding/v1/usages`, cached 60s in `~/.kimi-code-hud/quota.json`; when stale, the hot path renders the stale cache and spawns a detached background refresh — never blocking |
 
 ### Install
 
@@ -151,14 +135,6 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 
 > Do not mix the two: while the plugin is enabled, its hook points `tui.toml` at the managed copy. To go back to a manual install, `/plugins remove kimi-code-hud` first, then re-run `--install`.
 
-### Configuration
-
-- `~/.kimi-code-hud/config.json`: `{"layout":"compact"|"normal"|"full"}` (default `normal`)
-- `KIMI_HUD_LAYOUT` env var overrides the config file
-- `NO_COLOR` or `KIMI_HUD_NO_COLOR`: disable all ANSI colors
-
-The model suffix shows thinking state: ` thinking` for boolean models, ` thinking: <effort>` for effort-capable ones (the status-line payload does not carry it; prefer `config.update` events from the session log — only written after an in-session effort change — falling back to the `[thinking]` and model tables in `~/.kimi-code/config.toml`); compact omits the suffix. The normal layout drops the Context segment (the host's line 2 already shows the exact numbers); compact/full keep bar + percentage + token counts. See the layout table above. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast), `[manual]` (muted gray placeholder that keeps the left edge aligned) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is implemented but the host status-line payload does not expose `swarmMode` yet — it activates automatically once upstream adds it. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
-
 ### Uninstall
 
 Plugin install: `/plugins remove kimi-code-hud` (per upstream behavior the managed copy stays on disk, but with the install record gone the status line falls back to the built-in layout immediately).
@@ -170,6 +146,30 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
 ```
 
 Backs up first, then removes this tool's `command` line from `[status_line]`.
+
+### Configuration
+
+- `~/.kimi-code-hud/config.json`: `{"layout":"compact"|"normal"|"full"}` (default `normal`)
+- `KIMI_HUD_LAYOUT` env var overrides the config file
+- `NO_COLOR` or `KIMI_HUD_NO_COLOR`: disable all ANSI colors
+
+The model suffix shows thinking state: ` thinking` for boolean models, ` thinking: <effort>` for effort-capable ones (the status-line payload does not carry it; prefer `config.update` events from the session log — only written after an in-session effort change — falling back to the `[thinking]` and model tables in `~/.kimi-code/config.toml`); compact omits the suffix. The normal layout drops the Context segment (the host's line 2 already shows the exact numbers); compact/full keep bar + percentage + token counts. See the layout table above. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast), `[manual]` (muted gray placeholder that keeps the left edge aligned) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is implemented but the host status-line payload does not expose `swarmMode` yet — it activates automatically once upstream adds it. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
+
+### How it works
+
+Kimi Code's `~/.kimi-code/tui.toml` accepts a `[status_line]` custom command:
+
+- On each refresh (at most once per second) the host pipes a JSON snapshot to stdin (`model`, `cwd`, `gitBranch`, `permissionMode`, `planMode`, `contextTokens`, ...);
+- The **first line** of the command's stdout takes over footer line 1 (line 2 is always drawn by the host as `context: N%` and cannot be taken over);
+- The command must finish within **300ms**; on failure/timeout/empty output the host silently falls back to the built-in layout — so this script degrades silently on every error path and never logs anything. The single deliberate non-zero exit is when the script is the managed copy of a disabled/removed plugin, which hands the line back to the built-in layout (that is how the plugin on/off switch works).
+
+Data sources:
+
+| Segment | Source |
+|---|---|
+| model / branch / Context | stdin snapshot + `git status --porcelain` (150ms timeout) |
+| TPS / TTFT | incremental parsing of `step.end` events in `~/.kimi-code/sessions/*/session_<id>/agents/main/wire.jsonl` (legacy `ses_<id>` also supported) (byte offset persisted in `~/.kimi-code-hud/metrics-<sessionId>.json`; only new bytes are read each second) |
+| quota (5h/wk) | `GET https://api.kimi.com/coding/v1/usages`, cached 60s in `~/.kimi-code-hud/quota.json`; when stale, the hot path renders the stale cache and spawns a detached background refresh — never blocking |
 
 ### Privacy & security
 
