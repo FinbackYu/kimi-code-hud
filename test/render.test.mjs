@@ -55,21 +55,22 @@ test('formatCountdown formats d/h/m and reset states', () => {
   assert.equal(formatCountdown('garbage', NOW), null);
 });
 
-test('compact layout: model, git, speed, window pct + countdown', () => {
+test('compact layout: model, git, ctx pct, speed, window pct + countdown', () => {
   const [line] = renderHud(baseCtx({ layout: 'compact' }));
   const parts = line.split(' │ ');
   assert.equal(parts[0], '[manual] K3');
   assert.equal(parts[1], 'git:(main*)');
-  assert.equal(parts[2], '⚡ 47');
-  assert.equal(parts[3], '5h 31% ~2h18m');
-  assert.equal(parts.length, 4); // no Context, no project, no bar, no wk, no version
+  assert.equal(parts[2], 'ctx 62%');
+  assert.equal(parts[3], '⚡ 47');
+  assert.equal(parts[4], '5h 31% ~2h18m');
+  assert.equal(parts.length, 5); // no Context bar, no project, no wk, no version
 });
 
-test('normal layout drops Context, adds project, t/s+TTFT, countdown and weekly', () => {
+test('normal layout: compact ctx pct, project, t/s+TTFT, countdown and weekly', () => {
   const [line] = renderHud(baseCtx({ layout: 'normal' }));
   assert.equal(
     line,
-    '[manual] K3 │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m │ wk ██░░░░░░░░ 25%',
+    '[manual] K3 │ kimi-code-hud git:(main*) │ ctx 62% │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m │ wk ██░░░░░░░░ 25%',
   );
 });
 
@@ -106,7 +107,7 @@ test('badges for yolo/auto permission modes', () => {
 
 test('optional segments drop cleanly', () => {
   const [line] = renderHud(baseCtx({
-    payload: basePayload({ gitBranch: null }),
+    payload: basePayload({ gitBranch: null, contextTokens: undefined, maxContextTokens: undefined, contextUsage: undefined }),
     quota: null,
     metrics: { tps: null, ttftMs: null },
     gitDirty: false,
@@ -164,4 +165,64 @@ test('swarm badge renders in accent cyan when payload exposes swarmMode', () => 
   assert.ok(line.includes('\x1b[38;2;91;192;190m[swarm]\x1b[0m'));
   const [plain] = renderHud(baseCtx({ payload: basePayload({ swarmMode: true }) }));
   assert.ok(plain.startsWith('[manual] [swarm] '));
+});
+
+test('goal badge mirrors the host footer: status, wall clock, turns', () => {
+  const goal = { status: 'active', wallClockMs: 4 * 60_000, turnsUsed: 7, at: NOW - 60_000 };
+  const [line] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, goal } }));
+  // active: last event's 4m plus one elapsed minute since the event
+  assert.ok(line.startsWith('[manual] [goal ● active · 5m · 7 turns] '));
+});
+
+test('goal badge freezes the wall clock while paused and hides when done', () => {
+  const paused = { status: 'paused', wallClockMs: 4 * 60_000, turnsUsed: 1, at: NOW - 60_000 };
+  const [line] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, goal: paused } }));
+  assert.ok(line.startsWith('[manual] [goal ● paused · 4m · 1 turn] '));
+
+  for (const status of ['complete', 'stopped', null]) {
+    const [done] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, goal: { status, at: NOW } } }));
+    assert.ok(done.startsWith('[manual] K3'));
+    assert.ok(!done.includes('[goal'));
+  }
+});
+
+test('goal badge colors the status dot: green active, yellow paused, red blocked', () => {
+  const mk = (status) => renderHud(baseCtx({
+    color: true,
+    metrics: { tps: 47, ttftMs: 1300, goal: { status, wallClockMs: 0, at: NOW } },
+  }))[0];
+  assert.ok(mk('active').includes('\x1b[32m●\x1b[0m'));
+  assert.ok(mk('paused').includes('\x1b[93m●\x1b[0m'));
+  assert.ok(mk('blocked').includes('\x1b[91m●\x1b[0m'));
+  assert.ok(mk('active').includes('\x1b[90m[goal \x1b[0m'));
+});
+
+test('speed segment ticks live while generating, static TTFT when idle', () => {
+  const idle = { tps: 47, ttftMs: 1300, generatingSince: null };
+  assert.ok(renderHud(baseCtx({ metrics: idle }))[0].includes('⚡ 47 t/s · TTFT 1.3s'));
+
+  const gen = { tps: 47, ttftMs: 1300, generatingSince: NOW - 23_000 };
+  const [line] = renderHud(baseCtx({ metrics: gen }));
+  assert.ok(line.includes('⚡ 47 t/s · gen 23s'));
+  assert.ok(!line.includes('TTFT'));
+
+  const [compact] = renderHud(baseCtx({ layout: 'compact', metrics: gen }));
+  assert.ok(compact.includes('⚡ 47 gen 23s'));
+
+  // No samples yet but a request is in flight: ticker still shows.
+  const [fresh] = renderHud(baseCtx({ metrics: { tps: null, ttftMs: null, generatingSince: NOW - 3000 } }));
+  assert.ok(fresh.includes('⚡ gen 3s'));
+});
+
+test('ctx pct segment is usage-graded and omitted without any context data', () => {
+  const [hot] = renderHud(baseCtx({
+    color: true,
+    layout: 'normal',
+    payload: basePayload({ contextTokens: 230000, maxContextTokens: 262144 }),
+  }));
+  assert.ok(hot.includes('\x1b[31mctx 88%\x1b[0m')); // >=85% red
+  const [none] = renderHud(baseCtx({
+    payload: basePayload({ contextTokens: undefined, maxContextTokens: undefined, contextUsage: undefined }),
+  }));
+  assert.ok(!none.includes('ctx'));
 });

@@ -78,6 +78,18 @@ function formatTtft(ms) {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
+/** Elapsed wall-clock for the goal badge: "45s" / "4m" / "1h12m" / "2d3h". */
+function formatElapsed(ms) {
+  if (typeof ms !== 'number' || ms < 0) return '0s';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const mins = Math.floor(s / 60);
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h${mins % 60}m`;
+  return `${Math.floor(h / 24)}d${h % 24}h`;
+}
+
 function pctOf(used, limit) {
   return Math.round((used / limit) * 100);
 }
@@ -96,7 +108,7 @@ function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-function badges(payload, color) {
+function badges(payload, color, goal, now) {
   const out = [];
   // Host defaults render auto/yolo in warning amber and plan in primary
   // blue; auto keeps bright red here per user preference to stay distinct.
@@ -109,15 +121,54 @@ function badges(payload, color) {
   // The status-line payload does not carry swarmMode yet; rendered as soon
   // as the host exposes it (accent cyan, same as the built-in footer).
   if (payload.swarmMode) out.push(colorize(color, C.accent, '[swarm]'));
+  // Goal badge, mirroring the host's formatGoalBadge. The payload has no
+  // goal fields either, so metrics.mjs reconstructs this from the main
+  // wire's goal.update events. While active the wall clock keeps running
+  // between events, so extrapolate from the last status event's timestamp.
+  if (goal && (goal.status === 'active' || goal.status === 'paused' || goal.status === 'blocked')) {
+    const dot = goal.status === 'active' ? C.green : goal.status === 'paused' ? C.brightYellow : C.brightRed;
+    let wall = typeof goal.wallClockMs === 'number' ? goal.wallClockMs : 0;
+    if (goal.status === 'active' && typeof goal.at === 'number') {
+      wall += Math.max(0, now - goal.at);
+    }
+    const labelParts = [`${goal.status} · ${formatElapsed(wall)}`];
+    if (typeof goal.turnsUsed === 'number') {
+      labelParts.push(`${goal.turnsUsed} ${goal.turnsUsed === 1 ? 'turn' : 'turns'}`);
+    }
+    out.push(
+      colorize(color, C.muted, '[goal ')
+      + colorize(color, dot, '●')
+      + colorize(color, C.muted, ` ${labelParts.join(' · ')}]`),
+    );
+  }
   return out;
 }
 
 /**
+ * Context usage fraction + whether exact token counts are available.
+ * @returns {{frac: number, hasCounts: boolean}|null}
+ */
+function contextInfo(payload) {
+  if (
+    typeof payload.contextTokens === 'number'
+    && typeof payload.maxContextTokens === 'number'
+    && payload.maxContextTokens > 0
+  ) {
+    return { frac: payload.contextTokens / payload.maxContextTokens, hasCounts: true };
+  }
+  if (typeof payload.contextUsage === 'number') {
+    return { frac: payload.contextUsage, hasCounts: false };
+  }
+  return null;
+}
+
+/**
  * Build the segment list for one layout tier.
- * compact: model <effort> │ git:(branch) │ ⚡tps │ window pct+countdown
+ * compact: model <effort> │ git:(branch) │ ctx pct │ ⚡tps │ window pct+countdown
  * normal:  + project prefix, thinking suffix, t/s+TTFT, bars, weekly
- * full:    + Context segment, weekly countdown, version
- * (Context only in full — the host's line 2 already shows the numbers)
+ * full:    + Context bar with token counts, weekly countdown, version
+ * (Every tier shows ctx% on line 1 — the host's line 2 is right-aligned
+ * and easy to miss; line 2 keeps the exact token numbers.)
  */
 function buildSegments(layout, ctx) {
   const { payload, quota, metrics, gitDirty, color, now } = ctx;
@@ -149,35 +200,42 @@ function buildSegments(layout, ctx) {
     segs.push(project);
   }
 
-  // Context usage: bar + exact percentage + token counts. Only full shows
-  // it; compact/normal leave the exact numbers to the host's line 2.
-  if (layout === 'full') {
-    let ctxFrac = 0;
-    const hasCounts =
-      typeof payload.contextTokens === 'number' &&
-      typeof payload.maxContextTokens === 'number' &&
-      payload.maxContextTokens > 0;
-    if (hasCounts) {
-      ctxFrac = payload.contextTokens / payload.maxContextTokens;
-    } else if (typeof payload.contextUsage === 'number') {
-      ctxFrac = payload.contextUsage;
+  // Context usage on line 1 in every tier: the host's line 2 (which it
+  // always draws, custom status line or not) is right-aligned and easy to
+  // miss. compact/normal get a compact colored "ctx N%"; full keeps the
+  // bar + exact token counts.
+  const ctxInfo = contextInfo(payload);
+  if (ctxInfo) {
+    const pct = Math.round(ctxInfo.frac * 100);
+    if (layout === 'full') {
+      let ctxSeg = `Context ${bar(ctxInfo.frac, color)} ${pct}%`;
+      if (ctxInfo.hasCounts) {
+        ctxSeg += ` (${formatTokens(payload.contextTokens)}/${formatTokens(payload.maxContextTokens)})`;
+      }
+      segs.push(ctxSeg);
+    } else {
+      segs.push(colorize(color, levelColor(ctxInfo.frac), `ctx ${pct}%`));
     }
-    let ctxSeg = `Context ${bar(ctxFrac, color)} ${Math.round(ctxFrac * 100)}%`;
-    if (hasCounts) {
-      ctxSeg += ` (${formatTokens(payload.contextTokens)}/${formatTokens(payload.maxContextTokens)})`;
-    }
-    segs.push(ctxSeg);
   }
 
-  // Speed segment (omitted when no samples yet, e.g. fresh session)
+  // Speed segment (omitted when no samples yet, e.g. fresh session).
+  // While a request is in flight (generatingSince set) the segment swaps
+  // the static last-step TTFT for a live "gen <elapsed>" ticker — step.end
+  // samples only land when a step finishes, so without it the number looks
+  // frozen during long generations.
+  const genSince = metrics && typeof metrics.generatingSince === 'number' ? metrics.generatingSince : null;
   if (metrics && typeof metrics.tps === 'number') {
     const tps = Math.round(metrics.tps);
+    const gen = genSince !== null ? formatElapsed(now - genSince) : null;
     if (layout === 'compact') {
-      segs.push(`⚡ ${tps}`);
+      segs.push(`⚡ ${tps}${gen ? ` gen ${gen}` : ''}`);
     } else {
-      const ttft = formatTtft(metrics.ttftMs);
-      segs.push(`⚡ ${tps} t/s${ttft ? ` · TTFT ${ttft}` : ''}`);
+      const live = gen ? ` · gen ${gen}` : null;
+      const ttft = live === null ? formatTtft(metrics.ttftMs) : null;
+      segs.push(`⚡ ${tps} t/s${live ?? ''}${ttft ? ` · TTFT ${ttft}` : ''}`);
     }
+  } else if (genSince !== null) {
+    segs.push(`⚡ gen ${formatElapsed(now - genSince)}`);
   }
 
   // Quota segments (whole section omitted when no cache yet). Compact drops
@@ -232,7 +290,7 @@ export function renderHud(ctx) {
   const startIdx = Math.max(0, LAYOUT_ORDER.indexOf(ctx.layout || 'normal'));
   for (let i = startIdx; i < LAYOUT_ORDER.length; i++) {
     const layout = LAYOUT_ORDER[i];
-    const prefix = badges(payload, color);
+    const prefix = badges(payload, color, ctx.metrics && ctx.metrics.goal, now);
     const segs = buildSegments(layout, { ...ctx, payload, color, now });
     const line = [...prefix, segs.join(' │ ')].filter(Boolean).join(' ');
     if (stripAnsi(line).length <= MAX_WIDTH || layout === 'compact') return [line];
