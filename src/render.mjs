@@ -96,12 +96,13 @@ function stripAnsi(s) {
 
 function badges(payload, color) {
   const out = [];
-  // Host defaults render auto/yolo in warning amber and plan in primary
-  // blue; auto keeps bright red here per user preference to stay distinct.
-  // Manual mode shows a muted [manual] so the line's left edge stays put
-  // when no elevated-permission badge is present.
-  if (payload.permissionMode === 'yolo') out.push(colorize(color, C.warning, '[yolo]'));
-  else if (payload.permissionMode === 'auto') out.push(colorize(color, C.brightRed, '[auto]'));
+  // Permission badges are padded to a fixed 8-char width ([ yolo ] /
+  // [ auto ] / [manual]) so the line's left edge never shifts when the
+  // mode changes. Host defaults render auto/yolo in warning amber and
+  // plan in primary blue; auto keeps bright red here per user preference
+  // to stay distinct; manual is a muted placeholder.
+  if (payload.permissionMode === 'yolo') out.push(colorize(color, C.warning, '[ yolo ]'));
+  else if (payload.permissionMode === 'auto') out.push(colorize(color, C.brightRed, '[ auto ]'));
   else out.push(colorize(color, C.muted, '[manual]'));
   if (payload.planMode) out.push(colorize(color, C.primary, '[plan]'));
   // The status-line payload does not carry swarmMode yet; rendered as soon
