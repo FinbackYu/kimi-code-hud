@@ -130,6 +130,25 @@ test('TTFT remains visible while TPS is warming up', () => {
   assert.ok(!compact.includes('⚡'));
 });
 
+test('stale TPS stays visible in muted gray', () => {
+  const metrics = { tps: 47, tpsStale: true, ttftMs: 1300 };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', color: true, metrics }));
+  assert.ok(normal.includes('\x1b[90m⚡ 47 t/s · TTFT 1.3s\x1b[0m'));
+
+  const [compact] = renderHud(baseCtx({ layout: 'compact', color: true, metrics }));
+  assert.ok(compact.includes('\x1b[90m⚡ 47\x1b[0m'));
+
+  // Same text without color when colors are disabled.
+  const [plain] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(plain.includes('⚡ 47 t/s · TTFT 1.3s'));
+  assert.ok(!plain.includes('\x1b['));
+
+  // A fresh window is not muted.
+  const [fresh] = renderHud(baseCtx({ layout: 'normal', color: true, metrics: { tps: 47, tpsStale: false, ttftMs: 1300 } }));
+  assert.ok(fresh.includes('⚡ 47 t/s'));
+  assert.ok(!fresh.includes('\x1b[90m⚡'));
+});
+
 test('Context fraction prefers exact token counts', () => {
   const [line] = renderHud(baseCtx({
     layout: 'full',
