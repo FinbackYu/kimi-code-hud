@@ -44,6 +44,20 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 
 - **Reinstall to update**: run `/plugins install https://github.com/FinbackYu/kimi-code-hud` again. The managed copy is replaced in place and the status line picks up the new version within ~1 second — no `/reload-tui` or new session needed.
 
+### Temporary off / on
+
+To fall back to the built-in status line while debugging, you don't need `--uninstall` (which also strips the self-heal hook):
+
+```bash
+node ~/kimi-code-hud/bin/kimi-hud.mjs --off
+node ~/kimi-code-hud/bin/kimi-hud.mjs --on
+```
+
+- `--off`: writes `"disabled": true` into `~/.kimi-code-hud/config.json` (preserving other keys such as `layout`), backs up and removes the `[status_line]` command from `tui.toml`; the hook block in `config.toml` is left alone — the hook sees the flag and stays silent, so it won't resurrect the HUD on the next session start;
+- `--on`: deletes the `disabled` key, writes the command back into `tui.toml`, and ensures the hook block is present.
+
+**Restart Kimi Code or run `/reload-tui` to apply.**
+
 ### Uninstall
 
 Plugin install: `/plugins remove kimi-code-hud` (per upstream behavior the managed copy stays on disk while the install record is deleted; the managed copy strips its own `tui.toml` entry on its next run, and `/reload-tui` or a new session brings back the built-in layout).
@@ -58,7 +72,7 @@ Backs up first, then removes this tool's `command` line from `[status_line]` and
 
 ### Configuration
 
-- `~/.kimi-code-hud/config.json`: `{"layout":"compact"|"normal"|"full"}` (default `normal`)
+- `~/.kimi-code-hud/config.json`: `{"layout":"compact"|"normal"|"full"}` (default `normal`); `"disabled": true` is the switch flag written by `--off` (absent means enabled; `--on` deletes the key)
 - `KIMI_HUD_LAYOUT` env var overrides the config file
 - `NO_COLOR` or `KIMI_HUD_NO_COLOR`: disable all ANSI colors
 
