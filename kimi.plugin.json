@@ -1,7 +1,7 @@
 {
   "name": "kimi-code-hud",
-  "version": "0.2.6",
-  "description": "Zero-dependency HUD status line for Kimi Code CLI: model, thinking, git, context, token speed and quota.",
+  "version": "0.2.7",
+  "description": "Zero-dependency HUD status line for Kimi Code CLI: model, thinking, git, context, token speed, cache hit rate and quota.",
   "keywords": [
     "kimi-code",
     "status-line",
@@ -12,7 +12,7 @@
   "license": "MIT",
   "interface": {
     "displayName": "Kimi Code HUD",
-    "shortDescription": "HUD status line: model, thinking, git, context, speed, quota"
+    "shortDescription": "HUD status line: model, thinking, git, context, speed, cache, quota"
   },
   "hooks": [
     {
