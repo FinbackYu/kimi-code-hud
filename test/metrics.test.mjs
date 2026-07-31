@@ -214,7 +214,9 @@ test('getMetrics resets TPS and TTFT when modelAlias changes', () => {
       stepEnd({ output: 300, streamMs: 1000, ttftMs: 300 }),
     ].join('\n') + '\n',
   );
-  assert.equal(getMetrics(id, opts).tps, 200);
+  const before = getMetrics(id, opts);
+  assert.equal(before.tps, 200);
+  assert.equal(before.modelAlias, 'kimi-code/k3');
 
   fs.appendFileSync(
     wirePath,
@@ -224,6 +226,7 @@ test('getMetrics resets TPS and TTFT when modelAlias changes', () => {
   let m = getMetrics(id, opts);
   assert.equal(m.tps, null);
   assert.equal(m.ttftMs, 400);
+  assert.equal(m.modelAlias, 'anthropic/claude-opus-5');
 
   fs.appendFileSync(
     wirePath,
@@ -345,5 +348,5 @@ test('getMetrics returns nulls for unknown sessions', () => {
     sessionsRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-empty-')),
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-')),
   });
-  assert.deepEqual(m, { tps: null, ttftMs: null, thinkingLevel: null, goal: null });
+  assert.deepEqual(m, { tps: null, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null });
 });

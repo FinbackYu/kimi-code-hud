@@ -78,6 +78,58 @@ test('effort model falls back to model default_effort', () => {
   });
 });
 
+const THIRD_PARTY = `
+[models."vision-only"]
+model = "vision-only"
+capabilities = [ "image_in", "tool_use" ]
+
+[models."adaptive"]
+model = "adaptive"
+capabilities = [ "tool_use" ]
+adaptive_thinking = true
+
+[models."always-bool"]
+model = "always-bool"
+capabilities = [ "thinking", "always_thinking" ]
+
+[models."always-effort"]
+model = "always-effort"
+capabilities = [ "thinking", "always_thinking" ]
+support_efforts = [ "low", "high", "max" ]
+default_effort = "max"
+`;
+
+test('model declaring capabilities without thinking resolves to off', () => {
+  withConfig(THIRD_PARTY, (configPath) => {
+    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'vision-only', configPath }), 'off');
+  });
+});
+
+test('global effort keeps a non-thinking third-party model on (passthrough)', () => {
+  withConfig(`[thinking]\nenabled = true\neffort = "high"\n${THIRD_PARTY}`, (configPath) => {
+    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'vision-only', configPath }), 'on');
+  });
+});
+
+test('adaptive_thinking counts as thinking support', () => {
+  withConfig(THIRD_PARTY, (configPath) => {
+    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'adaptive', configPath }), 'on');
+  });
+});
+
+test('always_thinking models never resolve to off', () => {
+  const disabled = `[thinking]\nenabled = false\n${THIRD_PARTY}`;
+  withConfig(disabled, (configPath) => {
+    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'always-bool', configPath }), 'on');
+    // Effort-capable: falls back to the model default, skipping off.
+    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'always-effort', configPath }), 'max');
+  });
+  const offEffort = `[thinking]\nenabled = true\neffort = "off"\n${THIRD_PARTY}`;
+  withConfig(offEffort, (configPath) => {
+    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'always-effort', configPath }), 'max');
+  });
+});
+
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-snap-'));
 }
