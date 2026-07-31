@@ -267,6 +267,57 @@ test('color badges: yolo warning amber, auto bright red, plan primary blue', () 
   assert.ok(man.includes('\x1b[90m[manual]\x1b[0m'));
 });
 
+test('light theme swaps badges to bold brighter truecolor', () => {
+  // Default (no theme) stays on the dark palette.
+  const [def] = renderHud(baseCtx({ color: true, payload: basePayload({ planMode: true }) }));
+  assert.ok(def.includes('\x1b[38;2;79;168;255mK3\x1b[0m'));
+  assert.ok(def.includes('\x1b[38;2;79;168;255m[plan]\x1b[0m'));
+
+  const [light] = renderHud(baseCtx({
+    color: true,
+    theme: 'light',
+    payload: basePayload({ permissionMode: 'yolo', planMode: true, swarmMode: true }),
+  }));
+  assert.ok(light.includes('\x1b[1m\x1b[38;2;21;101;192mK3\x1b[0m'));    // bold primary #1565C0
+  assert.ok(light.includes('\x1b[1m\x1b[38;2;21;101;192m[plan]\x1b[0m'));
+  assert.ok(light.includes('\x1b[1m\x1b[38;2;217;119;6m[yolo]\x1b[0m'));  // bold amber #D97706
+  assert.ok(light.includes('\x1b[1m\x1b[38;2;20;184;166m[swarm]\x1b[0m')); // bold teal #14B8A6
+  assert.ok(!light.includes('\x1b[38;2;79;168;255m'));                    // no dark leftovers
+
+  // The auto badge keeps its ANSI bright red but goes bold in light.
+  const [lightAuto] = renderHud(baseCtx({
+    color: true,
+    theme: 'light',
+    payload: basePayload({ permissionMode: 'auto' }),
+  }));
+  assert.ok(lightAuto.includes('\x1b[1;91m[auto]\x1b[0m'));
+
+  // Explicit dark matches the default: no bold, ANSI auto.
+  const [dark] = renderHud(baseCtx({
+    color: true,
+    theme: 'dark',
+    payload: basePayload({ permissionMode: 'yolo', planMode: true, swarmMode: true }),
+  }));
+  assert.ok(dark.includes('\x1b[38;2;79;168;255m[plan]\x1b[0m'));
+  assert.ok(dark.includes('\x1b[38;2;232;168;56m[yolo]\x1b[0m'));
+  assert.ok(dark.includes('\x1b[38;2;91;192;190m[swarm]\x1b[0m'));
+});
+
+test('light theme tones the quota bar down to calmer truecolor hues', () => {
+  const hotQuota = {
+    weekly: { used: 25, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
+    windows: [{ label: '5h', used: 90, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
+  };
+  // Dark (and default) bars keep the terminal-remapped ANSI levels.
+  const [dark] = renderHud(baseCtx({ color: true, theme: 'dark', quota: hotQuota }));
+  assert.ok(dark.includes('\x1b[31m█████████░\x1b[0m'));
+  // Light swaps the glaring ANSI red for the host's light error hue; the
+  // mid-level amber matches the badge amber.
+  const [light] = renderHud(baseCtx({ color: true, theme: 'light', quota: hotQuota }));
+  assert.ok(light.includes('\x1b[38;2;185;28;28m█████████░\x1b[0m')); // #B91C1C
+  assert.ok(!light.includes('\x1b[31m'));
+});
+
 test('swarm badge renders in accent cyan when payload exposes swarmMode', () => {
   const [line] = renderHud(baseCtx({
     color: true,

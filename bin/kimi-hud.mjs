@@ -18,6 +18,7 @@ import { resolveThinkingLevel } from '../src/thinking.mjs';
 import { readQuotaCache, ensureFreshQuota, refreshQuota, HUD_DIR } from '../src/quota.mjs';
 import { resolveModelProvider, MANAGED_KIMI_PROVIDER } from '../src/model-config.mjs';
 import { renderHud } from '../src/render.mjs';
+import { resolveTheme } from '../src/theme.mjs';
 import { managedPluginDisabled } from '../src/plugin-state.mjs';
 import { setStatusLineCommand, removeStatusLineCommand } from '../src/toml.mjs';
 import { ensureHooksBlock, removeHooksBlock } from '../src/hooks.mjs';
@@ -43,6 +44,8 @@ Usage:
 
 Config: ~/.kimi-code-hud/config.json  {"layout":"compact|normal|full"}
 Env:    KIMI_HUD_LAYOUT overrides config; NO_COLOR / KIMI_HUD_NO_COLOR disable colors.
+        KIMI_HUD_THEME=dark|light pins the badge palette (default: tui.toml's
+        theme, with auto resolved via COLORFGBG, falling back to dark).
 `;
 
 function resolveLayout() {
@@ -212,6 +215,7 @@ async function render() {
     gitDirty,
     layout: resolveLayout(),
     color: colorEnabled(),
+    theme: resolveTheme({ tuiTomlPath: TUI_TOML_PATH }),
   });
   process.stdout.write(`${lines[0]}\n`);
 }
