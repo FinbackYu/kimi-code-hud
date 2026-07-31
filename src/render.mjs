@@ -98,7 +98,7 @@ function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-function badges(payload, color) {
+function badges(payload, color, swarmOn) {
   const out = [];
   // Host defaults render auto/yolo in warning amber and plan in primary
   // blue; auto keeps bright red here per user preference to stay distinct.
@@ -108,9 +108,11 @@ function badges(payload, color) {
   else if (payload.permissionMode === 'auto') out.push(colorize(color, C.brightRed, '[auto]'));
   else out.push(colorize(color, C.muted, '[manual]'));
   if (payload.planMode) out.push(colorize(color, C.primary, '[plan]'));
-  // The status-line payload does not carry swarmMode yet; rendered as soon
-  // as the host exposes it (accent cyan, same as the built-in footer).
-  if (payload.swarmMode) out.push(colorize(color, C.accent, '[swarm]'));
+  // Swarm mode comes from the wire journal's swarm_mode.enter/exit lines,
+  // folded into metrics (same derivation path as the goal badge); a future
+  // payload.swarmMode field also turns it on (accent cyan, same as the
+  // built-in footer).
+  if (swarmOn || payload.swarmMode) out.push(colorize(color, C.accent, '[swarm]'));
   return out;
 }
 
@@ -247,7 +249,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] full|normal|compact
  * @param {boolean} [ctx.color]
@@ -261,7 +263,7 @@ export function renderHud(ctx) {
   const startIdx = Math.max(0, LAYOUT_ORDER.indexOf(ctx.layout || 'normal'));
   for (let i = startIdx; i < LAYOUT_ORDER.length; i++) {
     const layout = LAYOUT_ORDER[i];
-    const prefix = badges(payload, color);
+    const prefix = badges(payload, color, ctx.metrics?.swarmMode === true);
     const goal = goalBadge(ctx.metrics?.goal, color, now);
     if (goal) prefix.push(goal);
     const segs = buildSegments(layout, { ...ctx, payload, color, now });
