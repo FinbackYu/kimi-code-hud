@@ -294,3 +294,53 @@ test('goal badge colors: dot by status, brackets muted', () => {
   }));
   assert.ok(paused.includes('\x1b[90m●')); // paused: muted
 });
+
+test('fleet speed shows total, head count and per-agent average', () => {
+  const metrics = { tps: 25, tpsTotal: 305, activeAgents: 12, ttftMs: 1300 };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(normal.includes('⚡ 305 t/s (12 agents @25) · TTFT 1.3s'));
+  const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
+  assert.ok(compact.includes('⚡ 305 (12@25)'));
+  // A fleet is never painted as stale.
+  const [colored] = renderHud(baseCtx({ layout: 'normal', color: true, metrics }));
+  assert.ok(!colored.includes('\x1b[90m⚡'));
+});
+
+test('live gen ticker replaces TTFT while a request is in flight', () => {
+  const metrics = { tps: 47, ttftMs: 1300, generatingSince: NOW - 3000 };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(normal.includes('⚡ 47 t/s · gen 3s'));
+  assert.ok(!normal.includes('TTFT'));
+  const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
+  assert.ok(compact.includes('⚡ 47 gen 3s'));
+  // Long generations format as minutes.
+  const [long] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: { ...metrics, generatingSince: NOW - 4 * 60_000 },
+  }));
+  assert.ok(long.includes('gen 4m'));
+});
+
+test('gen ticker carries the head count for fleets without speed samples', () => {
+  const [line] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: { tps: null, ttftMs: null, generatingSince: NOW - 3000, activeAgents: 106 },
+  }));
+  assert.ok(line.includes('⚡ gen 3s (106 agents)'));
+  const [solo] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: { tps: null, ttftMs: null, generatingSince: NOW - 3000, activeAgents: 1 },
+  }));
+  assert.ok(solo.includes('⚡ gen 3s'));
+  assert.ok(!solo.includes('agents'));
+});
+
+test('fleet gen ticker appends to the fleet speed format', () => {
+  const metrics = {
+    tps: 25, tpsTotal: 305, activeAgents: 12, ttftMs: 1300, generatingSince: NOW - 3000,
+  };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(normal.includes('⚡ 305 t/s (12 agents @25) · gen 3s'));
+  const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
+  assert.ok(compact.includes('⚡ 305 (12@25) gen 3s'));
+});

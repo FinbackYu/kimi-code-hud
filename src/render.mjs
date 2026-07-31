@@ -80,6 +80,18 @@ function formatTtft(ms) {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
+/** Elapsed wall-clock for the live generation ticker: "45s" / "4m" / "1h12m" / "2d3h". */
+function formatElapsed(ms) {
+  if (typeof ms !== 'number' || ms < 0) return '0s';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const mins = Math.floor(s / 60);
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h${mins % 60}m`;
+  return `${Math.floor(h / 24)}d${h % 24}h`;
+}
+
 function pctOf(used, limit) {
   return Math.round((used / limit) * 100);
 }
@@ -193,19 +205,35 @@ function buildSegments(layout, ctx) {
     segs.push(ctxSeg);
   }
 
-  // Speed segment. A fresh window (enough recent, reliable samples) renders
-  // bright; once it expires the last median stays visible in muted gray
-  // instead of disappearing. Only the initial warmup (no median yet) falls
-  // back to a bare TTFT.
+  // Speed segment. A fresh solo window (enough recent, reliable samples)
+  // renders bright; once it expires the last median stays visible in muted
+  // gray instead of disappearing. With several active agents
+  // (swarm/subagents) show the fleet total plus "N agents @avg". While a
+  // request is in flight (generatingSince set) the segment swaps the static
+  // last-step TTFT for a live "gen <elapsed>" ticker — step.end samples only
+  // land when a step finishes, so without it the number looks frozen during
+  // long generations. Only the initial warmup (no median yet, nothing in
+  // flight) falls back to a bare TTFT.
+  const genSince = metrics && typeof metrics.generatingSince === 'number' ? metrics.generatingSince : null;
+  const multi = metrics && typeof metrics.tpsTotal === 'number' && metrics.activeAgents > 1;
+  const gen = genSince !== null ? formatElapsed(now - genSince) : null;
   if (metrics && typeof metrics.tps === 'number') {
-    const tps = Math.round(metrics.tps);
+    const avg = Math.round(metrics.tps);
     const paint = (s) => (metrics.tpsStale === true ? colorize(color, C.muted, s) : s);
     if (layout === 'compact') {
-      segs.push(paint(`⚡ ${tps}`));
+      const head = multi ? `⚡ ${Math.round(metrics.tpsTotal)} (${metrics.activeAgents}@${avg})` : `⚡ ${avg}`;
+      segs.push(paint(`${head}${gen ? ` gen ${gen}` : ''}`));
     } else {
-      const ttft = formatTtft(metrics.ttftMs);
-      segs.push(paint(`⚡ ${tps} t/s${ttft ? ` · TTFT ${ttft}` : ''}`));
+      const base = multi
+        ? `⚡ ${Math.round(metrics.tpsTotal)} t/s (${metrics.activeAgents} agents @${avg})`
+        : `⚡ ${avg} t/s`;
+      const live = gen ? ` · gen ${gen}` : null;
+      const ttft = live === null ? formatTtft(metrics.ttftMs) : null;
+      segs.push(paint(`${base}${live ?? ''}${ttft ? ` · TTFT ${ttft}` : ''}`));
     }
+  } else if (metrics && genSince !== null) {
+    const n = metrics.activeAgents > 1 ? ` (${metrics.activeAgents} agents)` : '';
+    segs.push(`⚡ gen ${gen}${n}`);
   } else if (metrics) {
     const ttft = formatTtft(metrics.ttftMs);
     if (ttft) segs.push(`TTFT ${ttft}`);
@@ -271,7 +299,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, activeAgents, generatingSince}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] full|normal|compact
  * @param {boolean} [ctx.color]
