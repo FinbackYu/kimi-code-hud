@@ -201,6 +201,18 @@ test('swarm badge renders in accent cyan when payload exposes swarmMode', () => 
   assert.ok(plain.startsWith('[manual] [swarm] '));
 });
 
+test('swarm badge renders from wire-derived metrics.swarmMode (payload has no field)', () => {
+  const [line] = renderHud(baseCtx({
+    color: true,
+    metrics: { tps: 47, ttftMs: 1300, swarmMode: true },
+  }));
+  assert.ok(line.includes('\x1b[38;2;91;192;190m[swarm]\x1b[0m'));
+  const [plain] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, swarmMode: true } }));
+  assert.ok(plain.startsWith('[manual] [swarm] '));
+  const [off] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, swarmMode: false } }));
+  assert.ok(!off.includes('[swarm]'));
+});
+
 test('goal badge sits between mode badges and model, in every tier', () => {
   const goal = { status: 'active', turnsUsed: 7, wallClockMs: 0, wallClockResumedAt: NOW - 4 * 60_000 };
   for (const layout of ['compact', 'normal', 'full']) {

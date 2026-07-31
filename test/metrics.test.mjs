@@ -330,7 +330,7 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   assert.equal(m.thinkingLevel, 'high');
   // Second run must not rescan (versioned scan marker persisted).
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 4);
+  assert.equal(state.backfillScanV, 5);
 });
 
 test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
@@ -351,8 +351,56 @@ test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', ()
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 4);
+  assert.equal(state.backfillScanV, 5);
   assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
+});
+
+test('processWireChunk folds swarm_mode.enter/exit, last one wins', () => {
+  const state = { offset: 0, samples: [], lastTtftMs: null, swarmMode: false };
+  const lines = [
+    '{"type":"swarm_mode.enter","trigger":"manual","time":1}',
+    '{"type":"swarm_mode.exit","time":2}',
+    '{"type":"swarm_mode.enter","trigger":"prompt","time":3}',
+  ].join('\n') + '\n';
+  processWireChunk(state, lines);
+  assert.equal(state.swarmMode, true);
+});
+
+test('processWireChunk swarm_mode.exit without enter stays off', () => {
+  const state = { offset: 0, samples: [], lastTtftMs: null, swarmMode: false };
+  processWireChunk(state, '{"type":"swarm_mode.exit","time":1}\n');
+  assert.equal(state.swarmMode, false);
+});
+
+test('getMetrics tracks swarm mode from the wire journal', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(wirePath, '{"type":"swarm_mode.enter","trigger":"manual","time":1}\n');
+  const on = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(on.swarmMode, true);
+  fs.appendFileSync(wirePath, '{"type":"swarm_mode.exit","time":2}\n');
+  const off = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(off.swarmMode, false);
+});
+
+test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    '{"type":"swarm_mode.enter","trigger":"manual","time":1}\n' +
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }) + '\n',
+  );
+  // v4 state: offset already past the event, swarm flag never captured.
+  const size = fs.statSync(wirePath).size;
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({ offset: size, samples: [100], lastTtftMs: 500, backfillScanV: 4 }),
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(m.swarmMode, true);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.equal(state.backfillScanV, 5);
 });
 
 test('getMetrics returns nulls for unknown sessions', () => {
@@ -360,5 +408,5 @@ test('getMetrics returns nulls for unknown sessions', () => {
     sessionsRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-empty-')),
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-')),
   });
-  assert.deepEqual(m, { tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null });
+  assert.deepEqual(m, { tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null, swarmMode: false });
 });

@@ -14,8 +14,9 @@ const TPS_TTL_MS = 2 * 60 * 1000;
 const SAMPLE_STATE_V = 1;
 // Backfill scan version; bump when the tracked key set changes so existing
 // state files re-scan once (v2: `thinkingEffort`; v3: goal ops; v4:
-// `modelAlias`, used to keep TPS samples scoped to one model).
-const BACKFILL_SCAN_V = 4;
+// `modelAlias`, used to keep TPS samples scoped to one model; v5:
+// `swarm_mode.enter/exit`, the wire journal's swarm-mode record).
+const BACKFILL_SCAN_V = 5;
 
 /**
  * Locate the wire.jsonl for a session id. The payload sessionId may or may
@@ -67,6 +68,7 @@ function loadState(statePath) {
     const s = JSON.parse(fs.readFileSync(statePath, 'utf8'));
     if (s && typeof s === 'object' && typeof s.offset === 'number') {
       if (!Array.isArray(s.samples)) s.samples = [];
+      if (typeof s.swarmMode !== 'boolean') s.swarmMode = false;
       return s;
     }
   } catch {
@@ -82,6 +84,7 @@ function loadState(statePath) {
     sampleStateV: SAMPLE_STATE_V,
     thinkingLevel: null,
     goal: null,
+    swarmMode: false,
   };
 }
 
@@ -99,6 +102,7 @@ function resetStreamState(state) {
   state.sampleStateV = SAMPLE_STATE_V;
   state.thinkingLevel = null;
   state.goal = null;
+  state.swarmMode = false;
   delete state.backfillScanV;
   delete state.thinkingScanV; // legacy v1/v2 marker
   delete state.thinkingScanDone; // legacy v1 marker
@@ -117,8 +121,9 @@ function saveState(statePath, state) {
 
 /**
  * Fold one parsed wire row into the metrics state. Handles config.update
- * (thinking level), goal ops (goal badge state) and step.end loop events
- * (TPS samples + TTFT).
+ * (thinking level), goal ops (goal badge state), swarm_mode.enter/exit (the
+ * host journals swarm-mode toggles as top-level wire lines, like goal ops)
+ * and step.end loop events (TPS samples + TTFT).
  * @param {object} state mutated in place
  * @param {object} row parsed wire.jsonl line
  */
@@ -154,6 +159,13 @@ export function processWireRow(state, row) {
     row?.type === 'forked'
   ) {
     state.goal = applyGoalOp(state.goal ?? null, row);
+    return;
+  }
+  if (row?.type === 'swarm_mode.enter' || row?.type === 'swarm_mode.exit') {
+    // The status-line payload carries no swarm flag; these journal lines
+    // are the only structured record of the mode. `trigger` ("manual" vs a
+    // /swarm <task> prompt) does not matter for the badge.
+    state.swarmMode = row.type === 'swarm_mode.enter';
     return;
   }
   if (row?.type !== 'context.append_loop_event') return;
@@ -204,7 +216,8 @@ function isBackfillLine(line) {
     line.includes('"thinkingLevel"') ||
     line.includes('"modelAlias"') ||
     line.includes('"type":"goal.') ||
-    line.includes('"type":"forked"')
+    line.includes('"type":"forked"') ||
+    line.includes('"type":"swarm_mode.')
   );
 }
 
@@ -247,14 +260,14 @@ export function median(arr) {
  * offset when it exceeds the file size. Never throws.
  * @param {string} sessionId
  * @param {object} [opts]
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
   stateDir = HUD_DIR,
   now = Date.now(),
 } = {}) {
-  const empty = { tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null };
+  const empty = { tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null, swarmMode: false };
   try {
     if (!sessionId) return empty;
     const wirePath = findWirePath(sessionId, sessionsRoot);
@@ -287,9 +300,9 @@ export function getMetrics(sessionId, {
     }
     // One-time backfill: sessions whose offset predates a tracked key would
     // otherwise never see earlier events (initial config.update, goal.create).
-    // Versioned marker: v2 matched `thinkingEffort`, v3 added goal ops, and
-    // v4 adds `modelAlias`. The substring prefilter keeps this fast even on
-    // multi-MB logs.
+    // Versioned marker: v2 matched `thinkingEffort`, v3 added goal ops, v4
+    // added `modelAlias`, and v5 adds `swarm_mode.enter/exit`. The substring
+    // prefilter keeps this fast even on multi-MB logs.
     if ((state.backfillScanV ?? state.thinkingScanV ?? 0) < BACKFILL_SCAN_V) {
       try {
         const text = fs.readFileSync(wirePath, 'utf8');
@@ -345,6 +358,7 @@ export function getMetrics(sessionId, {
       thinkingLevel: state.thinkingLevel ?? null,
       goal: state.goal ?? null,
       modelAlias: state.modelAlias ?? null,
+      swarmMode: state.swarmMode === true,
     };
   } catch {
     return empty;
