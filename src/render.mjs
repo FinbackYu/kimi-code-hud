@@ -248,9 +248,12 @@ function buildSegments(layout, ctx) {
     if (ttft) segs.push(`TTFT ${ttft}`);
   }
 
-  // Current user-turn prompt-cache hit rate. The reducer guarantees a
-  // complete token-weighted metric; rendering stays neutral because a useful
-  // rate depends on provider and workload rather than universal thresholds.
+  // Session-cumulative prompt-cache hit rate. The reducer only counts
+  // step.end rows with complete usage; rendering stays neutral because a
+  // useful rate depends on provider and workload rather than universal
+  // thresholds. Between a new prompt and its first counted step the ratio
+  // lags the live session — dim it instead of dropping the segment (which
+  // used to shift the whole line's width every turn).
   const cache = metrics?.cache;
   if (
     cache &&
@@ -267,7 +270,7 @@ function buildSegments(layout, ctx) {
     ) {
       cacheSeg += ` (${formatTokens(cache.readTokens)}/${formatTokens(cache.inputTokens)})`;
     }
-    segs.push(cacheSeg);
+    segs.push(cache.stale === true ? colorize(color, C.muted, cacheSeg) : cacheSeg);
   }
 
   // Quota group (omitted when no quota cache exists): all windows join into

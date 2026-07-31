@@ -27,7 +27,7 @@ const ACTIVE_WINDOW_MS = TPS_TTL_MS;
 // a median.
 const MAX_STORED_SAMPLES = 20;
 const SAMPLE_STATE_V = 1;
-const CACHE_SCAN_V = 1;
+const CACHE_SCAN_V = 2;
 export const CACHE_BACKFILL_MAX_BYTES = 1024 * 1024;
 // Backfill scan version; bump when the tracked key set changes so existing
 // state files re-scan once (v2: `thinkingEffort`; v3: goal ops; v4:
@@ -182,8 +182,7 @@ function migrateFlatState(s) {
   // Absent cacheScanV must stay 0 so the bounded cache restoration still
   // runs once for pre-existing sessions (fresh states default to current).
   state.cacheScanV = typeof s.cacheScanV === 'number' ? s.cacheScanV : 0;
-  if (s.cacheTurn && typeof s.cacheTurn === 'object') state.cacheTurn = s.cacheTurn;
-  if (typeof s.cacheNeedsPrompt === 'boolean') state.cacheNeedsPrompt = s.cacheNeedsPrompt;
+  if (s.cache && typeof s.cache === 'object') state.cache = s.cache;
   state.agents.main = main;
   return state;
 }
@@ -196,6 +195,10 @@ function loadState(statePath) {
         for (const name of Object.keys(s.agents)) s.agents[name] = normAgent(s.agents[name]);
         if (typeof s.lastMedian !== 'number') s.lastMedian = null;
         if (typeof s.swarmMode !== 'boolean') s.swarmMode = false;
+        // Pre-v2 cache state was per-turn (cacheTurn/cacheNeedsPrompt); the
+        // cumulative rebuild owns state.cache now — drop the dead fields.
+        delete s.cacheTurn;
+        delete s.cacheNeedsPrompt;
         return s;
       }
       if (typeof s.offset === 'number') return migrateFlatState(s);
@@ -235,8 +238,8 @@ function saveState(statePath, state) {
  * Fold one parsed wire row into the metrics state. Rows are bucketed per
  * agent: llm.request/step.end/full_compaction.complete/turn.cancel drive
  * the in-flight generation flag, step.end adds TPS samples and TTFT. The
- * main agent additionally feeds the state-level handlers — cache turns,
- * config.update (model alias + thinking level), goal ops and the
+ * main agent additionally feeds the state-level handlers — the session cache
+ * counters, config.update (model alias + thinking level), goal ops and the
  * swarm_mode.enter/exit journal.
  * @param {object} state mutated in place
  * @param {object} row parsed wire.jsonl line
@@ -248,8 +251,8 @@ export function processWireRow(state, row, agent = 'main') {
   state.agents[agent] = bucket;
   const rowTime = Number.isFinite(row?.time) && row.time >= 0 ? row.time : null;
   if (agent === 'main') {
-    // Cache turns need to see every row, including turn.prompt boundaries,
-    // before the metric-specific early returns below.
+    // The session cache reducer needs to see every row, including turn.prompt
+    // boundaries, before the metric-specific early returns below.
     applyCacheWireRow(state, row);
   }
   if (row?.type === 'turn.prompt') {
@@ -392,8 +395,8 @@ export function processWireRow(state, row, agent = 'main') {
  * Backfill-only handler for turn-boundary rows (turn.prompt / turn.cancel /
  * end_turn step.end). Unlike the live path it must not run the full reducer:
  * folding a step.end again would duplicate its TPS sample (the offset
- * already covered it), and a turn.prompt through applyCacheWireRow would
- * clobber the persisted cache turn.
+ * already covered it), and turn.prompt side effects on the cache reducer
+ * belong to the cache restoration's own bounded scan.
  * @param {object} state mutated in place
  * @param {object} row parsed wire.jsonl line (main wire only)
  */
@@ -437,14 +440,14 @@ function isCacheBackfillLine(line) {
 }
 
 /**
- * Restore only the latest complete cache turn before the saved metrics byte
- * offset. The read is capped so an upgrade cannot turn the 300ms hot path into
- * an unbounded historical scan. Missing boundaries intentionally leave the
- * metric hidden until the next turn.prompt.
+ * Rebuild the session-cumulative cache counters from the bounded tail before
+ * the saved metrics byte offset. The read is capped so an upgrade cannot turn
+ * the 300ms hot path into an unbounded historical scan. Every complete
+ * step.end in the tail counts, so no prompt-boundary alignment is needed.
  */
 function restoreCacheState(wirePath, state) {
   const end = Math.max(0, Math.floor(state.agents?.main?.offset ?? 0));
-  resetCacheState(state, { needsPrompt: end > 0 });
+  resetCacheState(state);
   if (end === 0) {
     state.cacheScanV = CACHE_SCAN_V;
     return;
@@ -664,9 +667,9 @@ export function getMetrics(sessionId, {
           try {
             restoreCacheState(wirePath, state);
           } catch {
-            // Do not accept a partial current turn when restoration failed.
-            // Leave the version unset so a later refresh can retry.
-            resetCacheState(state, { needsPrompt: true });
+            // Do not accept partially restored counters when restoration
+            // failed. Leave the version unset so a later refresh can retry.
+            resetCacheState(state);
           }
           stateChanged = true;
         }

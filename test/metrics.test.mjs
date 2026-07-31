@@ -843,7 +843,7 @@ test('getMetrics runs the turn timer from the prompt until end_turn or cancel', 
   assert.equal(m.turnStartedAt, null);
 });
 
-test('getMetrics persists and incrementally updates current-turn cache usage', () => {
+test('getMetrics persists and incrementally updates session-cumulative cache usage', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
@@ -862,7 +862,7 @@ test('getMetrics persists and incrementally updates current-turn cache usage', (
   );
 
   let m = getMetrics(id, opts);
-  assert.deepEqual(m.cache, { hitRate: 0.6, readTokens: 300, inputTokens: 500 });
+  assert.deepEqual(m.cache, { hitRate: 0.6, readTokens: 300, inputTokens: 500, stale: false });
 
   fs.appendFileSync(
     wirePath,
@@ -877,17 +877,17 @@ test('getMetrics persists and incrementally updates current-turn cache usage', (
     }) + '\n',
   );
   m = getMetrics(id, opts);
-  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000 });
+  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000, stale: false });
 
   const persisted = JSON.parse(
     fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'),
   );
-  assert.equal(persisted.cacheTurn.turnId, '1');
-  assert.equal(persisted.cacheTurn.inputTokens, 1000);
-  assert.equal(persisted.cacheScanV, 1);
+  assert.equal(persisted.cache.readTokens, 400);
+  assert.equal(persisted.cache.inputTokens, 1000);
+  assert.equal(persisted.cacheScanV, 2);
 });
 
-test('getMetrics clears the previous cache value as soon as a new prompt arrives', () => {
+test('getMetrics dims the session cache value as soon as a new prompt arrives', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
@@ -896,10 +896,12 @@ test('getMetrics clears the previous cache value as soon as a new prompt arrives
     turnPrompt('first') + '\n' +
       stepEnd({ output: 100, streamMs: 1000, ttftMs: 500, turnId: '1' }) + '\n',
   );
-  assert.notEqual(getMetrics(id, opts).cache, null);
+  assert.equal(getMetrics(id, opts).cache.stale, false);
 
   fs.appendFileSync(wirePath, turnPrompt('second') + '\n');
-  assert.equal(getMetrics(id, opts).cache, null);
+  const cache = getMetrics(id, opts).cache;
+  assert.notEqual(cache, null);
+  assert.equal(cache.stale, true);
 });
 
 test('cache migration restores only usage before the old offset then reads new bytes once', () => {
@@ -942,12 +944,12 @@ test('cache migration restores only usage before the old offset then reads new b
 
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.tps, 150); // only the newly appended TPS row was added
-  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000 });
+  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000, stale: false });
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
   assert.deepEqual(state.agents.main.samples.map((s) => s.v), [100, 200, 300, 100]);
 });
 
-test('bounded cache migration hides a turn whose prompt lies beyond the 1 MiB tail', () => {
+test('bounded cache migration counts tail step.end rows without their prompt', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   const oversized = JSON.stringify({
@@ -971,14 +973,23 @@ test('bounded cache migration hides a turn whose prompt lies beyond the 1 MiB ta
   );
 
   const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
-  assert.equal(getMetrics(id, opts).cache, null);
+  // The prompt lies beyond the 1 MiB tail, but the step.end inside the tail
+  // still counts toward the cumulative session ratio.
+  const restored = getMetrics(id, opts).cache;
+  assert.notEqual(restored, null);
+  assert.equal(restored.stale, false);
 
   fs.appendFileSync(
     wirePath,
     turnPrompt('next') + '\n' +
       stepEnd({ output: 100, streamMs: 1000, ttftMs: 400, turnId: '2' }) + '\n',
   );
-  assert.notEqual(getMetrics(id, opts).cache, null);
+  const m = getMetrics(id, opts).cache;
+  // turnPrompt marks the ratio stale, then the new step.end folds in and
+  // clears it; identical usage doubles the cumulative counters.
+  assert.equal(m.stale, false);
+  assert.equal(m.inputTokens, restored.inputTokens * 2);
+  assert.equal(m.readTokens, restored.readTokens * 2);
 });
 
 test('getMetrics returns nulls for unknown sessions', () => {

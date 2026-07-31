@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-31
+
 ### Changed
 
 - The `gen` turn timer keeps showing seconds past the one-minute mark
@@ -15,11 +17,19 @@ The project follows [Semantic Versioning](https://semver.org/).
   window labels, and the normal layout now shows its reset countdown
   (`~3d2h`) instead of only the full layout. Quota windows group into one
   segment joined by `·` instead of the `│` segment bar.
+- The Cache segment now reports the whole session's token-weighted
+  cache-read ratio, cumulative across turns, instead of only the current
+  user turn; existing states rebuild the counters once from the bounded 1
+  MiB wire tail (cache scan v2).
 
 ### Fixed
 
 - A live `gen` timer no longer inherits the muted gray of an expired speed
   window: the stale TPS stays dimmed, but the running timer renders bright.
+- The Cache segment no longer disappears at each new prompt (which shifted
+  the line width every turn): the ratio stays visible dimmed until the new
+  turn's first counted step, then brightens again. Steps with incomplete
+  usage fields are now skipped instead of hiding the metric.
 
 ## [0.3.1] - 2026-07-31
 
@@ -84,7 +94,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.2
 [0.3.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.1
 [0.3.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.0
 [0.2.7]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.2.7

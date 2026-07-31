@@ -39,10 +39,11 @@ test('uses the official cache-read over total-input formula', () => {
     hitRate: 0.6,
     readTokens: 300,
     inputTokens: 500,
+    stale: false,
   });
 });
 
-test('aggregates tokens before dividing across steps in one turn', () => {
+test('aggregates tokens before dividing across steps and turns', () => {
   const state = makeState();
   applyCacheWireRow(state, prompt());
   applyCacheWireRow(state, stepEnd('1', usage({
@@ -50,7 +51,8 @@ test('aggregates tokens before dividing across steps in one turn', () => {
     inputCacheRead: 90,
     inputCacheCreation: 0,
   })));
-  applyCacheWireRow(state, stepEnd('1', usage({
+  applyCacheWireRow(state, prompt());
+  applyCacheWireRow(state, stepEnd('2', usage({
     inputOther: 900,
     inputCacheRead: 100,
     inputCacheCreation: 0,
@@ -60,22 +62,32 @@ test('aggregates tokens before dividing across steps in one turn', () => {
     hitRate: 190 / 1100,
     readTokens: 190,
     inputTokens: 1100,
+    stale: false,
   });
 });
 
-test('turn.prompt clears the previous turn until a new step completes', () => {
+test('turn.prompt dims the session ratio until a new step is counted', () => {
   const state = makeState();
   applyCacheWireRow(state, stepEnd('1', usage()));
-  assert.notEqual(cacheMetricFromState(state), null);
+  assert.equal(cacheMetricFromState(state).stale, false);
 
+  // A new prompt keeps the cumulative value visible but marks it stale.
   applyCacheWireRow(state, prompt());
-  assert.equal(cacheMetricFromState(state), null);
+  assert.deepEqual(cacheMetricFromState(state), {
+    hitRate: 0.6,
+    readTokens: 300,
+    inputTokens: 500,
+    stale: true,
+  });
 
   applyCacheWireRow(state, stepEnd('2', usage({ inputCacheRead: 0 })));
-  assert.equal(cacheMetricFromState(state)?.hitRate, 0);
+  const m = cacheMetricFromState(state);
+  assert.equal(m.stale, false);
+  assert.equal(m.readTokens, 300);
+  assert.equal(m.inputTokens, 700);
 });
 
-test('a changed turnId defensively starts a new aggregation', () => {
+test('a changed turnId keeps accumulating across the session', () => {
   const state = makeState();
   applyCacheWireRow(state, stepEnd('1', usage()));
   applyCacheWireRow(state, stepEnd('2', usage({
@@ -85,9 +97,10 @@ test('a changed turnId defensively starts a new aggregation', () => {
   })));
 
   assert.deepEqual(cacheMetricFromState(state), {
-    hitRate: 0.5,
-    readTokens: 100,
-    inputTokens: 200,
+    hitRate: 400 / 700,
+    readTokens: 400,
+    inputTokens: 700,
+    stale: false,
   });
 });
 
@@ -102,11 +115,14 @@ test('positive input with no cache reads is a visible zero rate', () => {
     hitRate: 0,
     readTokens: 0,
     inputTokens: 200,
+    stale: false,
   });
 });
 
 test('zero total input has no cache metric', () => {
   const state = makeState();
+  applyCacheWireRow(state, prompt());
+  assert.equal(cacheMetricFromState(state), null);
   applyCacheWireRow(state, stepEnd('1', usage({
     inputOther: 0,
     inputCacheRead: 0,
@@ -121,15 +137,18 @@ for (const [label, invalid] of [
   ['infinite', Number.POSITIVE_INFINITY],
   ['non-numeric', '100'],
 ]) {
-  test(`${label} input usage hides the incomplete turn until the next prompt`, () => {
+  test(`${label} usage skips the step instead of poisoning the ratio`, () => {
     const state = makeState();
     applyCacheWireRow(state, stepEnd('1', usage({ inputCacheRead: invalid })));
-    applyCacheWireRow(state, stepEnd('1', usage()));
     assert.equal(cacheMetricFromState(state), null);
 
-    applyCacheWireRow(state, prompt());
-    applyCacheWireRow(state, stepEnd('2', usage()));
-    assert.notEqual(cacheMetricFromState(state), null);
+    applyCacheWireRow(state, stepEnd('1', usage()));
+    assert.deepEqual(cacheMetricFromState(state), {
+      hitRate: 0.6,
+      readTokens: 300,
+      inputTokens: 500,
+      stale: false,
+    });
   });
 }
 
@@ -145,31 +164,26 @@ test('usage.record is ignored to avoid double counting step.end', () => {
   assert.equal(cacheMetricFromState(state)?.readTokens, 300);
 });
 
-test('needs-prompt state ignores partial steps until a prompt boundary', () => {
+test('resetCacheState clears the counters back to a hidden metric', () => {
   const state = makeState();
-  resetCacheState(state, { needsPrompt: true });
-  applyCacheWireRow(state, stepEnd('8', usage()));
+  applyCacheWireRow(state, stepEnd('1', usage()));
+  resetCacheState(state);
   assert.equal(cacheMetricFromState(state), null);
-
-  applyCacheWireRow(state, prompt());
-  applyCacheWireRow(state, stepEnd('9', usage()));
-  assert.notEqual(cacheMetricFromState(state), null);
 });
 
 test('malformed persisted counters are discarded before new usage is added', () => {
   const state = {
-    cacheTurn: {
-      turnId: '1',
+    cache: {
       readTokens: '300',
       inputTokens: 500,
-      complete: true,
+      awaitsUsage: false,
     },
-    cacheNeedsPrompt: false,
   };
   applyCacheWireRow(state, stepEnd('1', usage()));
   assert.deepEqual(cacheMetricFromState(state), {
     hitRate: 0.6,
     readTokens: 300,
     inputTokens: 500,
+    stale: false,
   });
 });
