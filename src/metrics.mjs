@@ -32,8 +32,10 @@ export const CACHE_BACKFILL_MAX_BYTES = 1024 * 1024;
 // Backfill scan version; bump when the tracked key set changes so existing
 // state files re-scan once (v2: `thinkingEffort`; v3: goal ops; v4:
 // `modelAlias`, used to keep TPS samples scoped to one model; v5:
-// `swarm_mode.enter/exit`, the wire journal's swarm-mode record).
-const BACKFILL_SCAN_V = 5;
+// `swarm_mode.enter/exit`, the wire journal's swarm-mode record; v6:
+// `turn.prompt`/`turn.cancel`/`end_turn`, the turn boundaries anchoring the
+// turn-work timer).
+const BACKFILL_SCAN_V = 6;
 // State format version; v6: per-agent sample buckets with timestamped
 // samples (v1..v5 states were flat single-wire shapes and are migrated).
 const STATE_V = 6;
@@ -110,6 +112,8 @@ function emptyAgent() {
     lastSampleAt: null,
     lastRequestAt: null,
     lastStepEndAt: null,
+    lastTurnPromptAt: null,
+    lastTurnEndAt: null,
   };
 }
 
@@ -123,6 +127,8 @@ function normAgent(a) {
   if (typeof a.lastSampleAt !== 'number') a.lastSampleAt = null;
   if (typeof a.lastRequestAt !== 'number') a.lastRequestAt = null;
   if (typeof a.lastStepEndAt !== 'number') a.lastStepEndAt = null;
+  if (typeof a.lastTurnPromptAt !== 'number') a.lastTurnPromptAt = null;
+  if (typeof a.lastTurnEndAt !== 'number') a.lastTurnEndAt = null;
   return a;
 }
 
@@ -246,6 +252,16 @@ export function processWireRow(state, row, agent = 'main') {
     // before the metric-specific early returns below.
     applyCacheWireRow(state, row);
   }
+  if (row?.type === 'turn.prompt') {
+    // The user's command anchors the turn-work timer ("how long has it been
+    // working since my prompt"). Only the main agent sees user prompts.
+    if (agent === 'main') {
+      if (rowTime !== null && (bucket.lastTurnPromptAt === null || rowTime > bucket.lastTurnPromptAt)) {
+        bucket.lastTurnPromptAt = rowTime;
+      }
+    }
+    return;
+  }
   if (row?.type === 'llm.request') {
     // A loop request without a later step.end means the model is generating
     // right now. Compaction requests never produce a step.end, so they must
@@ -262,9 +278,15 @@ export function processWireRow(state, row, agent = 'main') {
   if (row?.type === 'full_compaction.complete' || row?.type === 'turn.cancel') {
     // Both close an in-flight generation: a compaction completes its
     // request, and a cancelled (ESC) generation will never see a step.end —
-    // without this the live ticker would stick until the window expires.
+    // without this the in-flight flag would stick until the window expires.
     if (rowTime !== null && (bucket.lastStepEndAt === null || rowTime > bucket.lastStepEndAt)) {
       bucket.lastStepEndAt = rowTime;
+    }
+    // A cancel also ends the whole turn (compaction does not).
+    if (agent === 'main' && row?.type === 'turn.cancel') {
+      if (rowTime !== null && (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt)) {
+        bucket.lastTurnEndAt = rowTime;
+      }
     }
     return;
   }
@@ -319,6 +341,16 @@ export function processWireRow(state, row, agent = 'main') {
   if (rowTime !== null && (bucket.lastStepEndAt === null || rowTime > bucket.lastStepEndAt)) {
     bucket.lastStepEndAt = rowTime;
   }
+  // end_turn closes the turn (other finish reasons keep it running through
+  // tool calls and further steps). Turn boundaries are main-agent only.
+  if (
+    agent === 'main' &&
+    ev.finishReason === 'end_turn' &&
+    rowTime !== null &&
+    (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt)
+  ) {
+    bucket.lastTurnEndAt = rowTime;
+  }
   if (Number.isFinite(ev.llmFirstTokenLatencyMs) && ev.llmFirstTokenLatencyMs >= 0) {
     bucket.lastTtftMs = ev.llmFirstTokenLatencyMs;
   }
@@ -353,6 +385,44 @@ export function processWireRow(state, row, agent = 'main') {
       // invalidates it.
       state.lastMedian = median(bucket.samples.slice(-MAX_SAMPLES).map((s) => s.v));
     }
+  }
+}
+
+/**
+ * Backfill-only handler for turn-boundary rows (turn.prompt / turn.cancel /
+ * end_turn step.end). Unlike the live path it must not run the full reducer:
+ * folding a step.end again would duplicate its TPS sample (the offset
+ * already covered it), and a turn.prompt through applyCacheWireRow would
+ * clobber the persisted cache turn.
+ * @param {object} state mutated in place
+ * @param {object} row parsed wire.jsonl line (main wire only)
+ */
+function applyTurnBoundaryRow(state, row) {
+  const rowTime = Number.isFinite(row?.time) && row.time >= 0 ? row.time : null;
+  if (rowTime === null) return;
+  if (!state.agents || typeof state.agents !== 'object') state.agents = {};
+  const bucket = normAgent(state.agents.main);
+  state.agents.main = bucket;
+  if (row?.type === 'turn.prompt') {
+    if (bucket.lastTurnPromptAt === null || rowTime > bucket.lastTurnPromptAt) {
+      bucket.lastTurnPromptAt = rowTime;
+    }
+    return;
+  }
+  if (row?.type === 'turn.cancel') {
+    if (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt) {
+      bucket.lastTurnEndAt = rowTime;
+    }
+    return;
+  }
+  const ev = row?.event;
+  if (
+    row?.type === 'context.append_loop_event' &&
+    ev?.type === 'step.end' &&
+    ev.finishReason === 'end_turn' &&
+    (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt)
+  ) {
+    bucket.lastTurnEndAt = rowTime;
   }
 }
 
@@ -420,7 +490,10 @@ function isBackfillLine(line) {
     line.includes('"modelAlias"') ||
     line.includes('"type":"goal.') ||
     line.includes('"type":"forked"') ||
-    line.includes('"type":"swarm_mode.')
+    line.includes('"type":"swarm_mode.') ||
+    line.includes('"type":"turn.prompt"') ||
+    line.includes('"type":"turn.cancel"') ||
+    line.includes('"finishReason":"end_turn"')
   );
 }
 
@@ -471,11 +544,12 @@ export function median(arr) {
  * the head count (`activeAgents`), and TTFT is the median across active
  * agents so one stuck agent cannot poison the display. A single active
  * agent keeps the hardened MIN_SAMPLES gate; an idle session falls back to
- * the last full-window median (flagged stale). `generatingSince` is set
- * while any agent has a request in flight.
+ * the last full-window median (flagged stale). `turnStartedAt` anchors the
+ * live timer at the user's latest prompt (turn.prompt) until the turn ends
+ * (end_turn or turn.cancel).
  * @param {string} sessionId
  * @param {object} [opts]
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, activeAgents: number, generatingSince: number|null}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, activeAgents: number, turnStartedAt: number|null}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
@@ -485,7 +559,7 @@ export function getMetrics(sessionId, {
   const empty = {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
     modelAlias: null, swarmMode: false, cache: null,
-    tpsTotal: null, activeAgents: 0, generatingSince: null,
+    tpsTotal: null, activeAgents: 0, turnStartedAt: null,
   };
   try {
     if (!sessionId) return empty;
@@ -565,7 +639,16 @@ export function getMetrics(sessionId, {
               for (const line of text.split('\n')) {
                 if (!isBackfillLine(line)) continue;
                 try {
-                  processWireRow(state, JSON.parse(line), 'main');
+                  const row = JSON.parse(line);
+                  if (
+                    row?.type === 'turn.prompt' ||
+                    row?.type === 'turn.cancel' ||
+                    row?.type === 'context.append_loop_event'
+                  ) {
+                    applyTurnBoundaryRow(state, row);
+                  } else {
+                    processWireRow(state, row, 'main');
+                  }
                 } catch {
                   // keep scanning
                 }
@@ -613,7 +696,6 @@ export function getMetrics(sessionId, {
     // and idle.
     const activeSpeeds = [];
     const activeTtfts = [];
-    let generatingSince = null;
     let activeAgents = 0;
     let soleActive = null;
     for (const [name, a] of Object.entries(state.agents)) {
@@ -629,9 +711,6 @@ export function getMetrics(sessionId, {
         && now - a.lastRequestAt < SAMPLE_WINDOW_MS
         && (a.lastStepEndAt === null || a.lastRequestAt > a.lastStepEndAt);
       const recent = fresh.length > 0 && fresh[fresh.length - 1].t >= now - ACTIVE_WINDOW_MS;
-      if (generating && (generatingSince === null || a.lastRequestAt > generatingSince)) {
-        generatingSince = a.lastRequestAt;
-      }
       if (!generating && !recent) continue;
       activeAgents += 1;
       soleActive = { name, bucket: a, fresh, speed };
@@ -683,6 +762,15 @@ export function getMetrics(sessionId, {
       ttftMs = state.agents.main?.lastTtftMs ?? null;
     }
 
+    // The turn-work timer anchors at the user's latest prompt and runs
+    // until the turn ends (end_turn or cancel) — spanning tool calls and
+    // individual steps, not just one request.
+    const mainBucket = state.agents.main;
+    const turnStartedAt = mainBucket
+      && mainBucket.lastTurnPromptAt !== null
+      && (mainBucket.lastTurnEndAt === null || mainBucket.lastTurnPromptAt > mainBucket.lastTurnEndAt)
+      ? mainBucket.lastTurnPromptAt
+      : null;
     return {
       tps,
       tpsStale,
@@ -694,7 +782,7 @@ export function getMetrics(sessionId, {
       cache: cacheMetricFromState(state),
       tpsTotal,
       activeAgents,
-      generatingSince,
+      turnStartedAt,
     };
   } catch {
     return empty;

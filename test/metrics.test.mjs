@@ -20,6 +20,7 @@ function stepEnd({
   streamMs,
   ttftMs,
   time = EVENT_TIME,
+  finishReason = 'end_turn',
   turnId = '6',
   inputOther = 952,
   inputCacheRead = 67840,
@@ -32,7 +33,7 @@ function stepEnd({
       turnId,
       step: 11,
       usage: { inputOther, output, inputCacheRead, inputCacheCreation },
-      finishReason: 'end_turn',
+      finishReason,
       llmFirstTokenLatencyMs: ttftMs,
       llmStreamDurationMs: streamMs,
     },
@@ -40,12 +41,12 @@ function stepEnd({
   });
 }
 
-function turnPrompt(text = 'hello') {
+function turnPrompt(text = 'hello', time = EVENT_TIME) {
   return JSON.stringify({
     type: 'turn.prompt',
     input: [{ type: 'text', text }],
     origin: { kind: 'user' },
-    time: EVENT_TIME,
+    time,
   });
 }
 
@@ -175,12 +176,13 @@ test('processWireChunk accepts the newer thinkingEffort key', () => {
   assert.equal(state.thinkingLevel, 'max');
 });
 
-test('processWireChunk ignores subagent config/goal/swarm rows', () => {
+test('processWireChunk ignores subagent config/goal/swarm/turn rows', () => {
   const state = makeState();
   const lines = [
     '{"type":"config.update","modelAlias":"kimi-code/k3","thinkingEffort":"max","time":1}',
     '{"type":"goal.create","goalId":"g1","objective":"do it","time":2}',
     '{"type":"swarm_mode.enter","trigger":"manual","time":3}',
+    turnPrompt(),
     stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }),
   ].join('\n') + '\n';
   processWireChunk(state, lines, 'agent-0');
@@ -188,6 +190,8 @@ test('processWireChunk ignores subagent config/goal/swarm rows', () => {
   assert.equal(state.modelAlias, null);
   assert.equal(state.goal, null);
   assert.equal(state.swarmMode, false);
+  // Turn boundaries are main-agent only...
+  assert.equal(state.agents['agent-0'].lastTurnPromptAt, null);
   // ...while the subagent's own speed sample still lands in its bucket.
   assert.equal(state.agents['agent-0'].samples.length, 1);
 });
@@ -213,6 +217,25 @@ test('processWireChunk turn.cancel closes an in-flight generation', () => {
   );
   assert.equal(state.agents.main.lastRequestAt, EVENT_TIME);
   assert.equal(state.agents.main.lastStepEndAt, EVENT_TIME + 500);
+});
+
+test('processWireChunk tracks turn boundaries on the main agent', () => {
+  const state = makeState();
+  processWireChunk(state, turnPrompt() + '\n');
+  assert.equal(state.agents.main.lastTurnPromptAt, EVENT_TIME);
+  assert.equal(state.agents.main.lastTurnEndAt, null);
+  // A mid-turn tool step does not end the turn.
+  processWireChunk(
+    state,
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000, finishReason: 'tool_use' }) + '\n',
+  );
+  assert.equal(state.agents.main.lastTurnEndAt, null);
+  // end_turn closes it.
+  processWireChunk(
+    state,
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 2000 }) + '\n',
+  );
+  assert.equal(state.agents.main.lastTurnEndAt, EVENT_TIME + 2000);
 });
 
 test('processWireChunk compaction never marks generating and its completion closes', () => {
@@ -612,7 +635,7 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   assert.equal(m.thinkingLevel, 'high');
   // Second run must not rescan (versioned scan marker persisted).
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 5);
+  assert.equal(state.backfillScanV, 6);
 });
 
 test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
@@ -633,7 +656,7 @@ test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', ()
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 5);
+  assert.equal(state.backfillScanV, 6);
   assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
 });
 
@@ -654,7 +677,7 @@ test('getMetrics fresh sessions derive tracked rows without a separate backfill 
   assert.ok(m.goal);
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 5); // marker still set, no rescan later
+  assert.equal(state.backfillScanV, 6); // marker still set, no rescan later
 });
 
 test('getMetrics tracks swarm mode from the wire journal', () => {
@@ -666,6 +689,39 @@ test('getMetrics tracks swarm mode from the wire journal', () => {
   fs.appendFileSync(wirePath, '{"type":"swarm_mode.exit","time":2}\n');
   const off = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(off.swarmMode, false);
+});
+
+test('getMetrics v6 backfill re-scans v5 states and anchors the turn timer', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    turnPrompt() + '\n' +
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000, finishReason: 'tool_use' }) + '\n',
+  );
+  // 0.3.0-era state: offset already past the prompt, turn boundaries never
+  // captured, marker at v5.
+  const size = fs.statSync(wirePath).size;
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({
+      v: 6,
+      agents: {
+        main: {
+          offset: size, fileId: null, samples: [], lastTtftMs: null,
+          lastSampleAt: null, lastRequestAt: null, lastStepEndAt: null,
+          lastTurnPromptAt: null, lastTurnEndAt: null,
+        },
+      },
+      backfillScanV: 5,
+    }),
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  // The one-time re-scan recovers the open turn: prompt with no later
+  // end_turn means the timer is anchored right now.
+  assert.equal(m.turnStartedAt, EVENT_TIME);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.equal(state.backfillScanV, 6);
 });
 
 test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', () => {
@@ -685,7 +741,7 @@ test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', 
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 5);
+  assert.equal(state.backfillScanV, 6);
 });
 
 test('getMetrics aggregates an active fleet: total, average, count, TTFT median', () => {
@@ -749,35 +805,42 @@ test('getMetrics solo display keeps the 3-sample warmup gate', () => {
   assert.equal(m.ttftMs, 200);
 });
 
-test('getMetrics reports generatingSince while a request is in flight', () => {
-  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+test('getMetrics runs the turn timer from the prompt until end_turn or cancel', () => {
+  const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
-  fs.writeFileSync(wires.main, llmRequest() + '\n');
-  fs.writeFileSync(wires['agent-0'], llmRequest({ time: EVENT_TIME + 1000 }) + '\n');
+  fs.writeFileSync(wirePath, turnPrompt() + '\n' + llmRequest() + '\n');
   let m = getMetrics(id, opts);
-  // The most recent request drives the ticker; both agents count as active.
-  assert.equal(m.generatingSince, EVENT_TIME + 1000);
-  assert.equal(m.activeAgents, 2);
-  assert.equal(m.tps, null); // no samples yet
+  // The timer anchors at the user's prompt, not the first request.
+  assert.equal(m.turnStartedAt, EVENT_TIME);
+  assert.equal(m.activeAgents, 1);
 
-  // The subagent finishes; the main request is still in flight.
+  // A mid-turn tool step keeps the timer running.
   fs.appendFileSync(
-    wires['agent-0'],
+    wirePath,
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000, finishReason: 'tool_use' }) + '\n',
+  );
+  m = getMetrics(id, opts);
+  assert.equal(m.turnStartedAt, EVENT_TIME);
+
+  // end_turn stops the timer.
+  fs.appendFileSync(
+    wirePath,
     stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 2000 }) + '\n',
   );
   m = getMetrics(id, opts);
-  assert.equal(m.generatingSince, EVENT_TIME);
-  assert.equal(m.activeAgents, 2); // main generating + subagent's recent sample
+  assert.equal(m.turnStartedAt, null);
 
-  // Main is cancelled (ESC): the ticker stops without waiting for a timeout.
+  // A new prompt re-anchors; ESC (turn.cancel) stops it immediately.
+  fs.appendFileSync(wirePath, turnPrompt('again', EVENT_TIME + 3000) + '\n');
+  m = getMetrics(id, opts);
+  assert.equal(m.turnStartedAt, EVENT_TIME + 3000);
   fs.appendFileSync(
-    wires.main,
-    JSON.stringify({ type: 'turn.cancel', time: EVENT_TIME + 3000 }) + '\n',
+    wirePath,
+    JSON.stringify({ type: 'turn.cancel', time: EVENT_TIME + 4000 }) + '\n',
   );
   m = getMetrics(id, opts);
-  assert.equal(m.generatingSince, null);
-  assert.equal(m.activeAgents, 1);
+  assert.equal(m.turnStartedAt, null);
 });
 
 test('getMetrics persists and incrementally updates current-turn cache usage', () => {
@@ -926,6 +989,6 @@ test('getMetrics returns nulls for unknown sessions', () => {
   assert.deepEqual(m, {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
     modelAlias: null, swarmMode: false, cache: null,
-    tpsTotal: null, activeAgents: 0, generatingSince: null,
+    tpsTotal: null, activeAgents: 0, turnStartedAt: null,
   });
 });

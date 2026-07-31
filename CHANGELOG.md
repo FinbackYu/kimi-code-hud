@@ -6,6 +6,17 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-31
+
+### Changed
+
+- The live `gen Ns` timer now measures the whole turn — from your prompt
+  (`turn.prompt`) until the turn ends (`end_turn` or `turn.cancel`), spanning
+  tool calls and steps — instead of only the current LLM request.
+- Existing state files re-scan once (backfill v6) to recover an in-flight
+  turn; the backfill folds turn boundaries through a narrow handler so it
+  cannot duplicate TPS samples or clobber cache counters.
+
 ## [0.3.0] - 2026-07-31
 
 ### Added
@@ -58,6 +69,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.1
 [0.3.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.0
 [0.2.7]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.2.7

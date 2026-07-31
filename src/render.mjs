@@ -208,15 +208,16 @@ function buildSegments(layout, ctx) {
   // Speed segment. A fresh solo window (enough recent, reliable samples)
   // renders bright; once it expires the last median stays visible in muted
   // gray instead of disappearing. With several active agents
-  // (swarm/subagents) show the fleet total plus "N agents @avg". While a
-  // request is in flight (generatingSince set) the segment swaps the static
-  // last-step TTFT for a live "gen <elapsed>" ticker — step.end samples only
-  // land when a step finishes, so without it the number looks frozen during
-  // long generations. Only the initial warmup (no median yet, nothing in
-  // flight) falls back to a bare TTFT.
-  const genSince = metrics && typeof metrics.generatingSince === 'number' ? metrics.generatingSince : null;
+  // (swarm/subagents) show the fleet total plus "N agents @avg". While the
+  // turn is running (turnStartedAt set — from the user's prompt until
+  // end_turn/cancel) the segment swaps the static last-step TTFT for a live
+  // "gen <elapsed>" turn-work timer, so long generations and tool runs show
+  // how long the command has been working, not just one request. Only the
+  // initial warmup (no median yet, no turn in flight) falls back to a bare
+  // TTFT.
+  const turnStart = metrics && typeof metrics.turnStartedAt === 'number' ? metrics.turnStartedAt : null;
   const multi = metrics && typeof metrics.tpsTotal === 'number' && metrics.activeAgents > 1;
-  const gen = genSince !== null ? formatElapsed(now - genSince) : null;
+  const gen = turnStart !== null ? formatElapsed(now - turnStart) : null;
   if (metrics && typeof metrics.tps === 'number') {
     const avg = Math.round(metrics.tps);
     const paint = (s) => (metrics.tpsStale === true ? colorize(color, C.muted, s) : s);
@@ -231,7 +232,7 @@ function buildSegments(layout, ctx) {
       const ttft = live === null ? formatTtft(metrics.ttftMs) : null;
       segs.push(paint(`${base}${live ?? ''}${ttft ? ` · TTFT ${ttft}` : ''}`));
     }
-  } else if (metrics && genSince !== null) {
+  } else if (metrics && turnStart !== null) {
     const n = metrics.activeAgents > 1 ? ` (${metrics.activeAgents} agents)` : '';
     segs.push(`⚡ gen ${gen}${n}`);
   } else if (metrics) {
@@ -299,7 +300,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, activeAgents, generatingSince}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, activeAgents, turnStartedAt}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] full|normal|compact
  * @param {boolean} [ctx.color]
