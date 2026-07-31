@@ -3,24 +3,48 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { median, processWireChunk, getMetrics, findWirePath } from '../src/metrics.mjs';
+import {
+  CACHE_BACKFILL_MAX_BYTES,
+  median,
+  processWireChunk,
+  getMetrics,
+  findWirePath,
+} from '../src/metrics.mjs';
 
 const EVENT_TIME = Date.parse('2026-07-31T00:00:00Z');
 const FRESH_NOW = EVENT_TIME + 60_000;
 
-function stepEnd({ output, streamMs, ttftMs, time = EVENT_TIME }) {
+function stepEnd({
+  output,
+  streamMs,
+  ttftMs,
+  time = EVENT_TIME,
+  turnId = '6',
+  inputOther = 952,
+  inputCacheRead = 67840,
+  inputCacheCreation = 0,
+}) {
   return JSON.stringify({
     type: 'context.append_loop_event',
     event: {
       type: 'step.end',
-      turnId: '6',
+      turnId,
       step: 11,
-      usage: { inputOther: 952, output, inputCacheRead: 67840, inputCacheCreation: 0 },
+      usage: { inputOther, output, inputCacheRead, inputCacheCreation },
       finishReason: 'end_turn',
       llmFirstTokenLatencyMs: ttftMs,
       llmStreamDurationMs: streamMs,
     },
     time,
+  });
+}
+
+function turnPrompt(text = 'hello') {
+  return JSON.stringify({
+    type: 'turn.prompt',
+    input: [{ type: 'text', text }],
+    origin: { kind: 'user' },
+    time: EVENT_TIME,
   });
 }
 
@@ -403,10 +427,148 @@ test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', 
   assert.equal(state.backfillScanV, 5);
 });
 
+test('getMetrics persists and incrementally updates current-turn cache usage', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wirePath,
+    turnPrompt() + '\n' +
+      stepEnd({
+        output: 100,
+        streamMs: 1000,
+        ttftMs: 500,
+        turnId: '1',
+        inputOther: 100,
+        inputCacheRead: 300,
+        inputCacheCreation: 100,
+      }) + '\n',
+  );
+
+  let m = getMetrics(id, opts);
+  assert.deepEqual(m.cache, { hitRate: 0.6, readTokens: 300, inputTokens: 500 });
+
+  fs.appendFileSync(
+    wirePath,
+    stepEnd({
+      output: 100,
+      streamMs: 1000,
+      ttftMs: 400,
+      turnId: '1',
+      inputOther: 400,
+      inputCacheRead: 100,
+      inputCacheCreation: 0,
+    }) + '\n',
+  );
+  m = getMetrics(id, opts);
+  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000 });
+
+  const persisted = JSON.parse(
+    fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'),
+  );
+  assert.equal(persisted.cacheTurn.turnId, '1');
+  assert.equal(persisted.cacheTurn.inputTokens, 1000);
+  assert.equal(persisted.cacheScanV, 1);
+});
+
+test('getMetrics clears the previous cache value as soon as a new prompt arrives', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wirePath,
+    turnPrompt('first') + '\n' +
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 500, turnId: '1' }) + '\n',
+  );
+  assert.notEqual(getMetrics(id, opts).cache, null);
+
+  fs.appendFileSync(wirePath, turnPrompt('second') + '\n');
+  assert.equal(getMetrics(id, opts).cache, null);
+});
+
+test('cache migration restores only usage before the old offset then reads new bytes once', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const first = turnPrompt() + '\n' + stepEnd({
+    output: 100,
+    streamMs: 1000,
+    ttftMs: 500,
+    turnId: '1',
+    inputOther: 100,
+    inputCacheRead: 300,
+    inputCacheCreation: 100,
+  }) + '\n';
+  fs.writeFileSync(wirePath, first);
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({
+      offset: Buffer.byteLength(first),
+      samples: [100, 200, 300],
+      lastTtftMs: 500,
+      lastSampleAt: EVENT_TIME,
+      lastMedian: 200,
+      sampleStateV: 1,
+      backfillScanV: 5,
+    }),
+  );
+  fs.appendFileSync(
+    wirePath,
+    stepEnd({
+      output: 100,
+      streamMs: 1000,
+      ttftMs: 400,
+      turnId: '1',
+      inputOther: 400,
+      inputCacheRead: 100,
+      inputCacheCreation: 0,
+    }) + '\n',
+  );
+
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(m.tps, 150); // only the newly appended TPS row was added
+  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000 });
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.deepEqual(state.samples, [100, 200, 300, 100]);
+});
+
+test('bounded cache migration hides a turn whose prompt lies beyond the 1 MiB tail', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const oversized = JSON.stringify({
+    type: 'other',
+    data: 'x'.repeat(CACHE_BACKFILL_MAX_BYTES),
+  });
+  fs.writeFileSync(
+    wirePath,
+    turnPrompt() + '\n' + oversized + '\n' +
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 500, turnId: '1' }) + '\n',
+  );
+  const size = fs.statSync(wirePath).size;
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({
+      offset: size,
+      samples: [],
+      sampleStateV: 1,
+      backfillScanV: 5,
+    }),
+  );
+
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  assert.equal(getMetrics(id, opts).cache, null);
+
+  fs.appendFileSync(
+    wirePath,
+    turnPrompt('next') + '\n' +
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 400, turnId: '2' }) + '\n',
+  );
+  assert.notEqual(getMetrics(id, opts).cache, null);
+});
+
 test('getMetrics returns nulls for unknown sessions', () => {
   const m = getMetrics('nope', {
     sessionsRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-empty-')),
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-')),
   });
-  assert.deepEqual(m, { tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null, swarmMode: false });
+  assert.deepEqual(m, { tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null, swarmMode: false, cache: null });
 });

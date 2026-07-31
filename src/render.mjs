@@ -138,9 +138,9 @@ function goalBadge(goal, color, now) {
 
 /**
  * Build the segment list for one layout tier.
- * compact: model <effort> │ git:(branch) │ ⚡tps │ window pct+countdown
+ * compact: model <effort> │ git:(branch) │ ⚡tps │ Cache pct │ window pct+countdown
  * normal:  + project prefix, thinking suffix, t/s+TTFT, bars, weekly
- * full:    + Context segment, weekly countdown, version
+ * full:    + Context segment, cache token counts, weekly countdown, version
  * (Context only in full — the host's line 2 already shows the numbers)
  */
 function buildSegments(layout, ctx) {
@@ -211,9 +211,31 @@ function buildSegments(layout, ctx) {
     if (ttft) segs.push(`TTFT ${ttft}`);
   }
 
-  // Quota segments (whole section omitted when no cache yet). Compact drops
-  // the bar and keeps pct + reset countdown; other tiers show bar + pct,
-  // and all tiers show the countdown when the reset time is known.
+  // Current user-turn prompt-cache hit rate. The reducer guarantees a
+  // complete token-weighted metric; rendering stays neutral because a useful
+  // rate depends on provider and workload rather than universal thresholds.
+  const cache = metrics?.cache;
+  if (
+    cache &&
+    typeof cache.hitRate === 'number' &&
+    Number.isFinite(cache.hitRate) &&
+    cache.hitRate >= 0 &&
+    cache.hitRate <= 1
+  ) {
+    let cacheSeg = `Cache ${Math.round(cache.hitRate * 100)}%`;
+    if (
+      layout === 'full' &&
+      typeof cache.readTokens === 'number' &&
+      typeof cache.inputTokens === 'number'
+    ) {
+      cacheSeg += ` (${formatTokens(cache.readTokens)}/${formatTokens(cache.inputTokens)})`;
+    }
+    segs.push(cacheSeg);
+  }
+
+  // Quota segments (whole section omitted when no quota cache exists).
+  // Compact drops the bar and keeps pct + reset countdown; other tiers show
+  // bar + pct, and all tiers show the countdown when the reset time is known.
   if (quota) {
     for (const w of quota.windows || []) {
       const frac = w.used / w.limit;
@@ -249,7 +271,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] full|normal|compact
  * @param {boolean} [ctx.color]

@@ -3,6 +3,11 @@ import path from 'node:path';
 import os from 'node:os';
 import { HUD_DIR } from './quota.mjs';
 import { applyGoalOp } from './goal.mjs';
+import {
+  applyCacheWireRow,
+  cacheMetricFromState,
+  resetCacheState,
+} from './cache-hit.mjs';
 
 export const SESSIONS_ROOT = path.join(os.homedir(), '.kimi-code', 'sessions');
 
@@ -12,6 +17,8 @@ const MIN_STREAM_MS = 250;
 const MAX_TPS = 1000;
 const TPS_TTL_MS = 2 * 60 * 1000;
 const SAMPLE_STATE_V = 1;
+const CACHE_SCAN_V = 1;
+export const CACHE_BACKFILL_MAX_BYTES = 1024 * 1024;
 // Backfill scan version; bump when the tracked key set changes so existing
 // state files re-scan once (v2: `thinkingEffort`; v3: goal ops; v4:
 // `modelAlias`, used to keep TPS samples scoped to one model; v5:
@@ -74,7 +81,7 @@ function loadState(statePath) {
   } catch {
     // fall through
   }
-  return {
+  const state = {
     offset: 0,
     samples: [],
     lastTtftMs: null,
@@ -85,7 +92,10 @@ function loadState(statePath) {
     thinkingLevel: null,
     goal: null,
     swarmMode: false,
+    cacheScanV: CACHE_SCAN_V,
   };
+  resetCacheState(state);
+  return state;
 }
 
 function resetMetricWindow(state) {
@@ -103,6 +113,8 @@ function resetStreamState(state) {
   state.thinkingLevel = null;
   state.goal = null;
   state.swarmMode = false;
+  resetCacheState(state);
+  delete state.cacheScanV;
   delete state.backfillScanV;
   delete state.thinkingScanV; // legacy v1/v2 marker
   delete state.thinkingScanDone; // legacy v1 marker
@@ -128,6 +140,9 @@ function saveState(statePath, state) {
  * @param {object} row parsed wire.jsonl line
  */
 export function processWireRow(state, row) {
+  // Cache turns need to see every row, including turn.prompt boundaries,
+  // before the metric-specific early returns below.
+  applyCacheWireRow(state, row);
   if (row?.type === 'config.update') {
     const modelAlias =
       typeof row.modelAlias === 'string' && row.modelAlias ? row.modelAlias : null;
@@ -209,6 +224,62 @@ export function processWireRow(state, row) {
   }
 }
 
+function isCacheBackfillLine(line) {
+  return (
+    line.includes('"type":"turn.prompt"') ||
+    (
+      line.includes('"type":"context.append_loop_event"') &&
+      line.includes('"type":"step.end"')
+    )
+  );
+}
+
+/**
+ * Restore only the latest complete cache turn before the saved metrics byte
+ * offset. The read is capped so an upgrade cannot turn the 300ms hot path into
+ * an unbounded historical scan. Missing boundaries intentionally leave the
+ * metric hidden until the next turn.prompt.
+ */
+function restoreCacheState(wirePath, state) {
+  const end = Math.max(0, Math.floor(state.offset));
+  resetCacheState(state, { needsPrompt: end > 0 });
+  if (end === 0) {
+    state.cacheScanV = CACHE_SCAN_V;
+    return;
+  }
+
+  const len = Math.min(end, CACHE_BACKFILL_MAX_BYTES);
+  const start = end - len;
+  const fd = fs.openSync(wirePath, 'r');
+  let text;
+  try {
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, start);
+    text = buf.toString('utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  // A bounded tail commonly begins in the middle of a JSONL row. Discard it
+  // rather than risk parsing a partial prompt or usage object.
+  if (start > 0) {
+    const firstNl = text.indexOf('\n');
+    text = firstNl >= 0 ? text.slice(firstNl + 1) : '';
+  }
+  const lastNl = text.lastIndexOf('\n');
+  text = lastNl >= 0 ? text.slice(0, lastNl + 1) : '';
+
+  for (const line of text.split('\n')) {
+    if (!line || !isCacheBackfillLine(line)) continue;
+    try {
+      applyCacheWireRow(state, JSON.parse(line));
+    } catch {
+      // keep scanning the bounded tail
+    }
+  }
+  state.cacheScanV = CACHE_SCAN_V;
+}
+
 /** True when a raw line might carry a backfill-tracked key (cheap prefilter). */
 function isBackfillLine(line) {
   return (
@@ -260,14 +331,14 @@ export function median(arr) {
  * offset when it exceeds the file size. Never throws.
  * @param {string} sessionId
  * @param {object} [opts]
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
   stateDir = HUD_DIR,
   now = Date.now(),
 } = {}) {
-  const empty = { tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null, swarmMode: false };
+  const empty = { tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null, swarmMode: false, cache: null };
   try {
     if (!sessionId) return empty;
     const wirePath = findWirePath(sessionId, sessionsRoot);
@@ -322,6 +393,16 @@ export function getMetrics(sessionId, {
       delete state.thinkingScanDone; // legacy v1 marker
       stateChanged = true;
     }
+    if ((state.cacheScanV ?? 0) < CACHE_SCAN_V) {
+      try {
+        restoreCacheState(wirePath, state);
+      } catch {
+        // Do not accept a partial current turn when restoration failed. Leave
+        // the version unset so a later refresh can retry the bounded read.
+        resetCacheState(state, { needsPrompt: true });
+      }
+      stateChanged = true;
+    }
     if (size > state.offset) {
       const fd = fs.openSync(wirePath, 'r');
       try {
@@ -359,6 +440,7 @@ export function getMetrics(sessionId, {
       goal: state.goal ?? null,
       modelAlias: state.modelAlias ?? null,
       swarmMode: state.swarmMode === true,
+      cache: cacheMetricFromState(state),
     };
   } catch {
     return empty;

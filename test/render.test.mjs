@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { renderHud, bar, formatCountdown } from '../src/render.mjs';
 
 const NOW = Date.parse('2026-07-30T10:00:00Z');
+const CACHE_METRIC = { hitRate: 88064 / 95744, readTokens: 88064, inputTokens: 95744 };
 
 function basePayload(overrides = {}) {
   return {
@@ -130,6 +131,51 @@ test('TTFT remains visible while TPS is warming up', () => {
   assert.ok(!compact.includes('⚡'));
 });
 
+test('cache hit rate appears after speed and before quota in every layout', () => {
+  for (const layout of ['compact', 'normal', 'full']) {
+    const [line] = renderHud(baseCtx({
+      layout,
+      metrics: { tps: 47, ttftMs: 1300, cache: CACHE_METRIC },
+    }));
+    assert.ok(line.includes('Cache 92%'), `${layout}: ${line}`);
+    assert.ok(line.indexOf('⚡') < line.indexOf('Cache 92%'), `${layout}: ${line}`);
+    assert.ok(line.indexOf('Cache 92%') < line.indexOf('5h'), `${layout}: ${line}`);
+    if (layout === 'full') {
+      assert.ok(line.includes('Cache 92% (86K/94K)'));
+    } else {
+      assert.ok(!line.includes('(86K/94K)'));
+    }
+  }
+});
+
+test('cache zero rate is shown while unavailable or invalid rates are omitted', () => {
+  const [zero] = renderHud(baseCtx({
+    metrics: {
+      tps: 47,
+      ttftMs: 1300,
+      cache: { hitRate: 0, readTokens: 0, inputTokens: 100 },
+    },
+  }));
+  assert.ok(zero.includes('Cache 0%'));
+
+  for (const cache of [null, { hitRate: Number.NaN }, { hitRate: -0.1 }, { hitRate: 1.1 }]) {
+    const [line] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, cache } }));
+    assert.ok(!line.includes('Cache'));
+  }
+});
+
+test('cache segment has no semantic threshold color', () => {
+  const [line] = renderHud(baseCtx({
+    layout: 'normal',
+    color: true,
+    metrics: { tps: null, ttftMs: null, cache: CACHE_METRIC },
+  }));
+  assert.ok(line.includes(' │ Cache 92% │ '));
+  assert.ok(!line.includes('\x1b[32mCache'));
+  assert.ok(!line.includes('\x1b[33mCache'));
+  assert.ok(!line.includes('\x1b[31mCache'));
+});
+
 test('stale TPS stays visible in muted gray', () => {
   const metrics = { tps: 47, tpsStale: true, ttftMs: 1300 };
   const [normal] = renderHud(baseCtx({ layout: 'normal', color: true, metrics }));
@@ -170,9 +216,12 @@ test('width defense downgrades full -> compact', () => {
   const [line] = renderHud(baseCtx({
     layout: 'full',
     payload: basePayload({ cwd: `/tmp/${longName}` }),
+    metrics: { tps: 47, ttftMs: 1300, cache: CACHE_METRIC },
   }));
   assert.ok(line.length <= 220); // compact tier guaranteed <= MAX_WIDTH
   assert.ok(!line.includes('v0.31.0')); // downgraded away from full
+  assert.ok(line.includes('Cache 92%')); // compact retains the percentage
+  assert.ok(!line.includes('(86K/94K)')); // full-only counts were dropped
 });
 
 test('color badges: yolo warning amber, auto bright red, plan primary blue', () => {
