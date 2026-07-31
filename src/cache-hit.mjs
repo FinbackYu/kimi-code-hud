@@ -1,51 +1,37 @@
 /**
- * Current-turn prompt-cache metrics reconstructed from the main agent's wire
- * journal. The caller owns persistence; this module only mutates the supplied
- * state and derives a render-safe metric.
+ * Session-cumulative prompt-cache metrics reconstructed from the main agent's
+ * wire journal. The caller owns persistence; this module only mutates the
+ * supplied state and derives a render-safe metric.
  */
 
-function emptyCacheTurn() {
+function emptyCache() {
   return {
-    turnId: null,
     readTokens: 0,
     inputTokens: 0,
-    complete: true,
+    // True between a turn.prompt and that turn's first fully-counted
+    // step.end: the cumulative ratio then lags the live session and renders
+    // dimmed instead of disappearing (which used to jump the line width).
+    awaitsUsage: false,
   };
 }
 
 function ensureCacheState(state) {
-  const cache = state.cacheTurn;
-  const validTurnId =
-    cache?.turnId === null ||
-    typeof cache?.turnId === 'string' ||
-    typeof cache?.turnId === 'number';
+  const cache = state.cache;
   const validCounters =
     validUsageNumber(cache?.readTokens) &&
     validUsageNumber(cache?.inputTokens) &&
     cache.readTokens <= cache.inputTokens;
-  if (
-    !cache ||
-    typeof cache !== 'object' ||
-    !validTurnId ||
-    !validCounters ||
-    typeof cache.complete !== 'boolean'
-  ) {
-    state.cacheTurn = emptyCacheTurn();
-  }
-  if (typeof state.cacheNeedsPrompt !== 'boolean') {
-    state.cacheNeedsPrompt = false;
+  if (!cache || typeof cache !== 'object' || !validCounters || typeof cache.awaitsUsage !== 'boolean') {
+    state.cache = emptyCache();
   }
 }
 
 /**
- * Reset the current-turn cache state.
+ * Reset the session cache counters (wire truncated/rotated, restore retry).
  * @param {object} state mutated in place
- * @param {object} [opts]
- * @param {boolean} [opts.needsPrompt]
  */
-export function resetCacheState(state, { needsPrompt = false } = {}) {
-  state.cacheTurn = emptyCacheTurn();
-  state.cacheNeedsPrompt = needsPrompt;
+export function resetCacheState(state) {
+  state.cache = emptyCache();
 }
 
 function validUsageNumber(value) {
@@ -53,9 +39,11 @@ function validUsageNumber(value) {
 }
 
 /**
- * Fold one wire row into the current-turn cache counters. Only turn.prompt
- * and context.append_loop_event/step.end are relevant; usage.record is
- * deliberately ignored because it duplicates the step.end usage.
+ * Fold one wire row into the session cache counters. turn.prompt only marks
+ * the ratio as awaiting fresh usage; step.end accumulates cumulatively — the
+ * metric describes the whole session, not the current turn. usage.record is
+ * deliberately ignored because it duplicates the step.end usage. A step.end
+ * without complete usage fields is skipped rather than poisoning the ratio.
  * @param {object} state mutated in place
  * @param {object} row parsed wire.jsonl line
  */
@@ -63,27 +51,12 @@ export function applyCacheWireRow(state, row) {
   ensureCacheState(state);
 
   if (row?.type === 'turn.prompt') {
-    resetCacheState(state);
+    state.cache.awaitsUsage = true;
     return;
   }
   if (row?.type !== 'context.append_loop_event') return;
   const event = row.event;
-  if (!event || event.type !== 'step.end' || state.cacheNeedsPrompt) return;
-
-  const turnId =
-    typeof event.turnId === 'string' || typeof event.turnId === 'number'
-      ? event.turnId
-      : null;
-  if (
-    state.cacheTurn.turnId !== null &&
-    turnId !== null &&
-    turnId !== state.cacheTurn.turnId
-  ) {
-    resetCacheState(state);
-  }
-  if (state.cacheTurn.turnId === null && turnId !== null) {
-    state.cacheTurn.turnId = turnId;
-  }
+  if (!event || event.type !== 'step.end') return;
 
   const usage = event.usage;
   const fields = [
@@ -91,29 +64,25 @@ export function applyCacheWireRow(state, row) {
     usage?.inputCacheRead,
     usage?.inputCacheCreation,
   ];
-  if (!fields.every(validUsageNumber)) {
-    state.cacheTurn.complete = false;
-    return;
-  }
-  if (!state.cacheTurn.complete) return;
+  if (!fields.every(validUsageNumber)) return;
 
-  state.cacheTurn.readTokens += usage.inputCacheRead;
-  state.cacheTurn.inputTokens +=
+  state.cache.readTokens += usage.inputCacheRead;
+  state.cache.inputTokens +=
     usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation;
+  state.cache.awaitsUsage = false;
 }
 
 /**
- * Return the render-safe current-turn cache metric, or null when the turn is
- * incomplete, still awaiting a prompt boundary, or has no input tokens.
+ * Return the render-safe session cache metric, or null when nothing has been
+ * counted yet. `stale` marks a turn that has prompted but not yet contributed
+ * usage — the ratio shown is then one step behind the live session.
  * @param {object} state
- * @returns {{hitRate: number, readTokens: number, inputTokens: number}|null}
+ * @returns {{hitRate: number, readTokens: number, inputTokens: number, stale: boolean}|null}
  */
 export function cacheMetricFromState(state) {
   ensureCacheState(state);
-  const cache = state.cacheTurn;
+  const cache = state.cache;
   if (
-    state.cacheNeedsPrompt ||
-    cache.complete !== true ||
     !Number.isFinite(cache.inputTokens) ||
     cache.inputTokens <= 0 ||
     !Number.isFinite(cache.readTokens) ||
@@ -125,5 +94,6 @@ export function cacheMetricFromState(state) {
     hitRate: cache.readTokens / cache.inputTokens,
     readTokens: cache.readTokens,
     inputTokens: cache.inputTokens,
+    stale: cache.awaitsUsage,
   };
 }

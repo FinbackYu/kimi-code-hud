@@ -176,6 +176,23 @@ test('cache segment has no semantic threshold color', () => {
   assert.ok(!line.includes('\x1b[31mCache'));
 });
 
+test('stale cache ratio dims until the new turn contributes usage', () => {
+  const [dim] = renderHud(baseCtx({
+    layout: 'normal',
+    color: true,
+    metrics: { tps: 47, ttftMs: 1300, cache: { ...CACHE_METRIC, stale: true } },
+  }));
+  assert.ok(dim.includes('\x1b[90mCache 92%\x1b[0m'));
+
+  const [fresh] = renderHud(baseCtx({
+    layout: 'normal',
+    color: true,
+    metrics: { tps: 47, ttftMs: 1300, cache: { ...CACHE_METRIC, stale: false } },
+  }));
+  assert.ok(fresh.includes('Cache 92%'));
+  assert.ok(!fresh.includes('\x1b[90mCache'));
+});
+
 test('stale TPS stays visible in muted gray', () => {
   const metrics = { tps: 47, tpsStale: true, ttftMs: 1300 };
   const [normal] = renderHud(baseCtx({ layout: 'normal', color: true, metrics }));
