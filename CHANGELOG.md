@@ -6,6 +6,30 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-31
+
+### Added
+
+- Scan every agent wire in the session (main + subagents): speed samples are
+  timestamped and bucketed per agent, and only the freshest 5 within 10
+  minutes feed an agent's median, so resume continuations, idle gaps and
+  compactions never mix in stale numbers.
+- Fleet speed display when several agents are active (swarm/subagent runs):
+  total plus head count and per-agent average (`⚡ 305 t/s (12 agents @25)`);
+  TTFT is the median across active agents so one stuck agent cannot poison
+  the display. Ports the design from PR #2 with fixes (true mean instead of
+  a mislabeled median) — thanks @xiayh0107.
+- Live `gen Ns` ticker while a request is in flight, replacing the frozen
+  TTFT during long generations; `turn.cancel` and `full_compaction.complete`
+  close the in-flight window immediately (the PR let aborted generations
+  stick for 10 minutes).
+
+### Changed
+
+- Metrics state moves to per-agent buckets; flat state files migrate in
+  place, keeping the sample window, badges and cache counters, and cold
+  starts no longer read the whole main wire twice.
+
 ## [0.2.7] - 2026-07-31
 
 ### Added
@@ -34,5 +58,6 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.2.7...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.0
 [0.2.7]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.2.7
