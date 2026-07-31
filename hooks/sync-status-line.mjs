@@ -4,15 +4,23 @@
 // enabled, so it also repairs the entry after a reinstall moved the root.
 //
 // Never touches a [status_line] command that does not reference kimi-hud —
-// the user's own status line wins. Observational hook: always exits 0.
+// the user's own status line wins. Stays silent while the HUD is switched
+// off via --off ("disabled": true in config.json), or it would resurrect
+// the HUD the user meant to keep off. Observational hook: always exits 0.
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getStatusLineCommand, setStatusLineCommand } from '../src/toml.mjs';
+import { isHudDisabled } from '../src/plugin-state.mjs';
+import { HUD_DIR } from '../src/quota.mjs';
 
 function main() {
+  // --off switch: honor the flag before touching anything.
+  const hudHome = process.env.KIMI_HUD_HOME || HUD_DIR;
+  if (isHudDisabled(path.join(hudHome, 'config.json'))) return;
+
   const pluginRoot = process.env.KIMI_PLUGIN_ROOT
     || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const kimiHome = process.env.KIMI_CODE_HOME

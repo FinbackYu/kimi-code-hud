@@ -1,7 +1,10 @@
-// Managed-plugin enablement gate. When kimi-hud runs from a Kimi Code plugin
-// managed copy (<kimiHome>/plugins/managed/<id>/...), the status line should
-// only render while the plugin record in plugins/installed.json is enabled.
+// Enablement gates answering "should the HUD stay silent?".
+// Managed-plugin gate: when kimi-hud runs from a Kimi Code plugin managed
+// copy (<kimiHome>/plugins/managed/<id>/...), the status line should only
+// render while the plugin record in plugins/installed.json is enabled.
 // A plain git-checkout install (any other path) always renders.
+// Config-flag gate: isHudDisabled reads the reversible switch written by
+// `bin/kimi-hud.mjs --off` ("disabled": true in config.json).
 //
 // installed.json schema (agent-core-v2 plugin store):
 //   { "version": 1, "plugins": [ { "id", "root", "enabled", ... } ] }
@@ -49,4 +52,21 @@ export function managedPluginDisabled(scriptPath, kimiHome) {
   const record = plugins.find((p) => p && p.id === id);
   if (!record) return true; // managed copy on disk but no install record
   return record.enabled === false;
+}
+
+/**
+ * Read the user-facing on/off switch written by `bin/kimi-hud.mjs --off`.
+ * Lenient: a missing file, malformed JSON, or a missing flag all mean
+ * enabled — the switch must never blank out the status line by accident.
+ * @param {string} configPath absolute path of the HUD config.json
+ * @returns {boolean} true when the HUD must stay silent ("disabled": true)
+ */
+export function isHudDisabled(configPath) {
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    return false;
+  }
+  return cfg !== null && typeof cfg === 'object' && cfg.disabled === true;
 }

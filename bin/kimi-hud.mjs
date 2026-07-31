@@ -24,7 +24,7 @@ import { ensureHooksBlock, removeHooksBlock } from '../src/hooks.mjs';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const HOOK_SCRIPT_PATH = path.join(path.dirname(SCRIPT_PATH), '..', 'hooks', 'sync-status-line.mjs');
-const CONFIG_PATH = path.join(HUD_DIR, 'config.json');
+const CONFIG_PATH = path.join(process.env.KIMI_HUD_HOME || HUD_DIR, 'config.json');
 const TUI_TOML_PATH = process.env.KIMI_HUD_TUI_TOML
   || path.join(os.homedir(), '.kimi-code', 'tui.toml');
 const CONFIG_TOML_PATH = process.env.KIMI_HUD_CONFIG_TOML
@@ -36,6 +36,8 @@ Usage:
   kimi-code-hud                  render the status line (reads JSON from stdin)
   kimi-code-hud --install        register in ~/.kimi-code/tui.toml (+ self-heal hook)
   kimi-code-hud --uninstall      remove from ~/.kimi-code/tui.toml (+ the hook)
+  kimi-code-hud --on             re-enable: write the command back (+ ensure the hook)
+  kimi-code-hud --off            switch off (reversible): strip the command, hook stays dormant
   kimi-code-hud --refresh-quota  refresh the quota cache (internal, silent)
   kimi-code-hud --help           show this help
 
@@ -70,6 +72,24 @@ function backupFile(filePath) {
   } catch {
     // best effort
   }
+}
+
+// --off / --on are a reversible debugging switch (unlike --uninstall, which
+// also strips the config.toml hook block). The flag lives in config.json:
+// --off writes "disabled": true keeping other keys (e.g. layout), --on
+// deletes the key (absent == enabled, never written as false).
+function readHudConfig() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    return cfg && typeof cfg === 'object' ? cfg : {};
+  } catch {
+    return {}; // missing or malformed -> start from an empty object
+  }
+}
+
+function writeHudConfig(cfg) {
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(cfg, null, 2)}\n`);
 }
 
 // The host rewrites tui.toml on some upgrades (wiping [status_line]) but
@@ -112,6 +132,42 @@ function uninstall() {
   process.stdout.write(`Removed status line command from ${TUI_TOML_PATH}\n`);
   if (syncHooksBlock(false)) {
     process.stdout.write(`Removed SessionStart hook from ${CONFIG_TOML_PATH}\n`);
+  }
+  process.stdout.write('重启 Kimi Code 或运行 /reload-tui 生效\n');
+}
+
+function switchOff() {
+  const cfg = readHudConfig();
+  cfg.disabled = true;
+  writeHudConfig(cfg);
+  process.stdout.write(`Set "disabled": true in ${CONFIG_PATH}\n`);
+  const command = `node ${SCRIPT_PATH}`;
+  let content = '';
+  try { content = fs.readFileSync(TUI_TOML_PATH, 'utf8'); } catch { /* nothing to do */ }
+  backupFile(TUI_TOML_PATH);
+  fs.writeFileSync(TUI_TOML_PATH, removeStatusLineCommand(content, command));
+  process.stdout.write(`Removed status line command from ${TUI_TOML_PATH}\n`);
+  // The config.toml hook block stays in place on purpose: the SessionStart
+  // hook checks the disabled flag and stays silent while it is set.
+  process.stdout.write('重启 Kimi Code 或运行 /reload-tui 生效\n');
+}
+
+function switchOn() {
+  const cfg = readHudConfig();
+  if ('disabled' in cfg) {
+    delete cfg.disabled;
+    writeHudConfig(cfg);
+    process.stdout.write(`Removed "disabled" flag from ${CONFIG_PATH}\n`);
+  }
+  const command = `node ${SCRIPT_PATH}`;
+  let content = '';
+  try { content = fs.readFileSync(TUI_TOML_PATH, 'utf8'); } catch { /* new file */ }
+  backupFile(TUI_TOML_PATH);
+  fs.mkdirSync(path.dirname(TUI_TOML_PATH), { recursive: true });
+  fs.writeFileSync(TUI_TOML_PATH, setStatusLineCommand(content, command));
+  process.stdout.write(`Installed status line command in ${TUI_TOML_PATH}\n`);
+  if (syncHooksBlock(true)) {
+    process.stdout.write(`Registered SessionStart self-heal hook in ${CONFIG_TOML_PATH}\n`);
   }
   process.stdout.write('重启 Kimi Code 或运行 /reload-tui 生效\n');
 }
@@ -172,6 +228,8 @@ async function main() {
   }
   if (args.includes('--install')) { install(); return; }
   if (args.includes('--uninstall')) { uninstall(); return; }
+  if (args.includes('--on')) { switchOn(); return; }
+  if (args.includes('--off')) { switchOff(); return; }
   // Plugin on/off switch: when this script is the plugin managed copy and
   // the plugin is disabled or removed, hand the line back to the builtin
   // status line. Exiting non-zero alone is not enough — the host's

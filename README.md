@@ -44,6 +44,20 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 
 - **重装即更新**：再跑一遍 `/plugins install https://github.com/FinbackYu/kimi-code-hud`。托管副本原地替换，状态栏约 1 秒内自动用上新版本，无需 `/reload-tui` 或新会话。
 
+### 临时关闭 / 开启
+
+调试时想临时退回内置状态栏，不必 `--uninstall`（那会一并摘掉自愈 hook）：
+
+```bash
+node ~/kimi-code-hud/bin/kimi-hud.mjs --off
+node ~/kimi-code-hud/bin/kimi-hud.mjs --on
+```
+
+- `--off`：向 `~/.kimi-code-hud/config.json` 写入 `"disabled": true`（保留 `layout` 等其他键），备份后移除 `tui.toml` 的 `[status_line]` 命令；`config.toml` 的自愈 hook 块不动——hook 见到该旗标会保持沉默，不会在下次会话启动时把 HUD 复活；
+- `--on`：删除 `disabled` 键，把命令写回 `tui.toml` 并确保 hook 块在位。
+
+**重启 Kimi Code 或运行 `/reload-tui` 生效。**
+
 ### 卸载
 
 插件方式安装：`/plugins remove kimi-code-hud`（按官方行为托管副本仍留在磁盘上、安装记录被删除；托管副本下次运行时自动清除 `tui.toml` 里的条目，`/reload-tui` 或新会话后回退内置布局）。
@@ -58,7 +72,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
 
 ### 配置
 
-- `~/.kimi-code-hud/config.json`：`{"layout":"compact"|"normal"|"full"}`（默认 `normal`）
+- `~/.kimi-code-hud/config.json`：`{"layout":"compact"|"normal"|"full"}`（默认 `normal`）；`"disabled": true` 是 `--off` 写入的开关旗标（缺省即启用，`--on` 删除该键）
 - 环境变量 `KIMI_HUD_LAYOUT` 优先于配置文件
 - `NO_COLOR` 或 `KIMI_HUD_NO_COLOR`：禁用全部 ANSI 颜色
 

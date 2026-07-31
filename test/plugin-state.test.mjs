@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { managedPluginId, managedPluginDisabled } from '../src/plugin-state.mjs';
+import { managedPluginId, managedPluginDisabled, isHudDisabled } from '../src/plugin-state.mjs';
 
 function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
@@ -62,4 +62,34 @@ test('record without enabled flag defaults to rendering', () => {
   const home = tmpHome();
   writeInstalled(home, [{ id: 'kimi-code-hud' }]);
   assert.equal(managedPluginDisabled(managedPath(home), home), false);
+});
+
+function writeConfig(home, content) {
+  const file = path.join(home, 'config.json');
+  fs.writeFileSync(file, content);
+  return file;
+}
+
+test('isHudDisabled honors the disabled flag', () => {
+  const home = tmpHome();
+  assert.equal(isHudDisabled(writeConfig(home, '{"disabled": true, "layout": "compact"}')), true);
+});
+
+test('isHudDisabled treats disabled:false as enabled', () => {
+  const home = tmpHome();
+  assert.equal(isHudDisabled(writeConfig(home, '{"disabled": false}')), false);
+});
+
+test('isHudDisabled treats a missing flag as enabled', () => {
+  const home = tmpHome();
+  assert.equal(isHudDisabled(writeConfig(home, '{"layout": "normal"}')), false);
+});
+
+test('isHudDisabled treats malformed JSON as enabled', () => {
+  const home = tmpHome();
+  assert.equal(isHudDisabled(writeConfig(home, 'not json')), false);
+});
+
+test('isHudDisabled treats a missing file as enabled', () => {
+  assert.equal(isHudDisabled(path.join(tmpHome(), 'config.json')), false);
 });
