@@ -81,7 +81,7 @@ function syncHooksBlock(installing) {
   try { content = fs.readFileSync(CONFIG_TOML_PATH, 'utf8'); } catch { /* new file */ }
   const next = installing
     ? ensureHooksBlock(content, hookCommand)
-    : removeHooksBlock(content);
+    : removeHooksBlock(content, hookCommand);
   if (next === content) return false;
   backupFile(CONFIG_TOML_PATH);
   fs.mkdirSync(path.dirname(CONFIG_TOML_PATH), { recursive: true });
