@@ -80,13 +80,15 @@ function formatTtft(ms) {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
-/** Elapsed wall-clock for the live generation ticker: "45s" / "4m" / "1h12m" / "2d3h". */
+/** Elapsed wall-clock for the live generation ticker: "45s" / "4m5s" / "1h12m" / "2d3h". */
 function formatElapsed(ms) {
   if (typeof ms !== 'number' || ms < 0) return '0s';
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
   const mins = Math.floor(s / 60);
-  if (mins < 60) return `${mins}m`;
+  // Keep the seconds past the one-minute mark: a bare "4m" changes only once
+  // a minute and reads as a static number while the turn is still working.
+  if (mins < 60) return `${mins}m${s % 60}s`;
   const h = Math.floor(mins / 60);
   if (h < 24) return `${h}h${mins % 60}m`;
   return `${Math.floor(h / 24)}d${h % 24}h`;
@@ -151,8 +153,8 @@ function goalBadge(goal, color, now) {
 /**
  * Build the segment list for one layout tier.
  * compact: model <effort> │ git:(branch) │ ⚡tps │ Cache pct │ window pct+countdown
- * normal:  + project prefix, thinking suffix, t/s+TTFT, bars, weekly
- * full:    + Context segment, cache token counts, weekly countdown, version
+ * normal:  + project prefix, thinking suffix, t/s+TTFT, bars, weekly+countdown
+ * full:    + Context segment, cache token counts, version
  * (Context only in full — the host's line 2 already shows the numbers)
  */
 function buildSegments(layout, ctx) {
@@ -220,17 +222,23 @@ function buildSegments(layout, ctx) {
   const gen = turnStart !== null ? formatElapsed(now - turnStart) : null;
   if (metrics && typeof metrics.tps === 'number') {
     const avg = Math.round(metrics.tps);
+    // Stale (2 min without samples) dims the speed/TTFT text only; a live gen
+    // timer stays bright — the turn is actively working even though the last
+    // median is old.
     const paint = (s) => (metrics.tpsStale === true ? colorize(color, C.muted, s) : s);
     if (layout === 'compact') {
       const head = multi ? `⚡ ${Math.round(metrics.tpsTotal)} (${metrics.activeAgents}@${avg})` : `⚡ ${avg}`;
-      segs.push(paint(`${head}${gen ? ` gen ${gen}` : ''}`));
+      segs.push(gen ? `${paint(head)} gen ${gen}` : paint(head));
     } else {
       const base = multi
         ? `⚡ ${Math.round(metrics.tpsTotal)} t/s (${metrics.activeAgents} agents @${avg})`
         : `⚡ ${avg} t/s`;
-      const live = gen ? ` · gen ${gen}` : null;
-      const ttft = live === null ? formatTtft(metrics.ttftMs) : null;
-      segs.push(paint(`${base}${live ?? ''}${ttft ? ` · TTFT ${ttft}` : ''}`));
+      if (gen) {
+        segs.push(`${paint(base)} · gen ${gen}`);
+      } else {
+        const ttft = formatTtft(metrics.ttftMs);
+        segs.push(paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`));
+      }
     }
   } else if (metrics && turnStart !== null) {
     const n = metrics.activeAgents > 1 ? ` (${metrics.activeAgents} agents)` : '';
@@ -262,10 +270,13 @@ function buildSegments(layout, ctx) {
     segs.push(cacheSeg);
   }
 
-  // Quota segments (whole section omitted when no quota cache exists).
-  // Compact drops the bar and keeps pct + reset countdown; other tiers show
-  // bar + pct, and all tiers show the countdown when the reset time is known.
+  // Quota group (omitted when no quota cache exists): all windows join into
+  // one segment with "·", lighter than the "│" between segments — the 5h and
+  // 7d windows read as one quota block. Compact drops the bar and keeps pct +
+  // reset countdown; other tiers show bar + pct, and all tiers show the
+  // countdown when the reset time is known.
   if (quota) {
+    const parts = [];
     for (const w of quota.windows || []) {
       const frac = w.used / w.limit;
       let s = layout === 'compact'
@@ -273,17 +284,18 @@ function buildSegments(layout, ctx) {
         : `${w.label} ${bar(frac, color)} ${pctOf(w.used, w.limit)}%`;
       const cd = formatCountdown(w.resetAt, now);
       if (cd) s += ` ${cd}`;
-      segs.push(s);
+      parts.push(s);
     }
+    // Weekly window, labeled "7d" to match the 5h-style window labels; its
+    // reset countdown shows from normal up (compact drops the segment).
     if (layout !== 'compact' && quota.weekly) {
       const frac = quota.weekly.used / quota.weekly.limit;
-      let s = `wk ${bar(frac, color)} ${pctOf(quota.weekly.used, quota.weekly.limit)}%`;
-      if (layout === 'full') {
-        const cd = formatCountdown(quota.weekly.resetAt, now);
-        if (cd) s += ` ${cd}`;
-      }
-      segs.push(s);
+      let s = `7d ${bar(frac, color)} ${pctOf(quota.weekly.used, quota.weekly.limit)}%`;
+      const cd = formatCountdown(quota.weekly.resetAt, now);
+      if (cd) s += ` ${cd}`;
+      parts.push(s);
     }
+    if (parts.length) segs.push(parts.join(' · '));
   }
 
   if (layout === 'full' && payload.version) {

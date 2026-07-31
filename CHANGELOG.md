@@ -6,6 +6,21 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The `gen` turn timer keeps showing seconds past the one-minute mark
+  (`1m5s`), so the live ticker visibly updates every second instead of
+  looking static.
+- The weekly quota segment is labeled `7d`, consistent with the `5h`-style
+  window labels, and the normal layout now shows its reset countdown
+  (`~3d2h`) instead of only the full layout. Quota windows group into one
+  segment joined by `·` instead of the `│` segment bar.
+
+### Fixed
+
+- A live `gen` timer no longer inherits the muted gray of an expired speed
+  window: the stale TPS stays dimmed, but the running timer renders bright.
+
 ## [0.3.1] - 2026-07-31
 
 ### Changed
