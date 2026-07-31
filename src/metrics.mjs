@@ -7,10 +7,15 @@ import { applyGoalOp } from './goal.mjs';
 export const SESSIONS_ROOT = path.join(os.homedir(), '.kimi-code', 'sessions');
 
 const MAX_SAMPLES = 5;
-const MIN_STREAM_MS = 50;
+const MIN_SAMPLES = 3;
+const MIN_STREAM_MS = 250;
+const MAX_TPS = 1000;
+const TPS_TTL_MS = 2 * 60 * 1000;
+const SAMPLE_STATE_V = 1;
 // Backfill scan version; bump when the tracked key set changes so existing
-// state files re-scan once (v2: added `thinkingEffort`; v3: goal ops).
-const BACKFILL_SCAN_V = 3;
+// state files re-scan once (v2: `thinkingEffort`; v3: goal ops; v4:
+// `modelAlias`, used to keep TPS samples scoped to one model).
+const BACKFILL_SCAN_V = 4;
 
 /**
  * Locate the wire.jsonl for a session id. The payload sessionId may or may
@@ -67,13 +72,29 @@ function loadState(statePath) {
   } catch {
     // fall through
   }
-  return { offset: 0, samples: [], lastTtftMs: null, thinkingLevel: null, goal: null };
+  return {
+    offset: 0,
+    samples: [],
+    lastTtftMs: null,
+    lastSampleAt: null,
+    modelAlias: null,
+    sampleStateV: SAMPLE_STATE_V,
+    thinkingLevel: null,
+    goal: null,
+  };
+}
+
+function resetMetricWindow(state) {
+  state.samples = [];
+  state.lastTtftMs = null;
+  state.lastSampleAt = null;
 }
 
 function resetStreamState(state) {
   state.offset = 0;
-  state.samples = [];
-  state.lastTtftMs = null;
+  resetMetricWindow(state);
+  state.modelAlias = null;
+  state.sampleStateV = SAMPLE_STATE_V;
   state.thinkingLevel = null;
   state.goal = null;
   delete state.backfillScanV;
@@ -101,6 +122,20 @@ function saveState(statePath, state) {
  */
 export function processWireRow(state, row) {
   if (row?.type === 'config.update') {
+    const modelAlias =
+      typeof row.modelAlias === 'string' && row.modelAlias ? row.modelAlias : null;
+    if (modelAlias && modelAlias !== state.modelAlias) {
+      // A first observed alias after samples is also unsafe: those samples
+      // cannot be attributed to the new model with confidence.
+      if (
+        state.modelAlias ||
+        state.samples.length > 0 ||
+        state.lastTtftMs !== null
+      ) {
+        resetMetricWindow(state);
+      }
+      state.modelAlias = modelAlias;
+    }
     // Latest thinking level wins ("on"/"off" for boolean models, or a
     // concrete effort like "high"/"max" for effort-capable ones). New
     // hosts write `thinkingEffort` (including an initial event at
@@ -122,16 +157,34 @@ export function processWireRow(state, row) {
   if (row?.type !== 'context.append_loop_event') return;
   const ev = row.event;
   if (!ev || ev.type !== 'step.end') return;
-  if (typeof ev.llmFirstTokenLatencyMs === 'number' && ev.llmFirstTokenLatencyMs >= 0) {
+  if (Number.isFinite(ev.llmFirstTokenLatencyMs) && ev.llmFirstTokenLatencyMs >= 0) {
     state.lastTtftMs = ev.llmFirstTokenLatencyMs;
   }
   const out = ev.usage && typeof ev.usage.output === 'number' ? ev.usage.output : 0;
   const streamMs = typeof ev.llmStreamDurationMs === 'number' ? ev.llmStreamDurationMs : 0;
-  if (out > 0 && streamMs >= MIN_STREAM_MS) {
-    state.samples.push(out / (streamMs / 1000));
+  const sampleAt = Number.isFinite(row.time) && row.time >= 0 ? row.time : null;
+  const tps = out / (streamMs / 1000);
+  if (
+    Number.isFinite(out) &&
+    out > 0 &&
+    Number.isFinite(streamMs) &&
+    streamMs >= MIN_STREAM_MS &&
+    Number.isFinite(tps) &&
+    tps <= MAX_TPS &&
+    sampleAt !== null
+  ) {
+    if (
+      Number.isFinite(state.lastSampleAt) &&
+      sampleAt - state.lastSampleAt > TPS_TTL_MS
+    ) {
+      // Do not let a new sample revive an otherwise stale window.
+      state.samples = [];
+    }
+    state.samples.push(tps);
     if (state.samples.length > MAX_SAMPLES) {
       state.samples.splice(0, state.samples.length - MAX_SAMPLES);
     }
+    state.lastSampleAt = sampleAt;
   }
 }
 
@@ -140,6 +193,7 @@ function isBackfillLine(line) {
   return (
     line.includes('"thinkingEffort"') ||
     line.includes('"thinkingLevel"') ||
+    line.includes('"modelAlias"') ||
     line.includes('"type":"goal.') ||
     line.includes('"type":"forked"')
   );
@@ -189,6 +243,7 @@ export function median(arr) {
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
   stateDir = HUD_DIR,
+  now = Date.now(),
 } = {}) {
   const empty = { tps: null, ttftMs: null, thinkingLevel: null, goal: null };
   try {
@@ -197,10 +252,19 @@ export function getMetrics(sessionId, {
     if (!wirePath) return empty;
     const statePath = statePathFor(sessionId, stateDir);
     const state = loadState(statePath);
+    let stateChanged = false;
+    if (state.sampleStateV !== SAMPLE_STATE_V) {
+      // Old caches lack sample timestamps and model ownership. Keeping those
+      // samples would let previously accepted outliers leak into the new
+      // validity rules, so migrate by dropping only the metric window.
+      resetMetricWindow(state);
+      state.modelAlias = null;
+      state.sampleStateV = SAMPLE_STATE_V;
+      stateChanged = true;
+    }
     const stat = fs.statSync(wirePath);
     const size = stat.size;
     const fileId = `${stat.dev}:${stat.ino}`;
-    let stateChanged = false;
     // A smaller file was truncated in place; a different device/inode means
     // log rotation or replacement. In either case, old samples and offsets no
     // longer describe this stream and must be discarded together.
@@ -214,8 +278,8 @@ export function getMetrics(sessionId, {
     }
     // One-time backfill: sessions whose offset predates a tracked key would
     // otherwise never see earlier events (initial config.update, goal.create).
-    // Versioned marker: v2 matched the newer `thinkingEffort` key; v3 also
-    // folds in goal ops. The substring prefilter keeps this fast even on
+    // Versioned marker: v2 matched `thinkingEffort`, v3 added goal ops, and
+    // v4 adds `modelAlias`. The substring prefilter keeps this fast even on
     // multi-MB logs.
     if ((state.backfillScanV ?? state.thinkingScanV ?? 0) < BACKFILL_SCAN_V) {
       try {
@@ -255,8 +319,15 @@ export function getMetrics(sessionId, {
       }
     }
     if (stateChanged) saveState(statePath, state);
+    const sampleAge =
+      Number.isFinite(state.lastSampleAt) && Number.isFinite(now)
+        ? now - state.lastSampleAt
+        : Number.POSITIVE_INFINITY;
+    const hasFreshWindow =
+      state.samples.length >= MIN_SAMPLES &&
+      sampleAge <= TPS_TTL_MS;
     return {
-      tps: median(state.samples),
+      tps: hasFreshWindow ? median(state.samples) : null,
       ttftMs: state.lastTtftMs ?? null,
       thinkingLevel: state.thinkingLevel ?? null,
       goal: state.goal ?? null,

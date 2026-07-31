@@ -131,7 +131,7 @@ test('getMetrics rebuilds goal state from the wire journal', () => {
   assert.equal(m3.goal, null);
 });
 
-test('getMetrics v3 backfill picks up goal ops from before the offset', () => {
+test('getMetrics current backfill picks up goal ops from before the offset', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   fs.writeFileSync(
@@ -148,6 +148,6 @@ test('getMetrics v3 backfill picks up goal ops from before the offset', () => {
   const m = getMetrics(id, { sessionsRoot: root, stateDir });
   assert.equal(m.goal.turnsUsed, 5);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 3);
+  assert.equal(state.backfillScanV, 4);
   assert.equal(state.thinkingScanV, undefined); // legacy marker dropped
 });

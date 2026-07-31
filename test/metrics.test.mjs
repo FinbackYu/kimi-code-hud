@@ -5,7 +5,10 @@ import path from 'node:path';
 import os from 'node:os';
 import { median, processWireChunk, getMetrics, findWirePath } from '../src/metrics.mjs';
 
-function stepEnd({ output, streamMs, ttftMs }) {
+const EVENT_TIME = Date.parse('2026-07-31T00:00:00Z');
+const FRESH_NOW = EVENT_TIME + 60_000;
+
+function stepEnd({ output, streamMs, ttftMs, time = EVENT_TIME }) {
   return JSON.stringify({
     type: 'context.append_loop_event',
     event: {
@@ -17,7 +20,7 @@ function stepEnd({ output, streamMs, ttftMs }) {
       llmFirstTokenLatencyMs: ttftMs,
       llmStreamDurationMs: streamMs,
     },
-    time: 1780239554281,
+    time,
   });
 }
 
@@ -59,12 +62,25 @@ test('processWireChunk computes TPS and keeps last 5 samples', () => {
   assert.equal(state.lastTtftMs, 900);
 });
 
+test('processWireChunk rejects unreliable stream durations and implausible TPS', () => {
+  const state = { offset: 0, samples: [], lastTtftMs: null };
+  const lines = [
+    stepEnd({ output: 167, streamMs: 50, ttftMs: 20442 }),   // 3340 t/s: buffered tool call
+    stepEnd({ output: 251, streamMs: 250, ttftMs: 500 }),    // 1004 t/s: implausible
+    stepEnd({ output: 250, streamMs: 250, ttftMs: 600 }),    // boundary: 1000 t/s
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 700 }),
+  ].join('\n') + '\n';
+  processWireChunk(state, lines);
+  assert.deepEqual(state.samples, [1000, 100]);
+  assert.equal(state.lastTtftMs, 700);
+});
+
 test('processWireChunk tracks latest thinkingLevel from config.update', () => {
   const state = { offset: 0, samples: [], lastTtftMs: null, thinkingLevel: null };
   const lines = [
-    '{"type":"config.update","thinkingLevel":"on","time":1}',
+    '{"type":"config.update","modelAlias":"kimi-code/k3","thinkingLevel":"on","time":1}',
     stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }),
-    '{"type":"config.update","modelAlias":"kimi-code/k3","time":2}',  // no level: keep previous
+    '{"type":"config.update","modelAlias":"kimi-code/k3","time":2}',  // same model, keep sample
     '{"type":"config.update","thinkingLevel":"high","time":3}',
   ].join('\n') + '\n';
   processWireChunk(state, lines);
@@ -105,18 +121,22 @@ test('findWirePath matches session_ prefixed dirs (newer hosts)', () => {
 test('getMetrics reads incrementally and survives truncation', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
-  const opts = { sessionsRoot: root, stateDir };
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
 
   fs.writeFileSync(wirePath, stepEnd({ output: 100, streamMs: 1000, ttftMs: 1200 }) + '\n');
   let m = getMetrics(id, opts);
-  assert.equal(m.tps, 100);
+  assert.equal(m.tps, null);
   assert.equal(m.ttftMs, 1200);
 
   // append: only new bytes are parsed
   fs.appendFileSync(wirePath, stepEnd({ output: 300, streamMs: 1000, ttftMs: 800 }) + '\n');
   m = getMetrics(id, opts);
-  assert.equal(m.tps, 200); // median(100, 300)
+  assert.equal(m.tps, null);
   assert.equal(m.ttftMs, 800);
+
+  fs.appendFileSync(wirePath, stepEnd({ output: 200, streamMs: 1000, ttftMs: 700 }) + '\n');
+  m = getMetrics(id, opts);
+  assert.equal(m.tps, 200); // first display: median(100, 300, 200)
 
   // incomplete trailing line is held for next run
   fs.appendFileSync(wirePath, stepEnd({ output: 999, streamMs: 1000 }).slice(0, 20));
@@ -124,7 +144,12 @@ test('getMetrics reads incrementally and survives truncation', () => {
   assert.equal(m.tps, 200);
 
   // truncation resets the offset
-  fs.writeFileSync(wirePath, stepEnd({ output: 60, streamMs: 1000, ttftMs: 100 }) + '\n');
+  fs.writeFileSync(
+    wirePath,
+    stepEnd({ output: 40, streamMs: 1000, ttftMs: 300 }) + '\n' +
+      stepEnd({ output: 60, streamMs: 1000, ttftMs: 200 }) + '\n' +
+      stepEnd({ output: 80, streamMs: 1000, ttftMs: 100 }) + '\n',
+  );
   m = getMetrics(id, opts);
   assert.equal(m.tps, 60);
   assert.equal(m.ttftMs, 100);
@@ -134,11 +159,12 @@ test('getMetrics reads incrementally and survives truncation', () => {
 test('getMetrics discards stale samples when a rotated file grows past the old offset', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
-  const opts = { sessionsRoot: root, stateDir };
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
 
   fs.writeFileSync(
     wirePath,
     stepEnd({ output: 100, streamMs: 1000, ttftMs: 1200 }) + '\n' +
+      stepEnd({ output: 200, streamMs: 1000, ttftMs: 1000 }) + '\n' +
       stepEnd({ output: 300, streamMs: 1000, ttftMs: 800 }) + '\n',
   );
   assert.equal(getMetrics(id, opts).tps, 200);
@@ -157,6 +183,120 @@ test('getMetrics discards stale samples when a rotated file grows past the old o
   assert.equal(m.ttftMs, 500);
 });
 
+test('getMetrics keeps a rolling 5-sample median after the 3-sample warmup', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wirePath,
+    [
+      stepEnd({ output: 10, streamMs: 1000, ttftMs: 100 }),
+      stepEnd({ output: 20, streamMs: 1000, ttftMs: 100 }),
+      stepEnd({ output: 30, streamMs: 1000, ttftMs: 100 }),
+      stepEnd({ output: 40, streamMs: 1000, ttftMs: 100 }),
+      stepEnd({ output: 50, streamMs: 1000, ttftMs: 100 }),
+      stepEnd({ output: 60, streamMs: 1000, ttftMs: 100 }),
+    ].join('\n') + '\n',
+  );
+  assert.equal(getMetrics(id, opts).tps, 40); // median(20, 30, 40, 50, 60)
+});
+
+test('getMetrics resets TPS and TTFT when modelAlias changes', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wirePath,
+    [
+      '{"type":"config.update","modelAlias":"kimi-code/k3","thinkingEffort":"high","time":1}',
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 100 }),
+      stepEnd({ output: 200, streamMs: 1000, ttftMs: 200 }),
+      stepEnd({ output: 300, streamMs: 1000, ttftMs: 300 }),
+    ].join('\n') + '\n',
+  );
+  assert.equal(getMetrics(id, opts).tps, 200);
+
+  fs.appendFileSync(
+    wirePath,
+    '{"type":"config.update","modelAlias":"anthropic/claude-opus-5","thinkingEffort":"max","time":2}\n' +
+      stepEnd({ output: 400, streamMs: 1000, ttftMs: 400 }) + '\n',
+  );
+  let m = getMetrics(id, opts);
+  assert.equal(m.tps, null);
+  assert.equal(m.ttftMs, 400);
+
+  fs.appendFileSync(
+    wirePath,
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 500 }) + '\n' +
+      stepEnd({ output: 600, streamMs: 1000, ttftMs: 600 }) + '\n',
+  );
+  m = getMetrics(id, opts);
+  assert.equal(m.tps, 500);
+});
+
+test('getMetrics hides TPS when the last valid sample is older than 2 minutes', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    [
+      stepEnd({ output: 40, streamMs: 1000, ttftMs: 100, time: EVENT_TIME }),
+      stepEnd({ output: 50, streamMs: 1000, ttftMs: 100, time: EVENT_TIME }),
+      stepEnd({ output: 60, streamMs: 1000, ttftMs: 100, time: EVENT_TIME }),
+    ].join('\n') + '\n',
+  );
+  const opts = { sessionsRoot: root, stateDir };
+  assert.equal(getMetrics(id, { ...opts, now: EVENT_TIME + 120_000 }).tps, 50);
+  assert.equal(getMetrics(id, { ...opts, now: EVENT_TIME + 120_001 }).tps, null);
+});
+
+test('getMetrics starts a new warmup instead of reviving an expired window', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir };
+  fs.writeFileSync(
+    wirePath,
+    [
+      stepEnd({ output: 40, streamMs: 1000, ttftMs: 100, time: EVENT_TIME }),
+      stepEnd({ output: 50, streamMs: 1000, ttftMs: 100, time: EVENT_TIME }),
+      stepEnd({ output: 60, streamMs: 1000, ttftMs: 100, time: EVENT_TIME }),
+    ].join('\n') + '\n',
+  );
+  assert.equal(getMetrics(id, { ...opts, now: EVENT_TIME + 60_000 }).tps, 50);
+
+  fs.appendFileSync(
+    wirePath,
+    stepEnd({ output: 400, streamMs: 1000, ttftMs: 400, time: EVENT_TIME + 180_001 }) + '\n',
+  );
+  assert.equal(getMetrics(id, { ...opts, now: EVENT_TIME + 180_002 }).tps, null);
+
+  fs.appendFileSync(
+    wirePath,
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 500, time: EVENT_TIME + 180_003 }) + '\n' +
+      stepEnd({ output: 600, streamMs: 1000, ttftMs: 600, time: EVENT_TIME + 180_004 }) + '\n',
+  );
+  assert.equal(getMetrics(id, { ...opts, now: EVENT_TIME + 180_005 }).tps, 500);
+});
+
+test('getMetrics drops legacy samples that lack freshness and model metadata', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({
+      offset: fs.statSync(wirePath).size,
+      samples: [3043, 2500, 1800, 50, 48],
+      lastTtftMs: 500,
+    }),
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(m.tps, null);
+  assert.equal(m.ttftMs, null);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.deepEqual(state.samples, []);
+  assert.equal(state.sampleStateV, 1);
+});
+
 test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
@@ -171,11 +311,11 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
     path.join(stateDir, `metrics-${id}.json`),
     JSON.stringify({ offset: size, samples: [100], lastTtftMs: 500 }),
   );
-  const m = getMetrics(id, { sessionsRoot: root, stateDir });
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.thinkingLevel, 'high');
   // Second run must not rescan (versioned scan marker persisted).
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 3);
+  assert.equal(state.backfillScanV, 4);
 });
 
 test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
@@ -193,10 +333,10 @@ test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', ()
     path.join(stateDir, `metrics-${id}.json`),
     JSON.stringify({ offset: size, samples: [100], lastTtftMs: 500, thinkingLevel: null, thinkingScanDone: true }),
   );
-  const m = getMetrics(id, { sessionsRoot: root, stateDir });
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 3);
+  assert.equal(state.backfillScanV, 4);
   assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
 });
 
