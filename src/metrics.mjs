@@ -238,14 +238,14 @@ export function median(arr) {
  * offset when it exceeds the file size. Never throws.
  * @param {string} sessionId
  * @param {object} [opts]
- * @returns {{tps: number|null, ttftMs: number|null, thinkingLevel: string|null, goal: object|null}}
+ * @returns {{tps: number|null, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
   stateDir = HUD_DIR,
   now = Date.now(),
 } = {}) {
-  const empty = { tps: null, ttftMs: null, thinkingLevel: null, goal: null };
+  const empty = { tps: null, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null };
   try {
     if (!sessionId) return empty;
     const wirePath = findWirePath(sessionId, sessionsRoot);
@@ -331,6 +331,7 @@ export function getMetrics(sessionId, {
       ttftMs: state.lastTtftMs ?? null,
       thinkingLevel: state.thinkingLevel ?? null,
       goal: state.goal ?? null,
+      modelAlias: state.modelAlias ?? null,
     };
   } catch {
     return empty;

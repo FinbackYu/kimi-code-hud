@@ -1,53 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { HUD_DIR } from './quota.mjs';
+import {
+  CONFIG_TOML_PATH,
+  tableText,
+  boolValue,
+  stringValue,
+  stringArrayValue,
+  findModelTable,
+} from './model-config.mjs';
 
-export const CONFIG_TOML_PATH = path.join(os.homedir(), '.kimi-code', 'config.toml');
-
-/**
- * Minimal TOML section extractor: returns the raw text of a `[name]` table,
- * or null when absent. Only used for flat key = value tables ([thinking],
- * [models."<alias>"]); sufficient for the host's own config style.
- * @param {string} text
- * @param {string} table literal table header without brackets, e.g. 'thinking'
- * @returns {string|null}
- */
-function tableText(text, table) {
-  const re = new RegExp(`\\[${table.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\s*\\n([\\s\\S]*?)(?=\\n\\[|$)`);
-  const m = text.match(re);
-  return m ? m[1] : null;
-}
-
-function boolValue(section, key) {
-  const m = section.match(new RegExp(`^\\s*${key}\\s*=\\s*(true|false)`, 'm'));
-  return m ? m[1] === 'true' : null;
-}
-
-function stringValue(section, key) {
-  const m = section.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"`, 'm'));
-  return m ? m[1] : null;
-}
-
-/**
- * Find the [models."<alias>"] table whose display_name or model id matches
- * the payload's model display string. Returns the raw table text or null.
- * @param {string} text config.toml content
- * @param {string} modelDisplay e.g. "K3" or "kimi-for-coding"
- * @returns {string|null}
- */
-function findModelTable(text, modelDisplay) {
-  if (!modelDisplay) return null;
-  const re = /\[models\."([^"]+)"\]\s*\n([\s\S]*?)(?=\n\[|$)/g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const [, alias, body] = m;
-    if (alias === modelDisplay) return body;
-    if (stringValue(body, 'display_name') === modelDisplay) return body;
-    if (stringValue(body, 'model') === modelDisplay) return body;
-  }
-  return null;
-}
+export { CONFIG_TOML_PATH };
 
 /**
  * Per-session snapshot. `/effort` rewrites the global config.toml, but a
@@ -78,7 +41,10 @@ function writeSnapshot(snapshotDir, sessionId, level, model) {
 
 /**
  * Resolve the thinking level from config.toml: [thinking] config > model
- * default_effort > boolean "on".
+ * default_effort > boolean "on", mirroring the host's own resolution
+ * (defaultThinkingEffortFor / resolveThinkingEffort): a model whose table
+ * explicitly declares capabilities without thinking resolves to 'off', and
+ * an always_thinking model can never resolve to 'off'.
  * @param {string} model payload model display string
  * @param {string} configPath
  * @returns {string}
@@ -92,14 +58,32 @@ function resolveFromConfig(model, configPath) {
   }
 
   const thinking = tableText(text, 'thinking');
-  if (thinking !== null && boolValue(thinking, 'enabled') === false) return 'off';
+  const modelTable = findModelTable(text, model);
+  const caps = modelTable !== null ? stringArrayValue(modelTable, 'capabilities') : null;
+  const alwaysThinking = caps !== null && caps.includes('always_thinking');
+  const thinkingCapable = alwaysThinking
+    || (caps !== null && caps.includes('thinking'))
+    || (modelTable !== null && boolValue(modelTable, 'adaptive_thinking') === true);
+
+  // Host: [thinking] enabled=false forces off — except on always_thinking
+  // models, where an off state would be a lie (upstream keeps reasoning).
+  if (thinking !== null && boolValue(thinking, 'enabled') === false && !alwaysThinking) return 'off';
 
   const globalEffort = thinking !== null ? stringValue(thinking, 'effort') : null;
-  const modelTable = findModelTable(text, model);
   const hasEfforts = modelTable !== null && /^\s*support_efforts\s*=/m.test(modelTable);
-  if (!hasEfforts) return 'on'; // boolean model -> plain " thinking"
+  if (!hasEfforts) {
+    // Explicit capabilities without thinking resolve to 'off' upstream; a
+    // configured global effort still shows on compatible (non-kimi)
+    // protocols, which pass the value through to the backend.
+    if (caps !== null && !thinkingCapable) return globalEffort ? 'on' : 'off';
+    return 'on'; // boolean model (or no declared capabilities) -> plain " thinking"
+  }
 
   const modelDefault = modelTable !== null ? stringValue(modelTable, 'default_effort') : null;
+  if (alwaysThinking) {
+    // Skip 'off' values and fall back to the model's own default.
+    return (globalEffort && globalEffort !== 'off' ? globalEffort : null) ?? modelDefault ?? 'on';
+  }
   return globalEffort ?? modelDefault ?? 'on';
 }
 

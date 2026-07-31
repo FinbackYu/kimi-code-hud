@@ -16,6 +16,7 @@ import { isGitDirty } from '../src/git.mjs';
 import { getMetrics } from '../src/metrics.mjs';
 import { resolveThinkingLevel } from '../src/thinking.mjs';
 import { readQuotaCache, ensureFreshQuota, refreshQuota, HUD_DIR } from '../src/quota.mjs';
+import { resolveModelProvider, MANAGED_KIMI_PROVIDER } from '../src/model-config.mjs';
 import { renderHud } from '../src/render.mjs';
 import { managedPluginDisabled } from '../src/plugin-state.mjs';
 import { setStatusLineCommand, removeStatusLineCommand } from '../src/toml.mjs';
@@ -121,11 +122,21 @@ async function render() {
     process.stdout.write('kimi-code-hud\n');
     return;
   }
-  // Hot path: serve the quota cache as-is (stale or not) and kick a detached
-  // background refresh when stale. Never blocks on the network.
-  ensureFreshQuota({ scriptPath: SCRIPT_PATH });
-  const quota = readQuotaCache();
   const metrics = getMetrics(payload.sessionId);
+  // The quota API only describes the managed Kimi Code subscription. When the
+  // active model is served by a third-party provider (added via /provider,
+  // selected with /model), the bars would show a subscription the session is
+  // not consuming — suppress the whole quota section and skip the refresh.
+  // When the provider cannot be determined (no wire alias yet, unknown
+  // model), keep the historical behavior and show it.
+  const provider = resolveModelProvider({ modelAlias: metrics.modelAlias, modelDisplay: payload.model });
+  let quota = null;
+  if (provider === null || provider === MANAGED_KIMI_PROVIDER) {
+    // Hot path: serve the quota cache as-is (stale or not) and kick a
+    // detached background refresh when stale. Never blocks on the network.
+    ensureFreshQuota({ scriptPath: SCRIPT_PATH });
+    quota = readQuotaCache();
+  }
   // The wire log's config.update events carry the effort (new hosts:
   // `thinkingEffort`, including an initial event at session start; older
   // hosts: `thinkingLevel`, only after an in-session change). The

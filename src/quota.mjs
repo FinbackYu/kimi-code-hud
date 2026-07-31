@@ -163,6 +163,9 @@ export function ensureFreshQuota({
 /**
  * --refresh-quota entry point: read credentials, call /usages, write cache.
  * Completely silent on success and on failure; never writes to stdout/stderr.
+ * When the credentials are gone or carry no token (/logout, corrupt file),
+ * the stale cache is deleted along the way so the HUD stops rendering quota
+ * for a logged-out account.
  * @param {object} [opts]
  * @returns {Promise<boolean>} true when the cache was updated
  */
@@ -174,9 +177,17 @@ export async function refreshQuota({
   timeoutMs = 8000,
 } = {}) {
   try {
-    const cred = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+    let cred = null;
+    try {
+      cred = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+    } catch {
+      // missing or unreadable credentials file
+    }
     const token = cred && typeof cred.access_token === 'string' ? cred.access_token : null;
-    if (!token) return false;
+    if (!token) {
+      try { fs.unlinkSync(cachePath); } catch { /* no cache to drop */ }
+      return false;
+    }
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     let res;

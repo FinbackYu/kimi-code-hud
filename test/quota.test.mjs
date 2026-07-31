@@ -9,6 +9,7 @@ import {
   readQuotaCache,
   isQuotaStale,
   writeQuotaCache,
+  refreshQuota,
   QUOTA_TTL_MS,
 } from '../src/quota.mjs';
 
@@ -77,4 +78,35 @@ test('readQuotaCache tolerates corrupt files', () => {
   const cachePath = path.join(dir, 'quota.json');
   fs.writeFileSync(cachePath, '{broken');
   assert.equal(readQuotaCache(cachePath), null);
+});
+
+test('refreshQuota drops the stale cache when credentials are gone (/logout)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-'));
+  const cachePath = path.join(dir, 'quota.json');
+  const lockPath = path.join(dir, 'refresh.lock');
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+
+  const ok = await refreshQuota({
+    credentialsPath: path.join(dir, 'missing-credentials.json'),
+    cachePath,
+    lockPath,
+  });
+  assert.equal(ok, false);
+  assert.equal(fs.existsSync(cachePath), false);
+  assert.equal(fs.existsSync(lockPath), false); // lock always released
+});
+
+test('refreshQuota drops the stale cache when the token is missing or corrupt', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-'));
+  const cachePath = path.join(dir, 'quota.json');
+  const lockPath = path.join(dir, 'refresh.lock');
+  const credentialsPath = path.join(dir, 'creds.json');
+
+  for (const body of [JSON.stringify({ refresh_token: 'x' }), '{broken']) {
+    fs.writeFileSync(credentialsPath, body);
+    writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+    const ok = await refreshQuota({ credentialsPath, cachePath, lockPath });
+    assert.equal(ok, false);
+    assert.equal(fs.existsSync(cachePath), false);
+  }
 });

@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a zero-dependency Node.js ESM CLI. `bin/kimi-hud.mjs` is the executable entry point. Reusable logic lives in `src/`, split by concern: payload parsing, rendering, metrics, quota access, Git state, plugin state, TOML editing, and thinking-level resolution. `hooks/sync-status-line.mjs` implements the plugin `SessionStart` hook. Tests live in `test/` and mirror source modules with names such as `test/render.test.mjs`. Plugin metadata is in `kimi.plugin.json`; user documentation is maintained in both `README.md` and `README.en.md`.
+This is a zero-dependency Node.js ESM CLI. `bin/kimi-hud.mjs` is the executable entry point. Reusable logic lives in `src/`, split by concern: payload parsing, rendering, metrics, quota access, Git state, plugin state, TOML editing, host config model-table parsing (`model-config.mjs`), and thinking-level resolution. `hooks/sync-status-line.mjs` implements the plugin `SessionStart` hook. Tests live in `test/` and mirror source modules with names such as `test/render.test.mjs`. Plugin metadata is in `kimi.plugin.json`; user documentation is maintained in both `README.md` and `README.en.md`.
 
 ## Build, Test, and Development Commands
 
