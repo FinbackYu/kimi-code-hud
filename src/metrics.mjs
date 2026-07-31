@@ -77,6 +77,7 @@ function loadState(statePath) {
     samples: [],
     lastTtftMs: null,
     lastSampleAt: null,
+    lastMedian: null,
     modelAlias: null,
     sampleStateV: SAMPLE_STATE_V,
     thinkingLevel: null,
@@ -88,6 +89,7 @@ function resetMetricWindow(state) {
   state.samples = [];
   state.lastTtftMs = null;
   state.lastSampleAt = null;
+  state.lastMedian = null;
 }
 
 function resetStreamState(state) {
@@ -185,6 +187,13 @@ export function processWireRow(state, row) {
       state.samples.splice(0, state.samples.length - MAX_SAMPLES);
     }
     state.lastSampleAt = sampleAt;
+    if (state.samples.length >= MIN_SAMPLES) {
+      // Remember the last full-window median so an expired window can stay
+      // visible (dimmed) instead of disappearing. A gap clear above only
+      // empties the live window; the median survives until a model switch
+      // or stream reset (resetMetricWindow) invalidates it.
+      state.lastMedian = median(state.samples);
+    }
   }
 }
 
@@ -238,14 +247,14 @@ export function median(arr) {
  * offset when it exceeds the file size. Never throws.
  * @param {string} sessionId
  * @param {object} [opts]
- * @returns {{tps: number|null, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
   stateDir = HUD_DIR,
   now = Date.now(),
 } = {}) {
-  const empty = { tps: null, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null };
+  const empty = { tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null };
   try {
     if (!sessionId) return empty;
     const wirePath = findWirePath(sessionId, sessionsRoot);
@@ -323,11 +332,15 @@ export function getMetrics(sessionId, {
       Number.isFinite(state.lastSampleAt) && Number.isFinite(now)
         ? now - state.lastSampleAt
         : Number.POSITIVE_INFINITY;
-    const hasFreshWindow =
-      state.samples.length >= MIN_SAMPLES &&
-      sampleAge <= TPS_TTL_MS;
+    const windowMedian = state.samples.length >= MIN_SAMPLES ? median(state.samples) : null;
+    const freshWindow = windowMedian !== null && sampleAge <= TPS_TTL_MS;
+    const lastMedian = typeof state.lastMedian === 'number' ? state.lastMedian : null;
     return {
-      tps: hasFreshWindow ? median(state.samples) : null,
+      // Fresh window: the live median. Otherwise the last full-window
+      // median survives as a stale value (rendered dimmed) until a model
+      // switch or stream reset cleared it.
+      tps: freshWindow ? windowMedian : lastMedian,
+      tpsStale: !freshWindow && lastMedian !== null,
       ttftMs: state.lastTtftMs ?? null,
       thinkingLevel: state.thinkingLevel ?? null,
       goal: state.goal ?? null,

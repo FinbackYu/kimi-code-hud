@@ -60,6 +60,7 @@ test('processWireChunk computes TPS and keeps last 5 samples', () => {
   assert.equal(state.samples.length, 5);
   assert.equal(state.samples[0], 50);
   assert.equal(state.lastTtftMs, 900);
+  assert.equal(state.lastMedian, 150); // median of the kept [50,100,150,200,250]
 });
 
 test('processWireChunk rejects unreliable stream durations and implausible TPS', () => {
@@ -225,6 +226,7 @@ test('getMetrics resets TPS and TTFT when modelAlias changes', () => {
   );
   let m = getMetrics(id, opts);
   assert.equal(m.tps, null);
+  assert.equal(m.tpsStale, false); // last median discarded with the old model
   assert.equal(m.ttftMs, 400);
   assert.equal(m.modelAlias, 'anthropic/claude-opus-5');
 
@@ -237,7 +239,7 @@ test('getMetrics resets TPS and TTFT when modelAlias changes', () => {
   assert.equal(m.tps, 500);
 });
 
-test('getMetrics hides TPS when the last valid sample is older than 2 minutes', () => {
+test('getMetrics keeps the last median as stale after the 2-minute TTL', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   fs.writeFileSync(
@@ -249,8 +251,12 @@ test('getMetrics hides TPS when the last valid sample is older than 2 minutes', 
     ].join('\n') + '\n',
   );
   const opts = { sessionsRoot: root, stateDir };
-  assert.equal(getMetrics(id, { ...opts, now: EVENT_TIME + 120_000 }).tps, 50);
-  assert.equal(getMetrics(id, { ...opts, now: EVENT_TIME + 120_001 }).tps, null);
+  const fresh = getMetrics(id, { ...opts, now: EVENT_TIME + 120_000 });
+  assert.equal(fresh.tps, 50);
+  assert.equal(fresh.tpsStale, false);
+  const stale = getMetrics(id, { ...opts, now: EVENT_TIME + 120_001 });
+  assert.equal(stale.tps, 50); // last median stays, flagged stale
+  assert.equal(stale.tpsStale, true);
 });
 
 test('getMetrics starts a new warmup instead of reviving an expired window', () => {
@@ -271,14 +277,20 @@ test('getMetrics starts a new warmup instead of reviving an expired window', () 
     wirePath,
     stepEnd({ output: 400, streamMs: 1000, ttftMs: 400, time: EVENT_TIME + 180_001 }) + '\n',
   );
-  assert.equal(getMetrics(id, { ...opts, now: EVENT_TIME + 180_002 }).tps, null);
+  // The gap cleared the live window, but the last median survives (stale)
+  // while the new window warms up.
+  let m = getMetrics(id, { ...opts, now: EVENT_TIME + 180_002 });
+  assert.equal(m.tps, 50);
+  assert.equal(m.tpsStale, true);
 
   fs.appendFileSync(
     wirePath,
     stepEnd({ output: 500, streamMs: 1000, ttftMs: 500, time: EVENT_TIME + 180_003 }) + '\n' +
       stepEnd({ output: 600, streamMs: 1000, ttftMs: 600, time: EVENT_TIME + 180_004 }) + '\n',
   );
-  assert.equal(getMetrics(id, { ...opts, now: EVENT_TIME + 180_005 }).tps, 500);
+  m = getMetrics(id, { ...opts, now: EVENT_TIME + 180_005 });
+  assert.equal(m.tps, 500);
+  assert.equal(m.tpsStale, false);
 });
 
 test('getMetrics drops legacy samples that lack freshness and model metadata', () => {
@@ -348,5 +360,5 @@ test('getMetrics returns nulls for unknown sessions', () => {
     sessionsRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-empty-')),
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-')),
   });
-  assert.deepEqual(m, { tps: null, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null });
+  assert.deepEqual(m, { tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null, modelAlias: null });
 });

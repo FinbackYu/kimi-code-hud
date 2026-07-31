@@ -191,15 +191,18 @@ function buildSegments(layout, ctx) {
     segs.push(ctxSeg);
   }
 
-  // Speed segment. TPS stays hidden until the metrics window has enough
-  // fresh, reliable samples; TTFT can still be useful during that warmup.
+  // Speed segment. A fresh window (enough recent, reliable samples) renders
+  // bright; once it expires the last median stays visible in muted gray
+  // instead of disappearing. Only the initial warmup (no median yet) falls
+  // back to a bare TTFT.
   if (metrics && typeof metrics.tps === 'number') {
     const tps = Math.round(metrics.tps);
+    const paint = (s) => (metrics.tpsStale === true ? colorize(color, C.muted, s) : s);
     if (layout === 'compact') {
-      segs.push(`⚡ ${tps}`);
+      segs.push(paint(`⚡ ${tps}`));
     } else {
       const ttft = formatTtft(metrics.ttftMs);
-      segs.push(`⚡ ${tps} t/s${ttft ? ` · TTFT ${ttft}` : ''}`);
+      segs.push(paint(`⚡ ${tps} t/s${ttft ? ` · TTFT ${ttft}` : ''}`));
     }
   } else if (metrics) {
     const ttft = formatTtft(metrics.ttftMs);
@@ -244,7 +247,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, ttftMs, thinkingLevel, goal}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] full|normal|compact
  * @param {boolean} [ctx.color]

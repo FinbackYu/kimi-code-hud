@@ -78,7 +78,7 @@ full:    [manual] K3 thinking:high │ kimi-code-hud git:(main*) │ Context █
 
 - 模型名以宿主主蓝色（dark 主题 `#4FA8FF`，即对话中链接/行内代码的蓝）显示；模型后缀显示 thinking 状态：布尔模型为 ` thinking`，支持 effort 的模型为 ` thinking:<effort>`（status line payload 不含此字段；优先取会话日志 `config.update` 事件——新版宿主键为 `thinkingEffort`，会话启动即有初始记录；旧版为 `thinkingLevel`，只在会话内切换过 effort 时记录。两者都没有时按会话快照固定取值，快照存 `~/.kimi-code-hud/thinking-<sessionId>.json`；快照不存在时才回退解析 `~/.kimi-code/config.toml` 的 `[thinking]` 与模型表并写入快照——这样其他会话执行 `/effort` 改写全局配置后，本会话显示不会跟着变）；compact 档去掉 `thinking` 标签、只保留空格分隔的 `<effort>` 后缀（如 `K3 high`）；
 - goal 徽章：格式与宿主默认 footer 一致（`[goal ● <status> · <计时> · <轮数>]`；设了 turn 预算显示 `3/10 turns`；圆点 active 蓝 / blocked 琥珀 / paused 暗灰）。status line payload 不含 goal 字段，状态从会话日志 `wire.jsonl` 的 `goal.create`/`goal.update`/`goal.clear`/`forked` op 重建（与 TPS 同一次增量扫描）；active 时按 `wallClockResumedAt` 每秒走动计时，goal 完成或清除后徽章消失；
-- TPS 只接纳流式阶段至少 250ms、且不超过 1000 t/s 的 `step.end` 样本；积累 3 个有效样本后开始显示，取最近最多 5 个样本的中位数。模型切换或有效样本中断超过 2 分钟时重新预热；预热期间仍显示最近一次 TTFT；
+- TPS 只接纳流式阶段至少 250ms、且不超过 1000 t/s 的 `step.end` 样本；积累 3 个有效样本后开始显示，取最近最多 5 个样本的中位数。窗口过期（最后一个样本超过 2 分钟）后不隐藏：最后一次中位数以暗灰继续显示，直到新窗口预热完成；模型切换时旧中位数一并清除、重新预热。首次预热（还没有中位数）期间仍显示最近一次 TTFT；
 - 配额段：normal/full 档为柱+百分比+重置倒计时；compact 档去掉柱体，保留百分比和倒计时；周配额（wk）只在 normal/full 档显示。仅当当前模型由 Kimi Code 托管订阅（`managed:kimi-code`）提供时显示——经 `/provider` 接入、用 `/model` 切到的第三方 provider 模型整段隐藏（配额接口只描述托管订阅，与当前会话实际用量无关）；`/logout` 删除凭证后配额缓存一并清除；
 - Context 段只在 full 档显示（柱+百分比+token 数）；compact/normal 档不含，直接看宿主第二行的精确数值；
 - 行首徽章与权限模式对齐：`[yolo]`（琥珀黄，对齐宿主默认）/`[auto]`（亮红，便于区分）/`[manual]`（暗灰占位，保持行首对齐），plan 模式加 `[plan]`（蓝色）；`[swarm]`（青色）已实现，但当前宿主 status line payload 尚未携带 `swarmMode` 字段，上游补齐后自动生效；
@@ -109,7 +109,7 @@ access token 仅从 `~/.kimi-code/credentials/kimi-code.json` **本地读取**�
 
 **状态栏没变化？** 确认 `/reload-tui` 或重启过；确认 `node <path>` 直接 `echo '{}' | node bin/kimi-hud.mjs` 有输出。
 
-**没有 TPS？** 新会话、模型刚切换或 TPS 超过 2 分钟未更新时，需要重新积累 3 个有效 `step.end` 样本；预热期间会先单独显示 TTFT。若连 TTFT 也没有，说明当前会话还没有完成过 `step.end`。
+**没有 TPS？** 只有两种状态会完全看不到 TPS：首次预热（还没攒够 3 个有效 `step.end` 样本，期间先单独显示 TTFT）和刚切换模型（旧中位数随之清除、重新预热）。窗口过期不再隐藏，改以暗灰显示最后一次中位数。若连 TTFT 也没有，说明当前会话还没有完成过 `step.end`。
 
 **没有配额段？** 先确认当前模型不是第三方 provider（`/provider` 接入的模型本就不显示配额，接口只覆盖托管订阅）。managed 模型下，缓存首次生成前整段省略（不显示"加载中"）。可手动 `node bin/kimi-hud.mjs --refresh-quota` 后重试；该命令静默执行，检查 `~/.kimi-code-hud/quota.json` 是否生成。
 
