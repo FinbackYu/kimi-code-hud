@@ -54,6 +54,10 @@ function llmRequest({ kind = 'loop', time = EVENT_TIME } = {}) {
   return JSON.stringify({ type: 'llm.request', kind, time });
 }
 
+function turnEnded({ reason = 'completed', time = EVENT_TIME, turnId = 0 } = {}) {
+  return JSON.stringify({ type: 'turn.ended', turnId, reason, time });
+}
+
 function makeSession({ withPrefix = true, agents = ['main'] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-ses-'));
   const id = 'abc123';
@@ -217,6 +221,50 @@ test('processWireChunk turn.cancel closes an in-flight generation', () => {
   );
   assert.equal(state.agents.main.lastRequestAt, EVENT_TIME);
   assert.equal(state.agents.main.lastStepEndAt, EVENT_TIME + 500);
+});
+
+test('processWireChunk turn.ended closes the generation and main turn', () => {
+  const state = makeState();
+  processWireChunk(
+    state,
+    turnPrompt() + '\n' +
+      llmRequest({ time: EVENT_TIME + 100 }) + '\n' +
+      turnEnded({ reason: 'failed', time: EVENT_TIME + 500 }) + '\n',
+  );
+  assert.equal(state.agents.main.lastStepEndAt, EVENT_TIME + 500);
+  assert.equal(state.agents.main.lastTurnEndAt, EVENT_TIME + 500);
+});
+
+test('processWireChunk subagent turn.ended closes only that agent generation', () => {
+  const state = makeState();
+  processWireChunk(state, turnPrompt() + '\n');
+  processWireChunk(
+    state,
+    llmRequest({ time: EVENT_TIME + 100 }) + '\n' +
+      turnEnded({ reason: 'blocked', time: EVENT_TIME + 500 }) + '\n',
+    'agent-0',
+  );
+  assert.equal(state.agents['agent-0'].lastStepEndAt, EVENT_TIME + 500);
+  assert.equal(state.agents['agent-0'].lastTurnEndAt, null);
+  assert.equal(state.agents.main.lastTurnEndAt, null);
+});
+
+test('processWireChunk queued turn.cancel does not close the active generation or turn', () => {
+  const state = makeState();
+  processWireChunk(
+    state,
+    turnPrompt() + '\n' +
+      llmRequest({ time: EVENT_TIME + 100 }) + '\n' +
+      JSON.stringify({
+        type: 'turn.cancel',
+        turnId: 1,
+        target: 'queued',
+        reason: 'user_cancelled',
+        time: EVENT_TIME + 500,
+      }) + '\n',
+  );
+  assert.equal(state.agents.main.lastStepEndAt, null);
+  assert.equal(state.agents.main.lastTurnEndAt, null);
 });
 
 test('processWireChunk tracks turn boundaries on the main agent', () => {
@@ -635,7 +683,7 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   assert.equal(m.thinkingLevel, 'high');
   // Second run must not rescan (versioned scan marker persisted).
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 6);
+  assert.equal(state.backfillScanV, 7);
 });
 
 test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
@@ -656,7 +704,7 @@ test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', ()
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 6);
+  assert.equal(state.backfillScanV, 7);
   assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
 });
 
@@ -677,7 +725,7 @@ test('getMetrics fresh sessions derive tracked rows without a separate backfill 
   assert.ok(m.goal);
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 6); // marker still set, no rescan later
+  assert.equal(state.backfillScanV, 7); // marker still set, no rescan later
 });
 
 test('getMetrics tracks swarm mode from the wire journal', () => {
@@ -721,7 +769,37 @@ test('getMetrics v6 backfill re-scans v5 states and anchors the turn timer', () 
   // end_turn means the timer is anchored right now.
   assert.equal(m.turnStartedAt, EVENT_TIME);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 6);
+  assert.equal(state.backfillScanV, 7);
+});
+
+test('getMetrics v7 backfill re-scans v6 states and recovers turn.ended', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    turnPrompt() + '\n' + turnEnded({ reason: 'failed', time: EVENT_TIME + 1000 }) + '\n',
+  );
+  const size = fs.statSync(wirePath).size;
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({
+      v: 6,
+      agents: {
+        main: {
+          offset: size, fileId: null, samples: [], lastTtftMs: null,
+          lastSampleAt: null, lastRequestAt: null, lastStepEndAt: null,
+          lastTurnPromptAt: null, lastTurnEndAt: null,
+        },
+      },
+      backfillScanV: 6,
+    }),
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(m.turnStartedAt, null);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.equal(state.agents.main.lastTurnPromptAt, EVENT_TIME);
+  assert.equal(state.agents.main.lastTurnEndAt, EVENT_TIME + 1000);
+  assert.equal(state.backfillScanV, 7);
 });
 
 test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', () => {
@@ -741,7 +819,7 @@ test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', 
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 6);
+  assert.equal(state.backfillScanV, 7);
 });
 
 test('getMetrics aggregates an active fleet: total, average, count, TTFT median', () => {
@@ -841,6 +919,31 @@ test('getMetrics runs the turn timer from the prompt until end_turn or cancel', 
   );
   m = getMetrics(id, opts);
   assert.equal(m.turnStartedAt, null);
+});
+
+test('getMetrics turn.ended stops failed and blocked turn timers', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wirePath,
+    turnPrompt() + '\n' +
+      llmRequest({ time: EVENT_TIME + 100 }) + '\n' +
+      turnEnded({ reason: 'failed', time: EVENT_TIME + 1000 }) + '\n',
+  );
+  let m = getMetrics(id, opts);
+  assert.equal(m.turnStartedAt, null);
+  assert.equal(m.activeAgents, 0);
+
+  fs.appendFileSync(
+    wirePath,
+    turnPrompt('again', EVENT_TIME + 2000) + '\n' +
+      llmRequest({ time: EVENT_TIME + 2100 }) + '\n' +
+      turnEnded({ reason: 'blocked', time: EVENT_TIME + 3000, turnId: 1 }) + '\n',
+  );
+  m = getMetrics(id, opts);
+  assert.equal(m.turnStartedAt, null);
+  assert.equal(m.activeAgents, 0);
 });
 
 test('getMetrics persists and incrementally updates session-cumulative cache usage', () => {

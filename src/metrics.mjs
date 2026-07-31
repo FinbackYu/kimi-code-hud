@@ -34,8 +34,9 @@ export const CACHE_BACKFILL_MAX_BYTES = 1024 * 1024;
 // `modelAlias`, used to keep TPS samples scoped to one model; v5:
 // `swarm_mode.enter/exit`, the wire journal's swarm-mode record; v6:
 // `turn.prompt`/`turn.cancel`/`end_turn`, the turn boundaries anchoring the
-// turn-work timer).
-const BACKFILL_SCAN_V = 6;
+// turn-work timer; v7: `turn.ended`, the authoritative terminal record added
+// by Kimi Code 0.31.1).
+const BACKFILL_SCAN_V = 7;
 // State format version; v6: per-agent sample buckets with timestamped
 // samples (v1..v5 states were flat single-wire shapes and are migrated).
 const STATE_V = 6;
@@ -236,8 +237,8 @@ function saveState(statePath, state) {
 
 /**
  * Fold one parsed wire row into the metrics state. Rows are bucketed per
- * agent: llm.request/step.end/full_compaction.complete/turn.cancel drive
- * the in-flight generation flag, step.end adds TPS samples and TTFT. The
+ * agent: llm.request/step.end/full_compaction.complete/turn.cancel/turn.ended
+ * drive the in-flight generation flag, step.end adds TPS samples and TTFT. The
  * main agent additionally feeds the state-level handlers — the session cache
  * counters, config.update (model alias + thinking level), goal ops and the
  * swarm_mode.enter/exit journal.
@@ -278,15 +279,30 @@ export function processWireRow(state, row, agent = 'main') {
     }
     return;
   }
-  if (row?.type === 'full_compaction.complete' || row?.type === 'turn.cancel') {
-    // Both close an in-flight generation: a compaction completes its
-    // request, and a cancelled (ESC) generation will never see a step.end —
-    // without this the in-flight flag would stick until the window expires.
+  if (row?.type === 'turn.ended') {
+    // Kimi Code 0.31.1 persists this authoritative terminal record for every
+    // completed, cancelled, failed or blocked turn. Close the agent's current
+    // generation even when no step.end was written; only the main agent owns
+    // the user-facing turn timer.
     if (rowTime !== null && (bucket.lastStepEndAt === null || rowTime > bucket.lastStepEndAt)) {
       bucket.lastStepEndAt = rowTime;
     }
-    // A cancel also ends the whole turn (compaction does not).
-    if (agent === 'main' && row?.type === 'turn.cancel') {
+    if (agent === 'main') {
+      if (rowTime !== null && (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt)) {
+        bucket.lastTurnEndAt = rowTime;
+      }
+    }
+    return;
+  }
+  const activeCancel = row?.type === 'turn.cancel' && row.target !== 'queued';
+  if (row?.type === 'full_compaction.complete' || activeCancel) {
+    // A compaction completion or active-turn cancellation closes an in-flight
+    // generation. Older turn.cancel rows lack target and remain compatible;
+    // cancelling a queued turn must not stop the active one.
+    if (rowTime !== null && (bucket.lastStepEndAt === null || rowTime > bucket.lastStepEndAt)) {
+      bucket.lastStepEndAt = rowTime;
+    }
+    if (agent === 'main' && activeCancel) {
       if (rowTime !== null && (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt)) {
         bucket.lastTurnEndAt = rowTime;
       }
@@ -392,8 +408,9 @@ export function processWireRow(state, row, agent = 'main') {
 }
 
 /**
- * Backfill-only handler for turn-boundary rows (turn.prompt / turn.cancel /
- * end_turn step.end). Unlike the live path it must not run the full reducer:
+ * Backfill-only handler for turn-boundary rows (turn.prompt / active
+ * turn.cancel / turn.ended / end_turn step.end). Unlike the live path it must
+ * not run the full reducer:
  * folding a step.end again would duplicate its TPS sample (the offset
  * already covered it), and turn.prompt side effects on the cache reducer
  * belong to the cache restoration's own bounded scan.
@@ -412,7 +429,10 @@ function applyTurnBoundaryRow(state, row) {
     }
     return;
   }
-  if (row?.type === 'turn.cancel') {
+  if (
+    row?.type === 'turn.ended' ||
+    (row?.type === 'turn.cancel' && row.target !== 'queued')
+  ) {
     if (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt) {
       bucket.lastTurnEndAt = rowTime;
     }
@@ -496,6 +516,7 @@ function isBackfillLine(line) {
     line.includes('"type":"swarm_mode.') ||
     line.includes('"type":"turn.prompt"') ||
     line.includes('"type":"turn.cancel"') ||
+    line.includes('"type":"turn.ended"') ||
     line.includes('"finishReason":"end_turn"')
   );
 }
@@ -549,7 +570,7 @@ export function median(arr) {
  * agent keeps the hardened MIN_SAMPLES gate; an idle session falls back to
  * the last full-window median (flagged stale). `turnStartedAt` anchors the
  * live timer at the user's latest prompt (turn.prompt) until the turn ends
- * (end_turn or turn.cancel).
+ * (turn.ended, or the legacy end_turn / active turn.cancel fallbacks).
  * @param {string} sessionId
  * @param {object} [opts]
  * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, activeAgents: number, turnStartedAt: number|null}}
@@ -646,6 +667,7 @@ export function getMetrics(sessionId, {
                   if (
                     row?.type === 'turn.prompt' ||
                     row?.type === 'turn.cancel' ||
+                    row?.type === 'turn.ended' ||
                     row?.type === 'context.append_loop_event'
                   ) {
                     applyTurnBoundaryRow(state, row);
@@ -766,8 +788,8 @@ export function getMetrics(sessionId, {
     }
 
     // The turn-work timer anchors at the user's latest prompt and runs
-    // until the turn ends (end_turn or cancel) — spanning tool calls and
-    // individual steps, not just one request.
+    // until the turn ends (turn.ended, or legacy end_turn / active cancel) —
+    // spanning tool calls and individual steps, not just one request.
     const mainBucket = state.agents.main;
     const turnStartedAt = mainBucket
       && mainBucket.lastTurnPromptAt !== null
