@@ -76,6 +76,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
 - `~/.kimi-code-hud/config.json`：`{"layout":"compact"|"normal"|"full"}`（默认 `normal`）；`"disabled": true` 是 `--off` 写入的开关旗标（缺省即启用，`--on` 删除该键）
 - 环境变量 `KIMI_HUD_LAYOUT` 优先于配置文件
 - `NO_COLOR` 或 `KIMI_HUD_NO_COLOR`：禁用全部 ANSI 颜色
+- `KIMI_HUD_THEME=dark|light`：手动固定配色主题。缺省跟随 `tui.toml` 顶层的 `theme` 设置；`"auto"` 经 `COLORFGBG` 判定、回退 dark（状态行无法在 300ms 热路径上执行宿主的 OSC 11 查询）；自定义主题名回退 dark。light 下徽标（模型名、`[plan]`、`[yolo]`、`[swarm]`、`[auto]`）加粗显示，琥珀/青色比宿主默认更亮（`#D97706`/`#14B8A6`），额度与 Context 柱体从刺眼的 ANSI 红改为柔和真彩色（`#B91C1C`/`#D97706`/`#0E7A38`）；dark 模式不变，柱体 ANSI 色由终端按自身主题重映射
 
 三档布局：
 
@@ -91,7 +92,7 @@ full:    [manual] K3 thinking:high │ kimi-code-hud git:(main*) │ Context █
 [manual] [goal ● active · 4m · 7 turns] K3 thinking:high │ …
 ```
 
-- 模型名以宿主主蓝色（dark 主题 `#4FA8FF`，即对话中链接/行内代码的蓝）显示；模型后缀显示 thinking 状态：布尔模型为 ` thinking`，支持 effort 的模型为 ` thinking:<effort>`（status line payload 不含此字段；优先取会话日志 `config.update` 事件——新版宿主键为 `thinkingEffort`，会话启动即有初始记录；旧版为 `thinkingLevel`，只在会话内切换过 effort 时记录。两者都没有时按会话快照固定取值，快照存 `~/.kimi-code-hud/thinking-<sessionId>.json`；快照不存在时才回退解析 `~/.kimi-code/config.toml` 的 `[thinking]` 与模型表并写入快照——这样其他会话执行 `/effort` 改写全局配置后，本会话显示不会跟着变）；compact 档去掉 `thinking` 标签、只保留空格分隔的 `<effort>` 后缀（如 `K3 high`）；
+- 模型名以宿主主蓝色（dark 主题 `#4FA8FF` / light 主题 `#1565C0`，即对话中链接/行内代码的蓝，随主题切换）显示；模型后缀显示 thinking 状态：布尔模型为 ` thinking`，支持 effort 的模型为 ` thinking:<effort>`（status line payload 不含此字段；优先取会话日志 `config.update` 事件——新版宿主键为 `thinkingEffort`，会话启动即有初始记录；旧版为 `thinkingLevel`，只在会话内切换过 effort 时记录。两者都没有时按会话快照固定取值，快照存 `~/.kimi-code-hud/thinking-<sessionId>.json`；快照不存在时才回退解析 `~/.kimi-code/config.toml` 的 `[thinking]` 与模型表并写入快照——这样其他会话执行 `/effort` 改写全局配置后，本会话显示不会跟着变）；compact 档去掉 `thinking` 标签、只保留空格分隔的 `<effort>` 后缀（如 `K3 high`）；
 - goal 徽章：格式与宿主默认 footer 一致（`[goal ● <status> · <计时> · <轮数>]`；设了 turn 预算显示 `3/10 turns`；圆点 active 蓝 / blocked 琥珀 / paused 暗灰）。status line payload 不含 goal 字段，状态从会话日志 `wire.jsonl` 的 `goal.create`/`goal.update`/`goal.clear`/`forked` op 重建（与 TPS 同一次增量扫描）；active 时按 `wallClockResumedAt` 每秒走动计时，goal 完成或清除后徽章消失；
 - TPS 只接纳流式阶段至少 250ms、且不超过 1000 t/s 的 `step.end` 样本；积累 3 个有效样本后开始显示，取最近最多 5 个样本的中位数。窗口过期（最后一个样本超过 2 分钟）后不隐藏：最后一次中位数以暗灰继续显示，直到新窗口预热完成；模型切换时旧中位数一并清除、重新预热。首次预热（还没有中位数）期间仍显示最近一次 TTFT；
 - Cache 为本次会话的 token 加权缓存命中率：`Σ inputCacheRead / Σ (inputOther + inputCacheRead + inputCacheCreation)`，跨回合累计主 Agent 的全部模型请求（usage 字段不完整的 step 跳过不计）。新回合开始、尚未计入新用量时以淡灰显示（段不再消失，行宽保持稳定），首个有效 `step.end` 计入后恢复常规色；会话尚无数据时整段省略。compact/normal 显示百分比，full 另显示缓存读取量/总输入量；不使用红黄绿阈值；

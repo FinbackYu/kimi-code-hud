@@ -5,22 +5,46 @@ import { formatGoalBadge } from './goal.mjs';
 const ESC = '\x1b[';
 const RESET = `${ESC}0m`;
 
-/** 24-bit truecolor foreground, matching the host's dark-theme hex values. */
+/** 24-bit truecolor foreground, matching the host's theme hex values. */
 function rgb(r, g, b) {
   return `${ESC}38;2;${r};${g};${b}m`;
 }
 
-const C = {
+// The ANSI slots are theme-independent (the terminal remaps them per its own
+// theme); only the badges and bar levels follow the resolved theme. Base hex
+// values from the host's tui/theme/colors.ts dark and light palettes.
+const ANSI = {
   green: `${ESC}32m`,
   yellow: `${ESC}33m`,
   red: `${ESC}31m`,
   brightYellow: `${ESC}93m`,
   brightRed: `${ESC}91m`,
   muted: `${ESC}90m`, // bright black / gray — placeholder badges
-  // Host defaults (dark theme, from kimi-code tui/theme/colors.ts):
+};
+
+const DARK = {
+  ...ANSI,
   warning: rgb(232, 168, 56), // #E8A838 — auto/yolo badges
   primary: rgb(79, 168, 255), // #4FA8FF — plan badge
   accent: rgb(91, 192, 190), //  #5BC0BE — swarm badge
+  barRed: ANSI.red,
+  barYellow: ANSI.yellow,
+  barGreen: ANSI.green,
+};
+
+// Light theme: badges go bold — short labels need the extra weight on a
+// white background. Amber/teal use brighter hues than the host's (its
+// #92660A / #00838F read muddy); the bar red/green take the host's calmer
+// light error/success instead of the terminal's glaring ANSI red.
+const LIGHT = {
+  ...ANSI,
+  brightRed: `${ESC}1;91m`, //                bold — auto badge
+  warning: `${ESC}1m${rgb(217, 119, 6)}`, //  bold #D97706 — yolo/goal blocked
+  primary: `${ESC}1m${rgb(21, 101, 192)}`, // bold #1565C0 — plan/model
+  accent: `${ESC}1m${rgb(20, 184, 166)}`, //  bold #14B8A6 — swarm
+  barRed: rgb(185, 28, 28), //                #B91C1C — host light error
+  barYellow: rgb(217, 119, 6), //             #D97706 — matches the badge amber
+  barGreen: rgb(14, 122, 56), //              #0E7A38 — host light success
 };
 
 const BAR_WIDTH = 10;
@@ -31,24 +55,26 @@ function colorize(enabled, color, str) {
   return enabled ? `${color}${str}${RESET}` : str;
 }
 
-/** Usage-graded bar color: <60% green, <85% yellow, >=85% red. */
-function levelColor(frac) {
-  if (frac >= 0.85) return C.red;
-  if (frac >= 0.6) return C.yellow;
-  return C.green;
+/** Usage-graded bar color: <60% green, <85% yellow, >=85% red. The palette
+ * decides the concrete hues — ANSI on dark, truecolor on light. */
+function levelColor(frac, C = DARK) {
+  if (frac >= 0.85) return C.barRed;
+  if (frac >= 0.6) return C.barYellow;
+  return C.barGreen;
 }
 
 /**
  * Render a 10-cell progress bar for a 0..1 fraction.
  * @param {number} frac
  * @param {boolean} color
+ * @param {object} [C] palette (default DARK)
  * @returns {string}
  */
-export function bar(frac, color) {
+export function bar(frac, color, C = DARK) {
   const clamped = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0;
   const filled = Math.floor(clamped * BAR_WIDTH);
   const s = '█'.repeat(filled) + '░'.repeat(BAR_WIDTH - filled);
-  return colorize(color, levelColor(clamped), s);
+  return colorize(color, levelColor(clamped, C), s);
 }
 
 /**
@@ -112,7 +138,7 @@ function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-function badges(payload, color, swarmOn) {
+function badges(payload, color, swarmOn, C) {
   const out = [];
   // Host defaults render auto/yolo in warning amber and plan in primary
   // blue; auto keeps bright red here per user preference to stay distinct.
@@ -137,7 +163,7 @@ function badges(payload, color, swarmOn) {
  * carries no goal field; the state comes from the wire journal's goal ops.
  * Shown in every layout tier — a live goal is too important to drop.
  */
-function goalBadge(goal, color, now) {
+function goalBadge(goal, color, now, C) {
   const badge = formatGoalBadge(goal, now);
   if (!badge) return null;
   const dotColor =
@@ -158,7 +184,7 @@ function goalBadge(goal, color, now) {
  * (Context only in full — the host's line 2 already shows the numbers)
  */
 function buildSegments(layout, ctx) {
-  const { payload, quota, metrics, gitDirty, color, now } = ctx;
+  const { payload, quota, metrics, gitDirty, color, now, C } = ctx;
   const segs = [];
 
   // Model with thinking suffix, mirroring the host footer: boolean models
@@ -200,7 +226,7 @@ function buildSegments(layout, ctx) {
     } else if (typeof payload.contextUsage === 'number') {
       ctxFrac = payload.contextUsage;
     }
-    let ctxSeg = `Context ${bar(ctxFrac, color)} ${Math.round(ctxFrac * 100)}%`;
+    let ctxSeg = `Context ${bar(ctxFrac, color, C)} ${Math.round(ctxFrac * 100)}%`;
     if (hasCounts) {
       ctxSeg += ` (${formatTokens(payload.contextTokens)}/${formatTokens(payload.maxContextTokens)})`;
     }
@@ -284,7 +310,7 @@ function buildSegments(layout, ctx) {
       const frac = w.used / w.limit;
       let s = layout === 'compact'
         ? `${w.label} ${pctOf(w.used, w.limit)}%`
-        : `${w.label} ${bar(frac, color)} ${pctOf(w.used, w.limit)}%`;
+        : `${w.label} ${bar(frac, color, C)} ${pctOf(w.used, w.limit)}%`;
       const cd = formatCountdown(w.resetAt, now);
       if (cd) s += ` ${cd}`;
       parts.push(s);
@@ -293,7 +319,7 @@ function buildSegments(layout, ctx) {
     // reset countdown shows from normal up (compact drops the segment).
     if (layout !== 'compact' && quota.weekly) {
       const frac = quota.weekly.used / quota.weekly.limit;
-      let s = `7d ${bar(frac, color)} ${pctOf(quota.weekly.used, quota.weekly.limit)}%`;
+      let s = `7d ${bar(frac, color, C)} ${pctOf(quota.weekly.used, quota.weekly.limit)}%`;
       const cd = formatCountdown(quota.weekly.resetAt, now);
       if (cd) s += ` ${cd}`;
       parts.push(s);
@@ -319,20 +345,22 @@ function buildSegments(layout, ctx) {
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] full|normal|compact
  * @param {boolean} [ctx.color]
+ * @param {string} [ctx.theme] dark|light — badge palette (default dark)
  * @param {number} [ctx.now]
  * @returns {string[]}
  */
 export function renderHud(ctx) {
   const color = ctx.color !== false;
+  const C = ctx.theme === 'light' ? LIGHT : DARK;
   const now = ctx.now ?? Date.now();
   const payload = ctx.payload || {};
   const startIdx = Math.max(0, LAYOUT_ORDER.indexOf(ctx.layout || 'normal'));
   for (let i = startIdx; i < LAYOUT_ORDER.length; i++) {
     const layout = LAYOUT_ORDER[i];
-    const prefix = badges(payload, color, ctx.metrics?.swarmMode === true);
-    const goal = goalBadge(ctx.metrics?.goal, color, now);
+    const prefix = badges(payload, color, ctx.metrics?.swarmMode === true, C);
+    const goal = goalBadge(ctx.metrics?.goal, color, now, C);
     if (goal) prefix.push(goal);
-    const segs = buildSegments(layout, { ...ctx, payload, color, now });
+    const segs = buildSegments(layout, { ...ctx, payload, color, now, C });
     const line = [...prefix, segs.join(' │ ')].filter(Boolean).join(' ');
     if (stripAnsi(line).length <= MAX_WIDTH || layout === 'compact') return [line];
   }

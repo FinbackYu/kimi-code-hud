@@ -6,6 +6,21 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-31
+
+### Added
+
+- Light-theme support. Resolved from `tui.toml`'s top-level `theme`
+  setting, with `"auto"` resolved via `COLORFGBG` and a dark fallback
+  (the status line can't run the host's OSC 11 query on the 300ms hot
+  path); `KIMI_HUD_THEME=dark|light` pins the palette manually. On light,
+  the badges (model name, `[plan]`, `[yolo]`, `[swarm]`, `[auto]`) render
+  bold, and the amber/teal use brighter hues (`#D97706` / `#14B8A6`) than
+  the host's muddy `#92660A` / `#00838F`, while the quota and context
+  bars switch from glaring terminal ANSI to calmer truecolor hues
+  (`#B91C1C` / `#D97706` / `#0E7A38`). Dark mode is unchanged: badges
+  keep the host dark hex values and bars keep terminal-remapped ANSI.
+
 ## [0.3.2] - 2026-07-31
 
 ### Changed
@@ -94,7 +109,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.4.0
 [0.3.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.2
 [0.3.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.1
 [0.3.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.0
