@@ -191,7 +191,8 @@ function buildSegments(layout, ctx) {
     segs.push(ctxSeg);
   }
 
-  // Speed segment (omitted when no samples yet, e.g. fresh session)
+  // Speed segment. TPS stays hidden until the metrics window has enough
+  // fresh, reliable samples; TTFT can still be useful during that warmup.
   if (metrics && typeof metrics.tps === 'number') {
     const tps = Math.round(metrics.tps);
     if (layout === 'compact') {
@@ -200,6 +201,9 @@ function buildSegments(layout, ctx) {
       const ttft = formatTtft(metrics.ttftMs);
       segs.push(`⚡ ${tps} t/s${ttft ? ` · TTFT ${ttft}` : ''}`);
     }
+  } else if (metrics) {
+    const ttft = formatTtft(metrics.ttftMs);
+    if (ttft) segs.push(`TTFT ${ttft}`);
   }
 
   // Quota segments (whole section omitted when no cache yet). Compact drops

@@ -114,6 +114,22 @@ test('optional segments drop cleanly', () => {
   assert.equal(line, '[manual] K3 │ kimi-code-hud');
 });
 
+test('TTFT remains visible while TPS is warming up', () => {
+  const [normal] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: { tps: null, ttftMs: 1300 },
+  }));
+  assert.ok(normal.includes('TTFT 1.3s'));
+  assert.ok(!normal.includes('t/s'));
+
+  const [compact] = renderHud(baseCtx({
+    layout: 'compact',
+    metrics: { tps: null, ttftMs: 1300 },
+  }));
+  assert.ok(compact.includes('TTFT 1.3s'));
+  assert.ok(!compact.includes('⚡'));
+});
+
 test('Context fraction prefers exact token counts', () => {
   const [line] = renderHud(baseCtx({
     layout: 'full',
