@@ -63,22 +63,22 @@ test('compact layout: model, git, speed, window pct + countdown', () => {
   assert.equal(parts[1], 'git:(main*)');
   assert.equal(parts[2], '⚡ 47');
   assert.equal(parts[3], '5h 31% ~2h18m');
-  assert.equal(parts.length, 4); // no Context, no project, no bar, no wk, no version
+  assert.equal(parts.length, 4); // no Context, no project, no bar, no weekly, no version
 });
 
 test('normal layout drops Context, adds project, t/s+TTFT, countdown and weekly', () => {
   const [line] = renderHud(baseCtx({ layout: 'normal' }));
   assert.equal(
     line,
-    '[manual] K3 │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m │ wk ██░░░░░░░░ 25%',
+    '[manual] K3 │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h',
   );
 });
 
-test('full layout adds Context, weekly countdown, version', () => {
+test('full layout adds Context and version', () => {
   const [line] = renderHud(baseCtx({ layout: 'full', payload: basePayload({ planMode: true }) }));
   assert.equal(
     line,
-    '[manual] [plan] K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m │ wk ██░░░░░░░░ 25% ~3d2h │ v0.31.0',
+    '[manual] [plan] K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h │ v0.31.0',
   );
 });
 
@@ -193,6 +193,16 @@ test('stale TPS stays visible in muted gray', () => {
   const [fresh] = renderHud(baseCtx({ layout: 'normal', color: true, metrics: { tps: 47, tpsStale: false, ttftMs: 1300 } }));
   assert.ok(fresh.includes('⚡ 47 t/s'));
   assert.ok(!fresh.includes('\x1b[90m⚡'));
+});
+
+test('live gen timer stays bright when the stale speed dims', () => {
+  const metrics = { tps: 47, tpsStale: true, ttftMs: 1300, turnStartedAt: NOW - 3000 };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', color: true, metrics }));
+  assert.ok(normal.includes('\x1b[90m⚡ 47 t/s\x1b[0m · gen 3s'));
+  assert.ok(!normal.includes('\x1b[90m⚡ 47 t/s · gen'));
+
+  const [compact] = renderHud(baseCtx({ layout: 'compact', color: true, metrics }));
+  assert.ok(compact.includes('\x1b[90m⚡ 47\x1b[0m gen 3s'));
 });
 
 test('Context fraction prefers exact token counts', () => {
@@ -313,12 +323,18 @@ test('live gen ticker replaces TTFT while the turn runs', () => {
   assert.ok(!normal.includes('TTFT'));
   const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
   assert.ok(compact.includes('⚡ 47 gen 3s'));
-  // Long turns format as minutes.
+  // Past the one-minute mark the seconds keep ticking, so the timer never
+  // looks static: exactly 60s renders "1m0s", and minutes carry the remainder.
+  const [minute] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: { ...metrics, turnStartedAt: NOW - 60_000 },
+  }));
+  assert.ok(minute.includes('gen 1m0s'));
   const [long] = renderHud(baseCtx({
     layout: 'normal',
-    metrics: { ...metrics, turnStartedAt: NOW - 4 * 60_000 },
+    metrics: { ...metrics, turnStartedAt: NOW - (4 * 60_000 + 5_000) },
   }));
-  assert.ok(long.includes('gen 4m'));
+  assert.ok(long.includes('gen 4m5s'));
 });
 
 test('gen ticker carries the head count for fleets without speed samples', () => {
