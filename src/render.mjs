@@ -207,7 +207,10 @@ function speedSegment({ layout, metrics, color, now, C }) {
   const turnStart = metrics && typeof metrics.turnStartedAt === 'number'
     ? metrics.turnStartedAt
     : null;
-  const multi = metrics && typeof metrics.tpsTotal === 'number' && metrics.activeAgents > 1;
+  // The parenthetical head count must match the agents actually feeding the
+  // total/average: an agent still waiting on its first step counts as active
+  // (gen ticker) but has no speed reading yet (tpsAgents).
+  const multi = metrics && typeof metrics.tpsTotal === 'number' && metrics.tpsAgents > 1;
   const generatedFor =
     !goalLive && turnStart !== null ? formatElapsed(now - turnStart) : null;
   const compacting =
@@ -225,7 +228,7 @@ function speedSegment({ layout, metrics, color, now, C }) {
     );
     if (layout === 'compact') {
       const head = multi
-        ? `⚡ ${Math.round(metrics.tpsTotal)} (${metrics.activeAgents}@${average})`
+        ? `⚡ ${Math.round(metrics.tpsTotal)} (${metrics.tpsAgents}@${average})`
         : `⚡ ${average}`;
       const live = generatedFor
         ? `gen ${generatedFor}`
@@ -233,7 +236,7 @@ function speedSegment({ layout, metrics, color, now, C }) {
       return live ? `${paint(head)} ${live}` : paint(head);
     }
     const base = multi
-      ? `⚡ ${Math.round(metrics.tpsTotal)} t/s (${metrics.activeAgents} agents @${average})`
+      ? `⚡ ${Math.round(metrics.tpsTotal)} t/s (${metrics.tpsAgents} agents @${average})`
       : `⚡ ${average} t/s`;
     if (generatedFor) return `${paint(base)} · gen ${generatedFor}`;
     if (compacting) return `${paint(base)} · compacting ${compacting}`;
@@ -315,7 +318,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, activeAgents, turnStartedAt, compactingSince, compactionMs}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, tpsAgents, activeAgents, turnStartedAt, compactingSince, compactionMs}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] normal|compact
  * @param {boolean} [ctx.color]

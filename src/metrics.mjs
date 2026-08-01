@@ -375,8 +375,11 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * Agents with a request in flight or a sample newer than ACTIVE_WINDOW_MS
  * count as active: with several active (swarm/subagent runs) the result
  * carries the fleet total (`tpsTotal`), the per-agent average (`tps`) and
- * the head count (`activeAgents`), and TTFT is the median across active
- * agents so one stuck agent cannot poison the display. A single active
+ * the head counts, and TTFT is the median across active agents so one
+ * stuck agent cannot poison the display. `activeAgents` counts every live
+ * agent (the gen-ticker head count); `tpsAgents` counts only those with a
+ * fresh speed reading, so an agent still waiting on its first step never
+ * inflates the fleet figure and `tpsTotal ≈ tpsAgents × tps` always holds. A single active
  * agent keeps the hardened MIN_SAMPLES gate; an idle session falls back to
  * the last full-window median (flagged stale). `turnStartedAt` anchors the
  * live timer at the user's latest prompt (turn.prompt) until the turn ends
@@ -391,7 +394,7 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * @param {object} [opts]
  * @param {number} [opts.deadline] absolute `performance.now()` deadline
  * @param {number} [opts.readBudgetBytes] total wire bytes allowed this frame
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, activeAgents: number, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
@@ -403,7 +406,7 @@ export function getMetrics(sessionId, {
   const empty = {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
     modelAlias: null, swarmMode: false, cache: null,
-    tpsTotal: null, activeAgents: 0, turnStartedAt: null,
+    tpsTotal: null, tpsAgents: 0, activeAgents: 0, turnStartedAt: null,
     compactingSince: null, compactionMs: null,
   };
   try {

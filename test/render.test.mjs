@@ -373,7 +373,7 @@ test('goal badge colors: dot by status, brackets muted', () => {
 });
 
 test('fleet speed shows total, head count and per-agent average', () => {
-  const metrics = { tps: 25, tpsTotal: 305, activeAgents: 12, ttftMs: 1300 };
+  const metrics = { tps: 25, tpsTotal: 305, tpsAgents: 12, activeAgents: 12, ttftMs: 1300 };
   const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
   assert.ok(normal.includes('⚡ 305 t/s (12 agents @25) · TTFT 1.3s'));
   const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
@@ -381,6 +381,19 @@ test('fleet speed shows total, head count and per-agent average', () => {
   // A fleet is never painted as stale.
   const [colored] = renderHud(baseCtx({ layout: 'normal', color: true, metrics }));
   assert.ok(!colored.includes('\x1b[90m⚡'));
+});
+
+test('fleet speed head count matches the agents feeding the total', () => {
+  // An agent with a request in flight but no speed sample yet stays in
+  // activeAgents but not in the parenthetical count.
+  const metrics = { tps: 62, tpsTotal: 124, tpsAgents: 2, activeAgents: 3 };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(normal.includes('⚡ 124 t/s (2 agents @62)'));
+  // A single reading renders as a solo speed, not a one-agent "fleet".
+  const solo = { tps: 68, tpsTotal: 68, tpsAgents: 1, activeAgents: 2 };
+  const [line] = renderHud(baseCtx({ layout: 'normal', metrics: solo }));
+  assert.ok(line.includes('⚡ 68 t/s'));
+  assert.ok(!line.includes('agents'));
 });
 
 test('live gen ticker replaces TTFT while the turn runs', () => {
@@ -420,7 +433,7 @@ test('gen ticker carries the head count for fleets without speed samples', () =>
 
 test('fleet gen ticker appends to the fleet speed format', () => {
   const metrics = {
-    tps: 25, tpsTotal: 305, activeAgents: 12, ttftMs: 1300, turnStartedAt: NOW - 3000,
+    tps: 25, tpsTotal: 305, tpsAgents: 12, activeAgents: 12, ttftMs: 1300, turnStartedAt: NOW - 3000,
   };
   const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
   assert.ok(normal.includes('⚡ 305 t/s (12 agents @25) · gen 3s'));

@@ -22,6 +22,13 @@ The project follows [Semantic Versioning](https://semver.org/).
   and the width defense degrades normal -> compact; read the host-drawn
   line 2 for context usage.
 
+### Fixed
+
+- Count only agents with a fresh speed reading in the fleet throughput
+  figure: an agent still waiting on its first step stays in the gen-ticker
+  head count but no longer inflates the `N agents @avg` parenthetical, so
+  the displayed total, head count and average stay consistent.
+
 ## [0.5.1] - 2026-08-01
 
 ### Added

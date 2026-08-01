@@ -896,6 +896,7 @@ test('getMetrics aggregates an active fleet: total, average, count, TTFT median'
   );
   const m = getMetrics(id, opts);
   assert.equal(m.activeAgents, 3);
+  assert.equal(m.tpsAgents, 3);
   assert.equal(m.tpsTotal, 900);
   assert.equal(m.tps, 300); // true per-agent average, not the median
   assert.equal(m.tpsStale, false);
@@ -919,8 +920,48 @@ test('getMetrics fleet members contribute speed with a single fresh sample', () 
   );
   const m = getMetrics(id, opts);
   assert.equal(m.activeAgents, 2);
+  assert.equal(m.tpsAgents, 2);
   assert.equal(m.tpsTotal, 700);
   assert.equal(m.tps, 350); // mean of the main median (200) and the subagent sample
+});
+
+test('getMetrics fleet speed head count excludes agents without samples', () => {
+  // Reproduces "124 t/s (3 agents @62)": the third agent had a request in
+  // flight but no step.end yet, so only two speeds fed the 124 total.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0', 'agent-1'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    stepEnd({ output: 62, streamMs: 1000, ttftMs: 100 }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 62, streamMs: 1000, ttftMs: 100 }) + '\n',
+  );
+  fs.writeFileSync(wires['agent-1'], llmRequest() + '\n'); // generating, no sample
+  const m = getMetrics(id, opts);
+  assert.equal(m.activeAgents, 3); // every live agent (gen ticker head count)
+  assert.equal(m.tpsAgents, 2); // only agents feeding the speed figure
+  assert.equal(m.tpsTotal, 124);
+  assert.equal(m.tps, 62);
+});
+
+test('getMetrics fleet with a single speed reading reports tpsAgents 1', () => {
+  // Reproduces "68 t/s (2 agents @68)": two live agents, one with a reading.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    stepEnd({ output: 68, streamMs: 1000, ttftMs: 100 }) + '\n',
+  );
+  fs.writeFileSync(wires['agent-0'], llmRequest() + '\n');
+  const m = getMetrics(id, opts);
+  assert.equal(m.activeAgents, 2);
+  assert.equal(m.tpsAgents, 1);
+  assert.equal(m.tpsTotal, 68);
+  assert.equal(m.tps, 68);
 });
 
 test('fleet-to-solo fallback uses the remaining agent median', () => {
@@ -1193,7 +1234,7 @@ test('getMetrics returns nulls for unknown sessions', () => {
   assert.deepEqual(m, {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
     modelAlias: null, swarmMode: false, cache: null,
-    tpsTotal: null, activeAgents: 0, turnStartedAt: null,
+    tpsTotal: null, tpsAgents: 0, activeAgents: 0, turnStartedAt: null,
     compactingSince: null, compactionMs: null,
   });
 });
