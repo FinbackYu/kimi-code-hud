@@ -6,6 +6,23 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-02
+
+### Added
+
+- Add real HUD screenshots to the Chinese and English READMEs.
+- Add a canonical Kimi Code 0.31.0 capability inventory with user-facing
+  activation instructions, readable-but-unrendered signals, and explicit
+  token-scope definitions.
+- Add a separate known-issues register for background tasks, Git fidelity,
+  terminal-width awareness, and stale-frame behavior, including acceptance
+  criteria for each open item.
+
+### Changed
+
+- Reorganize both READMEs around features, installation, configuration,
+  runtime behavior, and links to the capability and issue documents.
+
 ## [0.6.0] - 2026-08-02
 
 ### Changed
@@ -190,7 +207,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.1
 [0.6.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.0
 [0.5.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.5.1
 [0.5.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.5.0
