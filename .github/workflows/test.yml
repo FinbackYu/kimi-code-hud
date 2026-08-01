@@ -33,13 +33,11 @@ jobs:
       - name: Whitespace check
         shell: bash
         run: |
+          before="${{ github.event.before }}"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git diff --check "origin/${{ github.base_ref }}...HEAD"
+          elif [ "$before" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+            git diff --check "$before..HEAD"
           else
-            before="${{ github.event.before }}"
-            if [ "$before" = "0000000000000000000000000000000000000000" ]; then
-              echo "New branch push (before is the all-zero SHA); skipping whitespace check."
-            else
-              git diff --check "$before..HEAD"
-            fi
+            echo "No usable base revision (new ref, tag, or rewritten history); skipping whitespace check."
           fi
