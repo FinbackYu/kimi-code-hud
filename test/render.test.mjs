@@ -12,11 +12,7 @@ function basePayload(overrides = {}) {
     gitBranch: 'main',
     permissionMode: 'manual',
     planMode: false,
-    contextUsage: 0.62,
-    contextTokens: 162529,
-    maxContextTokens: 262144,
     sessionId: 'x',
-    version: '0.31.0',
     ...overrides,
   };
 }
@@ -63,10 +59,10 @@ test('compact layout: model, git, speed, window pct + countdown', () => {
   assert.equal(parts[1], 'git:(main*)');
   assert.equal(parts[2], '⚡ 47');
   assert.equal(parts[3], '5h 31% ~2h18m');
-  assert.equal(parts.length, 4); // no Context, no project, no bar, no weekly, no version
+  assert.equal(parts.length, 4); // no project, no bar, no weekly
 });
 
-test('normal layout drops Context, adds project, t/s+TTFT, countdown and weekly', () => {
+test('normal layout adds project, t/s+TTFT, countdown and weekly', () => {
   const [line] = renderHud(baseCtx({ layout: 'normal' }));
   assert.equal(
     line,
@@ -86,23 +82,15 @@ test('normal layout shows zero quota usage with its reset countdown', () => {
   assert.ok(line.includes('7d ░░░░░░░░░░ 0% ~3d2h'));
 });
 
-test('full layout adds Context and version', () => {
-  const [line] = renderHud(baseCtx({ layout: 'full', payload: basePayload({ planMode: true }) }));
-  assert.equal(
-    line,
-    '[manual] [plan] K3 │ kimi-code-hud git:(main*) │ Context ██████░░░░ 62% (159K/256K) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h │ v0.31.0',
-  );
-});
-
-test('model thinking suffix from session thinkingLevel (normal and full)', () => {
+test('model thinking suffix from session thinkingLevel (normal and compact)', () => {
   const withLevel = (thinkingLevel, layout) =>
     renderHud(baseCtx({ layout, metrics: { tps: 47, ttftMs: 1300, thinkingLevel } }))[0];
   assert.ok(withLevel('on', 'normal').startsWith('[manual] K3 thinking │'));
-  assert.ok(withLevel('high', 'normal').startsWith('[manual] K3 thinking:high │'));
-  assert.ok(withLevel('max', 'full').startsWith('[manual] K3 thinking:max │'));
+  // effort-capable models show the bare level without the "thinking" label
+  assert.ok(withLevel('high', 'normal').startsWith('[manual] K3 high │'));
+  assert.ok(withLevel('max', 'normal').startsWith('[manual] K3 max │'));
   assert.ok(withLevel('off', 'normal').startsWith('[manual] K3 │'));
   assert.ok(withLevel(null, 'normal').startsWith('[manual] K3 │'));
-  // compact keeps only " <effort>" without the "thinking" label
   assert.ok(withLevel('high', 'compact').startsWith('[manual] K3 high │'));
   assert.ok(withLevel('on', 'compact').startsWith('[manual] K3 on │'));
   assert.ok(withLevel('off', 'compact').startsWith('[manual] K3 │'));
@@ -144,7 +132,7 @@ test('TTFT remains visible while TPS is warming up', () => {
 });
 
 test('cache hit rate appears after speed and before quota in every layout', () => {
-  for (const layout of ['compact', 'normal', 'full']) {
+  for (const layout of ['compact', 'normal']) {
     const [line] = renderHud(baseCtx({
       layout,
       metrics: { tps: 47, ttftMs: 1300, cache: CACHE_METRIC },
@@ -152,11 +140,8 @@ test('cache hit rate appears after speed and before quota in every layout', () =
     assert.ok(line.includes('Cache 92%'), `${layout}: ${line}`);
     assert.ok(line.indexOf('⚡') < line.indexOf('Cache 92%'), `${layout}: ${line}`);
     assert.ok(line.indexOf('Cache 92%') < line.indexOf('5h'), `${layout}: ${line}`);
-    if (layout === 'full') {
-      assert.ok(line.includes('Cache 92% (86K/94K)'));
-    } else {
-      assert.ok(!line.includes('(86K/94K)'));
-    }
+    // token counts are never shown — only the percentage
+    assert.ok(!line.includes('(86K/94K)'), `${layout}: ${line}`);
   }
 });
 
@@ -217,33 +202,16 @@ test('live gen timer stays bright when the stale speed dims', () => {
   assert.ok(compact.includes('\x1b[90m⚡ 47\x1b[0m gen 3s'));
 });
 
-test('Context fraction prefers exact token counts', () => {
-  const [line] = renderHud(baseCtx({
-    layout: 'full',
-    payload: basePayload({ contextTokens: 10485, maxContextTokens: 262144, contextUsage: 0.9 }),
-  }));
-  assert.ok(line.includes('Context ░░░░░░░░░░ 4% (10K/256K)'));
-});
-
-test('falls back to contextUsage when token counts are missing', () => {
-  const [line] = renderHud(baseCtx({
-    layout: 'full',
-    payload: basePayload({ contextTokens: undefined, maxContextTokens: undefined, contextUsage: 0.5 }),
-  }));
-  assert.ok(line.includes('Context █████░░░░░ 50%'));
-});
-
-test('width defense downgrades full -> compact', () => {
+test('width defense downgrades normal -> compact', () => {
   const longName = 'x'.repeat(180);
   const [line] = renderHud(baseCtx({
-    layout: 'full',
+    layout: 'normal',
     payload: basePayload({ cwd: `/tmp/${longName}` }),
     metrics: { tps: 47, ttftMs: 1300, cache: CACHE_METRIC },
   }));
   assert.ok(line.length <= 220); // compact tier guaranteed <= MAX_WIDTH
-  assert.ok(!line.includes('v0.31.0')); // downgraded away from full
+  assert.ok(!line.includes('kimi-code-hud')); // downgraded away from normal
   assert.ok(line.includes('Cache 92%')); // compact retains the percentage
-  assert.ok(!line.includes('(86K/94K)')); // full-only counts were dropped
 });
 
 test('color badges: yolo warning amber, auto bright red, plan primary blue', () => {
@@ -337,7 +305,7 @@ test('swarm badge renders from wire-derived metrics.swarmMode (payload has no fi
 
 test('goal badge sits between mode badges and model, in every tier', () => {
   const goal = { status: 'active', turnsUsed: 7, wallClockMs: 0, wallClockResumedAt: NOW - 4 * 60_000 };
-  for (const layout of ['compact', 'normal', 'full']) {
+  for (const layout of ['compact', 'normal']) {
     const [line] = renderHud(baseCtx({
       layout,
       metrics: { tps: 47, ttftMs: 1300, goal },

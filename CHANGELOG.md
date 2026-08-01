@@ -6,6 +6,19 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Show the bare thinking effort level in the model segment (`K3 max` instead
+  of `K3 thinking:max`) in every layout; boolean thinking keeps the
+  ` thinking` label.
+
+### Removed
+
+- Drop the full layout tier together with its exclusive Context segment,
+  version suffix, and Cache token counts. Layouts are now compact and normal,
+  and the width defense degrades normal -> compact; read the host-drawn
+  line 2 for context usage.
+
 ## [0.5.1] - 2026-08-01
 
 ### Added

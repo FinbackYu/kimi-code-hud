@@ -43,7 +43,7 @@ test('sanitized host payload and wire fixtures lock every layout/theme/color con
   assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500 });
 
   const actual = {};
-  for (const layout of ['compact', 'normal', 'full']) {
+  for (const layout of ['compact', 'normal']) {
     for (const theme of ['dark', 'light']) {
       for (const color of [false, true]) {
         const key = `${layout}-${theme}-${color ? 'ansi' : 'plain'}`;
