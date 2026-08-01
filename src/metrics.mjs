@@ -1,246 +1,47 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import { HUD_DIR } from './quota.mjs';
+import { performance } from 'node:perf_hooks';
+import { emptyAgent, normAgent } from './metrics-agent.mjs';
+import { applyCompactionRow } from './metrics-compaction.mjs';
+import {
+  BACKFILL_SCAN_V,
+  CACHE_BACKFILL_MAX_BYTES,
+  CACHE_SCAN_V,
+} from './metrics-constants.mjs';
+import { median } from './metrics-math.mjs';
+import { applySessionMetaRow } from './metrics-session-meta.mjs';
+import {
+  MIGRATED,
+  emptyState,
+  loadState,
+  saveState,
+  statePathFor,
+} from './metrics-state.mjs';
+import { applyThroughputRow } from './metrics-throughput.mjs';
+import { applyTurnRow } from './metrics-turn.mjs';
+import { summarizeMetrics } from './metrics-summary.mjs';
+import { HUD_DIR, SESSIONS_ROOT } from './paths.mjs';
+import {
+  findSessionDir,
+  findWirePath,
+  resolveSessionDir,
+} from './session-locator.mjs';
+import {
+  AGENT_WIRE_SLICE_BYTES,
+  BACKFILL_WIRE_SLICE_BYTES,
+  MAIN_WIRE_SLICE_BYTES,
+  WIRE_READ_BUDGET_BYTES,
+  readBoundedWire,
+  wireTailMarker,
+  wireTailMatches,
+} from './wire-reader.mjs';
 import { applyGoalOp } from './goal.mjs';
 import {
   applyCacheWireRow,
-  cacheMetricFromState,
   resetCacheState,
 } from './cache-hit.mjs';
 
-export const SESSIONS_ROOT = path.join(os.homedir(), '.kimi-code', 'sessions');
-
-const MAX_SAMPLES = 5;
-const MIN_SAMPLES = 3;
-const MIN_STREAM_MS = 250;
-const MAX_TPS = 1000;
-const TPS_TTL_MS = 2 * 60 * 1000;
-// Speed samples carry the wire event timestamp and expire at read time:
-// after a resume / idle gap / compaction the pre-gap numbers describe a
-// different workload and must not leak into any agent's median.
-const SAMPLE_WINDOW_MS = 10 * 60 * 1000;
-// An agent counts as active (fleet total/average) when it produced a sample
-// within this window or has a request in flight.
-const ACTIVE_WINDOW_MS = TPS_TTL_MS;
-// Persisted per-agent sample array bound; only the freshest MAX_SAMPLES feed
-// a median.
-const MAX_STORED_SAMPLES = 20;
-const SAMPLE_STATE_V = 1;
-const CACHE_SCAN_V = 2;
-export const CACHE_BACKFILL_MAX_BYTES = 1024 * 1024;
-// Backfill scan version; bump when the tracked key set changes so existing
-// state files re-scan once (v2: `thinkingEffort`; v3: goal ops; v4:
-// `modelAlias`, used to keep TPS samples scoped to one model; v5:
-// `swarm_mode.enter/exit`, the wire journal's swarm-mode record; v6:
-// `turn.prompt`/`turn.cancel`/`end_turn`, the turn boundaries anchoring the
-// turn-work timer; v7: `turn.ended`, the authoritative terminal record added
-// by Kimi Code 0.31.1; v8: `full_compaction.*`, the compaction timer's
-// boundaries — `full_compaction.complete` was already folded live before).
-const BACKFILL_SCAN_V = 8;
-// State format version; v6: per-agent sample buckets with timestamped
-// samples (v1..v5 states were flat single-wire shapes and are migrated).
-const STATE_V = 6;
-
-/**
- * Locate the session directory for a session id. The payload sessionId may
- * or may not carry a prefix, session dirs live one level below
- * ~/.kimi-code/sessions/<wd_*>, and the dir prefix changed from "ses_" to
- * "session_" in newer hosts — all spellings are tried. Returns null when
- * not found.
- * @param {string} sessionId
- * @param {string} [sessionsRoot]
- * @returns {string|null}
- */
-export function findSessionDir(sessionId, sessionsRoot = SESSIONS_ROOT) {
-  if (!sessionId || typeof sessionId !== 'string') return null;
-  let bare = sessionId;
-  for (const prefix of ['ses_', 'session_']) {
-    if (bare.startsWith(prefix)) {
-      bare = bare.slice(prefix.length);
-      break;
-    }
-  }
-  const candidates = [`ses_${bare}`, `session_${bare}`, bare];
-  let wdDirs;
-  try {
-    wdDirs = fs.readdirSync(sessionsRoot, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-  for (const wd of wdDirs) {
-    if (!wd.isDirectory()) continue;
-    for (const name of candidates) {
-      const p = path.join(sessionsRoot, wd.name, name);
-      try {
-        if (fs.statSync(p).isDirectory()) return p;
-      } catch {
-        // keep looking
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Locate the main agent's wire.jsonl for a session id.
- * @param {string} sessionId
- * @param {string} [sessionsRoot]
- * @returns {string|null}
- */
-export function findWirePath(sessionId, sessionsRoot = SESSIONS_ROOT) {
-  const dir = findSessionDir(sessionId, sessionsRoot);
-  if (!dir) return null;
-  const p = path.join(dir, 'agents', 'main', 'wire.jsonl');
-  try {
-    if (fs.statSync(p).isFile()) return p;
-  } catch {
-    // not there
-  }
-  return null;
-}
-
-function statePathFor(sessionId, stateDir) {
-  const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, '_');
-  return path.join(stateDir, `metrics-${safe}.json`);
-}
-
-function emptyAgent() {
-  return {
-    offset: 0,
-    fileId: null,
-    samples: [],
-    lastTtftMs: null,
-    lastSampleAt: null,
-    lastRequestAt: null,
-    lastStepEndAt: null,
-    lastTurnPromptAt: null,
-    lastTurnEndAt: null,
-    lastCompactionBeginAt: null,
-    lastCompactionEndAt: null,
-    lastCompactionMs: null,
-  };
-}
-
-/** Normalize a persisted per-agent bucket in place. */
-function normAgent(a) {
-  if (!a || typeof a !== 'object') return emptyAgent();
-  if (typeof a.offset !== 'number') a.offset = 0;
-  if (typeof a.fileId !== 'string') a.fileId = null;
-  if (!Array.isArray(a.samples)) a.samples = [];
-  if (typeof a.lastTtftMs !== 'number') a.lastTtftMs = null;
-  if (typeof a.lastSampleAt !== 'number') a.lastSampleAt = null;
-  if (typeof a.lastRequestAt !== 'number') a.lastRequestAt = null;
-  if (typeof a.lastStepEndAt !== 'number') a.lastStepEndAt = null;
-  if (typeof a.lastTurnPromptAt !== 'number') a.lastTurnPromptAt = null;
-  if (typeof a.lastTurnEndAt !== 'number') a.lastTurnEndAt = null;
-  if (typeof a.lastCompactionBeginAt !== 'number') a.lastCompactionBeginAt = null;
-  if (typeof a.lastCompactionEndAt !== 'number') a.lastCompactionEndAt = null;
-  if (typeof a.lastCompactionMs !== 'number') a.lastCompactionMs = null;
-  return a;
-}
-
-function emptyState() {
-  const state = {
-    v: STATE_V,
-    agents: {},
-    lastMedian: null,
-    modelAlias: null,
-    thinkingLevel: null,
-    goal: null,
-    swarmMode: false,
-    cacheScanV: CACHE_SCAN_V,
-  };
-  resetCacheState(state);
-  return state;
-}
-
-/**
- * Migrate a pre-v6 flat single-wire state into the bucketed shape. The main
- * bucket inherits the offset/fileId so no historical re-read is needed.
- * Samples from a current SAMPLE_STATE_V carry no timestamps, so they are
- * stamped with the state's lastSampleAt — they keep describing the same
- * window and expire on their original timeline (states whose sample format
- * predates SAMPLE_STATE_V drop the window entirely, matching the old
- * migration). Everything else (lastMedian, modelAlias, thinking, goal,
- * swarm, cache) carries over untouched.
- */
-function migrateFlatState(s) {
-  const state = emptyState();
-  const main = emptyAgent();
-  main.offset = s.offset;
-  if (typeof s.fileId === 'string') main.fileId = s.fileId;
-  if (s.sampleStateV === SAMPLE_STATE_V) {
-    const stamp = typeof s.lastSampleAt === 'number' ? s.lastSampleAt : 0;
-    if (Array.isArray(s.samples)) {
-      main.samples = s.samples
-        .filter((v) => typeof v === 'number')
-        .map((v) => ({ v, t: stamp }));
-    }
-    if (typeof s.lastTtftMs === 'number') main.lastTtftMs = s.lastTtftMs;
-    if (typeof s.lastSampleAt === 'number') main.lastSampleAt = s.lastSampleAt;
-    if (typeof s.lastMedian === 'number') state.lastMedian = s.lastMedian;
-    if (typeof s.modelAlias === 'string') state.modelAlias = s.modelAlias;
-  }
-  if (typeof s.thinkingLevel === 'string') state.thinkingLevel = s.thinkingLevel;
-  if (s.goal && typeof s.goal === 'object') state.goal = s.goal;
-  if (typeof s.swarmMode === 'boolean') state.swarmMode = s.swarmMode;
-  if (typeof s.backfillScanV === 'number') state.backfillScanV = s.backfillScanV;
-  else if (typeof s.thinkingScanV === 'number') state.backfillScanV = s.thinkingScanV;
-  // Absent cacheScanV must stay 0 so the bounded cache restoration still
-  // runs once for pre-existing sessions (fresh states default to current).
-  state.cacheScanV = typeof s.cacheScanV === 'number' ? s.cacheScanV : 0;
-  if (s.cache && typeof s.cache === 'object') state.cache = s.cache;
-  state.agents.main = main;
-  return state;
-}
-
-function loadState(statePath) {
-  try {
-    const s = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-    if (s && typeof s === 'object') {
-      if (s.v === STATE_V && s.agents && typeof s.agents === 'object') {
-        for (const name of Object.keys(s.agents)) s.agents[name] = normAgent(s.agents[name]);
-        if (typeof s.lastMedian !== 'number') s.lastMedian = null;
-        if (typeof s.swarmMode !== 'boolean') s.swarmMode = false;
-        // Pre-v2 cache state was per-turn (cacheTurn/cacheNeedsPrompt); the
-        // cumulative rebuild owns state.cache now — drop the dead fields.
-        delete s.cacheTurn;
-        delete s.cacheNeedsPrompt;
-        return s;
-      }
-      if (typeof s.offset === 'number') return migrateFlatState(s);
-    }
-  } catch {
-    // fall through
-  }
-  return emptyState();
-}
-
-/**
- * Drop every agent's sample window and the remembered last median. Used
- * when the model changes: samples collected under one alias cannot be
- * attributed to another with confidence.
- */
-function resetFleetWindows(state) {
-  for (const a of Object.values(state.agents)) {
-    a.samples = [];
-    a.lastTtftMs = null;
-    a.lastSampleAt = null;
-  }
-  state.lastMedian = null;
-}
-
-function saveState(statePath, state) {
-  try {
-    fs.mkdirSync(path.dirname(statePath), { recursive: true });
-    const tmp = `${statePath}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(state));
-    fs.renameSync(tmp, statePath);
-  } catch {
-    // stay silent
-  }
-}
+export { SESSIONS_ROOT, findSessionDir, findWirePath, CACHE_BACKFILL_MAX_BYTES, median };
 
 /**
  * Fold one parsed wire row into the metrics state. Rows are bucketed per
@@ -257,251 +58,21 @@ function saveState(statePath, state) {
  */
 export function processWireRow(state, row, agent = 'main') {
   if (!state.agents || typeof state.agents !== 'object') state.agents = {};
-  const bucket = normAgent(state.agents[agent]);
-  state.agents[agent] = bucket;
-  const rowTime = Number.isFinite(row?.time) && row.time >= 0 ? row.time : null;
-  if (agent === 'main') {
-    // The session cache reducer needs to see every row, including turn.prompt
-    // boundaries, before the metric-specific early returns below.
-    applyCacheWireRow(state, row);
-  }
-  if (row?.type === 'turn.prompt') {
-    // The user's command anchors the turn-work timer ("how long has it been
-    // working since my prompt"). Only the main agent sees user prompts.
-    if (agent === 'main') {
-      if (rowTime !== null && (bucket.lastTurnPromptAt === null || rowTime > bucket.lastTurnPromptAt)) {
-        bucket.lastTurnPromptAt = rowTime;
-      }
-    }
-    return;
-  }
-  if (row?.type === 'llm.request') {
-    // A loop request without a later step.end means the model is generating
-    // right now. Compaction requests never produce a step.end, so they must
-    // not mark the agent as generating.
-    if (
-      row.kind !== 'compaction' &&
-      rowTime !== null &&
-      (bucket.lastRequestAt === null || rowTime > bucket.lastRequestAt)
-    ) {
-      bucket.lastRequestAt = rowTime;
-    }
-    return;
-  }
-  if (row?.type === 'turn.ended') {
-    // Kimi Code 0.31.1 persists this authoritative terminal record for every
-    // completed, cancelled, failed or blocked turn. Close the agent's current
-    // generation even when no step.end was written; only the main agent owns
-    // the user-facing turn timer.
-    if (rowTime !== null && (bucket.lastStepEndAt === null || rowTime > bucket.lastStepEndAt)) {
-      bucket.lastStepEndAt = rowTime;
-    }
-    if (agent === 'main') {
-      if (rowTime !== null && (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt)) {
-        bucket.lastTurnEndAt = rowTime;
-      }
-    }
-    return;
-  }
-  if (row?.type === 'full_compaction.begin') {
-    // Compaction is a main-agent context operation. The begin anchors the
-    // live "compacting Ns" timer until complete/cancel closes it — but only
-    // between turns (manual /compact). A begin while a turn is in flight is
-    // an auto-compaction inside the turn's work; the turn timer already owns
-    // the TTFT slot for that span, so it is never tracked.
-    if (agent !== 'main') return;
-    const turnInFlight =
-      bucket.lastTurnPromptAt !== null &&
-      (bucket.lastTurnEndAt === null || bucket.lastTurnPromptAt > bucket.lastTurnEndAt);
-    if (turnInFlight) return;
-    if (
-      rowTime !== null &&
-      (bucket.lastCompactionBeginAt === null || rowTime > bucket.lastCompactionBeginAt)
-    ) {
-      bucket.lastCompactionBeginAt = rowTime;
-    }
-    return;
-  }
-  if (row?.type === 'full_compaction.cancel') {
-    // A cancelled compaction closes the live timer but records no duration.
-    // Only an open (tracked) begin is closed; an untracked mid-turn cancel
-    // leaves an earlier finished duration untouched.
-    if (agent !== 'main') return;
-    const open =
-      bucket.lastCompactionBeginAt !== null &&
-      (bucket.lastCompactionEndAt === null ||
-        bucket.lastCompactionBeginAt > bucket.lastCompactionEndAt);
-    if (open && rowTime !== null) {
-      bucket.lastCompactionEndAt = rowTime;
-    }
-    return;
-  }
-  const activeCancel = row?.type === 'turn.cancel' && row.target !== 'queued';
-  if (row?.type === 'full_compaction.complete' || activeCancel) {
-    // A compaction completion or active-turn cancellation closes an in-flight
-    // generation. Older turn.cancel rows lack target and remain compatible;
-    // cancelling a queued turn must not stop the active one.
-    if (rowTime !== null && (bucket.lastStepEndAt === null || rowTime > bucket.lastStepEndAt)) {
-      bucket.lastStepEndAt = rowTime;
-    }
-    if (agent === 'main' && activeCancel) {
-      if (rowTime !== null && (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt)) {
-        bucket.lastTurnEndAt = rowTime;
-      }
-    }
-    if (agent === 'main' && row?.type === 'full_compaction.complete' && rowTime !== null) {
-      // Close the compaction timer and keep the duration for the dimmed
-      // "compacted Ns" readout. Only an open (tracked) begin is closed: a
-      // mid-turn auto-compaction was never tracked, and a complete that
-      // predates tracking has no timer to close.
-      const open =
-        bucket.lastCompactionBeginAt !== null &&
-        (bucket.lastCompactionEndAt === null ||
-          bucket.lastCompactionBeginAt > bucket.lastCompactionEndAt);
-      if (open && rowTime >= bucket.lastCompactionBeginAt) {
-        bucket.lastCompactionEndAt = rowTime;
-        bucket.lastCompactionMs = rowTime - bucket.lastCompactionBeginAt;
-      }
-    }
-    return;
-  }
-  if (row?.type === 'config.update') {
-    // Only the main agent drives the displayed model alias / thinking level.
-    if (agent !== 'main') return;
-    const modelAlias =
-      typeof row.modelAlias === 'string' && row.modelAlias ? row.modelAlias : null;
-    if (modelAlias && modelAlias !== state.modelAlias) {
-      // A first observed alias after samples is also unsafe: those samples
-      // cannot be attributed to the new model with confidence.
-      const hasSamples = Object.values(state.agents).some(
-        (a) => a.samples.length > 0 || a.lastTtftMs !== null,
-      );
-      if (state.modelAlias || hasSamples) {
-        resetFleetWindows(state);
-      }
-      state.modelAlias = modelAlias;
-    }
-    // Latest thinking level wins ("on"/"off" for boolean models, or a
-    // concrete effort like "high"/"max" for effort-capable ones). New
-    // hosts write `thinkingEffort` (including an initial event at
-    // session start); older hosts wrote `thinkingLevel`.
-    const level = typeof row.thinkingEffort === 'string' ? row.thinkingEffort
-      : typeof row.thinkingLevel === 'string' ? row.thinkingLevel : null;
-    if (level) state.thinkingLevel = level;
-    return;
-  }
+  state.agents[agent] = normAgent(state.agents[agent]);
+  if (agent === 'main') applyCacheWireRow(state, row);
+  applyTurnRow(state, row, agent);
+  applyThroughputRow(state, row, agent);
+  applyCompactionRow(state, row, agent);
+  applySessionMetaRow(state, row, agent);
   if (
-    row?.type === 'goal.create' ||
-    row?.type === 'goal.update' ||
-    row?.type === 'goal.clear' ||
-    row?.type === 'forked'
+    agent === 'main' && (
+      row?.type === 'goal.create' ||
+      row?.type === 'goal.update' ||
+      row?.type === 'goal.clear' ||
+      row?.type === 'forked'
+    )
   ) {
-    // Goal mode is main-agent only; the badge state reducer lives in
-    // goal.mjs.
-    if (agent !== 'main') return;
     state.goal = applyGoalOp(state.goal ?? null, row);
-    return;
-  }
-  if (row?.type === 'swarm_mode.enter' || row?.type === 'swarm_mode.exit') {
-    // The status-line payload carries no swarm flag; these journal lines
-    // are the only structured record of the mode. `trigger` ("manual" vs a
-    // /swarm <task> prompt) does not matter for the badge.
-    if (agent !== 'main') return;
-    state.swarmMode = row.type === 'swarm_mode.enter';
-    return;
-  }
-  if (row?.type !== 'context.append_loop_event') return;
-  const ev = row.event;
-  if (!ev || ev.type !== 'step.end') return;
-  if (rowTime !== null && (bucket.lastStepEndAt === null || rowTime > bucket.lastStepEndAt)) {
-    bucket.lastStepEndAt = rowTime;
-  }
-  // end_turn closes the turn (other finish reasons keep it running through
-  // tool calls and further steps). Turn boundaries are main-agent only.
-  if (
-    agent === 'main' &&
-    ev.finishReason === 'end_turn' &&
-    rowTime !== null &&
-    (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt)
-  ) {
-    bucket.lastTurnEndAt = rowTime;
-  }
-  if (Number.isFinite(ev.llmFirstTokenLatencyMs) && ev.llmFirstTokenLatencyMs >= 0) {
-    bucket.lastTtftMs = ev.llmFirstTokenLatencyMs;
-  }
-  const out = ev.usage && typeof ev.usage.output === 'number' ? ev.usage.output : 0;
-  const streamMs = typeof ev.llmStreamDurationMs === 'number' ? ev.llmStreamDurationMs : 0;
-  const tps = out / (streamMs / 1000);
-  if (
-    Number.isFinite(out) &&
-    out > 0 &&
-    Number.isFinite(streamMs) &&
-    streamMs >= MIN_STREAM_MS &&
-    Number.isFinite(tps) &&
-    tps <= MAX_TPS &&
-    rowTime !== null
-  ) {
-    if (
-      Number.isFinite(bucket.lastSampleAt) &&
-      rowTime - bucket.lastSampleAt > TPS_TTL_MS
-    ) {
-      // Do not let a new sample revive an otherwise stale window.
-      bucket.samples = [];
-    }
-    bucket.samples.push({ v: tps, t: rowTime });
-    if (bucket.samples.length > MAX_STORED_SAMPLES) {
-      bucket.samples.splice(0, bucket.samples.length - MAX_STORED_SAMPLES);
-    }
-    bucket.lastSampleAt = rowTime;
-    if (bucket.samples.length >= MIN_SAMPLES) {
-      // Remember the last full-window median so an expired window can stay
-      // visible (dimmed) instead of disappearing. A gap clear above only
-      // empties the live window; the median survives until a model switch
-      // invalidates it.
-      state.lastMedian = median(bucket.samples.slice(-MAX_SAMPLES).map((s) => s.v));
-    }
-  }
-}
-
-/**
- * Backfill-only handler for turn-boundary rows (turn.prompt / active
- * turn.cancel / turn.ended / end_turn step.end). Unlike the live path it must
- * not run the full reducer:
- * folding a step.end again would duplicate its TPS sample (the offset
- * already covered it), and turn.prompt side effects on the cache reducer
- * belong to the cache restoration's own bounded scan.
- * @param {object} state mutated in place
- * @param {object} row parsed wire.jsonl line (main wire only)
- */
-function applyTurnBoundaryRow(state, row) {
-  const rowTime = Number.isFinite(row?.time) && row.time >= 0 ? row.time : null;
-  if (rowTime === null) return;
-  if (!state.agents || typeof state.agents !== 'object') state.agents = {};
-  const bucket = normAgent(state.agents.main);
-  state.agents.main = bucket;
-  if (row?.type === 'turn.prompt') {
-    if (bucket.lastTurnPromptAt === null || rowTime > bucket.lastTurnPromptAt) {
-      bucket.lastTurnPromptAt = rowTime;
-    }
-    return;
-  }
-  if (
-    row?.type === 'turn.ended' ||
-    (row?.type === 'turn.cancel' && row.target !== 'queued')
-  ) {
-    if (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt) {
-      bucket.lastTurnEndAt = rowTime;
-    }
-    return;
-  }
-  const ev = row?.event;
-  if (
-    row?.type === 'context.append_loop_event' &&
-    ev?.type === 'step.end' &&
-    ev.finishReason === 'end_turn' &&
-    (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt)
-  ) {
-    bucket.lastTurnEndAt = rowTime;
   }
 }
 
@@ -520,16 +91,21 @@ function isCacheBackfillLine(line) {
  * the saved metrics byte offset. The read is capped so an upgrade cannot turn
  * the 300ms hot path into an unbounded historical scan. Every complete
  * step.end in the tail counts, so no prompt-boundary alignment is needed.
+ * A read cut short by the frame budget leaves the done marker unset so a
+ * later frame with a larger budget can finish the scan; only a complete read
+ * (or one stopped by the hard cap) is marked done.
  */
-function restoreCacheState(wirePath, state) {
+function restoreCacheState(wirePath, state, maxBytes = CACHE_BACKFILL_MAX_BYTES) {
   const end = Math.max(0, Math.floor(state.agents?.main?.offset ?? 0));
+  const budget = Math.max(0, Math.floor(maxBytes));
+  if (end > 0 && budget === 0) return 0;
   resetCacheState(state);
   if (end === 0) {
     state.cacheScanV = CACHE_SCAN_V;
-    return;
+    return 0;
   }
 
-  const len = Math.min(end, CACHE_BACKFILL_MAX_BYTES);
+  const len = Math.min(end, CACHE_BACKFILL_MAX_BYTES, budget);
   const start = end - len;
   const fd = fs.openSync(wirePath, 'r');
   let text;
@@ -558,7 +134,14 @@ function restoreCacheState(wirePath, state) {
       // keep scanning the bounded tail
     }
   }
-  state.cacheScanV = CACHE_SCAN_V;
+  // A frame budget smaller than the scan window leaves older history unread.
+  // Skip the done marker so a later frame with a larger budget can finish the
+  // scan; a read capped only by CACHE_BACKFILL_MAX_BYTES is final, because a
+  // retry would hit the same hard cap.
+  if (len === end || len === CACHE_BACKFILL_MAX_BYTES) {
+    state.cacheScanV = CACHE_SCAN_V;
+  }
+  return len;
 }
 
 /** True when a raw line might carry a backfill-tracked key (cheap prefilter). */
@@ -599,16 +182,186 @@ export function processWireChunk(state, text, agent = 'main') {
   }
 }
 
-/**
- * Median of a numeric array (null for empty).
- * @param {number[]} arr
- * @returns {number|null}
- */
-export function median(arr) {
-  if (!arr || arr.length === 0) return null;
-  const sorted = [...arr].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+function newBackfill(fileId, targetOffset, state) {
+  const reader = emptyAgent();
+  reader.fileId = fileId;
+  const shadow = emptyState();
+  shadow.modelAlias = state.modelAlias ?? null;
+  shadow.thinkingLevel = state.thinkingLevel ?? null;
+  shadow.goal = state.goal ? { ...state.goal } : null;
+  shadow.swarmMode = state.swarmMode === true;
+  if (state.agents?.main) {
+    const source = normAgent(state.agents.main);
+    const target = emptyAgent();
+    for (const key of [
+      'lastTurnPromptAt',
+      'lastTurnEndAt',
+      'lastCompactionBeginAt',
+      'lastCompactionEndAt',
+      'lastCompactionMs',
+    ]) {
+      target[key] = source[key];
+    }
+    shadow.agents.main = target;
+  }
+  return {
+    version: BACKFILL_SCAN_V,
+    fileId,
+    targetOffset,
+    reader,
+    shadow,
+  };
+}
+
+function foldBackfillChunk(shadow, text) {
+  for (const line of text.split('\n')) {
+    if (!line || !isBackfillLine(line)) continue;
+    try {
+      const row = JSON.parse(line);
+      if (
+        row?.type === 'turn.prompt' ||
+        row?.type === 'turn.cancel' ||
+        row?.type === 'turn.ended' ||
+        row?.type === 'context.append_loop_event'
+      ) {
+        applyTurnRow(shadow, row, 'main');
+      } else {
+        processWireRow(shadow, row, 'main');
+      }
+    } catch {
+      // A malformed historical row does not block later projection rows.
+    }
+  }
+}
+
+function installBackfillProjection(state, shadow) {
+  state.modelAlias = shadow.modelAlias ?? null;
+  state.thinkingLevel = shadow.thinkingLevel ?? null;
+  state.goal = shadow.goal ?? null;
+  state.swarmMode = shadow.swarmMode === true;
+  const source = normAgent(shadow.agents?.main);
+  const target = normAgent(state.agents?.main);
+  state.agents.main = target;
+  for (const key of [
+    'lastTurnPromptAt',
+    'lastTurnEndAt',
+    'lastCompactionBeginAt',
+    'lastCompactionEndAt',
+    'lastCompactionMs',
+  ]) {
+    target[key] = source[key];
+  }
+}
+
+/** Advance the replacement projection without disturbing the visible one. */
+function advanceBackfill(wirePath, state, fileId, targetOffset, maxBytes) {
+  if ((state.backfillScanV ?? 0) >= BACKFILL_SCAN_V) {
+    state.backfill = null;
+    return { bytesRead: 0, changed: false };
+  }
+  if (targetOffset <= 0) {
+    state.backfillScanV = BACKFILL_SCAN_V;
+    state.backfill = null;
+    return { bytesRead: 0, changed: true };
+  }
+  if (!state.backfill || state.backfill.fileId !== fileId) {
+    state.backfill = newBackfill(fileId, targetOffset, state);
+  }
+  const backfill = state.backfill;
+  backfill.targetOffset = Math.max(backfill.targetOffset, targetOffset);
+  if (maxBytes <= 0) return { bytesRead: 0, changed: true };
+
+  const result = readBoundedWire(
+    wirePath,
+    backfill.reader,
+    backfill.targetOffset,
+    maxBytes,
+  );
+  if (result.text) foldBackfillChunk(backfill.shadow, result.text);
+  const caughtUp =
+    backfill.reader.offset >= backfill.targetOffset &&
+    backfill.reader.pendingBase64 === '';
+  if (caughtUp) {
+    installBackfillProjection(state, backfill.shadow);
+    state.backfillScanV = BACKFILL_SCAN_V;
+    state.backfill = null;
+  }
+  return { bytesRead: result.bytesRead, changed: true };
+}
+
+function resetMainDerivedState(state) {
+  state.goal = null;
+  state.thinkingLevel = null;
+  state.modelAlias = null;
+  state.swarmMode = false;
+  resetCacheState(state);
+  state.cacheScanV = CACHE_SCAN_V;
+  state.backfillScanV = BACKFILL_SCAN_V;
+  state.backfill = null;
+}
+
+function enumerateWires(sessionDir) {
+  const agentsDir = path.join(sessionDir, 'agents');
+  const wires = [];
+  try {
+    for (const ent of fs.readdirSync(agentsDir, { withFileTypes: true })) {
+      if (!ent.isDirectory()) continue;
+      const wirePath = path.join(agentsDir, ent.name, 'wire.jsonl');
+      try {
+        if (fs.statSync(wirePath).isFile()) wires.push({ agent: ent.name, path: wirePath });
+      } catch {
+        // An agent may exist before its wire is created.
+      }
+    }
+  } catch {
+    return [];
+  }
+  wires.sort((a, b) => (
+    a.agent === 'main' ? -1 : b.agent === 'main' ? 1 : a.agent.localeCompare(b.agent)
+  ));
+  return wires;
+}
+
+function prepareWire(state, descriptor) {
+  try {
+    const stat = fs.statSync(descriptor.path);
+    const fileId = `${stat.dev}:${stat.ino}`;
+    const isNew = !state.agents[descriptor.agent];
+    let bucket = normAgent(state.agents[descriptor.agent]);
+    state.agents[descriptor.agent] = bucket;
+    let changed = isNew;
+    const replaced =
+      bucket.offset > stat.size ||
+      (bucket.fileId !== null && bucket.fileId !== fileId) ||
+      (bucket.fileId === fileId && !wireTailMatches(descriptor.path, bucket));
+    if (replaced) {
+      bucket = emptyAgent();
+      state.agents[descriptor.agent] = bucket;
+      if (descriptor.agent === 'main') resetMainDerivedState(state);
+      changed = true;
+    }
+    if (bucket.fileId !== fileId) {
+      bucket.fileId = fileId;
+      changed = true;
+    }
+    if (bucket.offset > 0 && bucket.tailMarker === null) {
+      bucket.tailMarker = wireTailMarker(descriptor.path, bucket.offset);
+      changed = true;
+    }
+    return { ...descriptor, stat, fileId, bucket, changed };
+  } catch {
+    return null;
+  }
+}
+
+function deadlineOpen(deadline) {
+  return !Number.isFinite(deadline) || performance.now() < deadline;
+}
+
+function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
+  const summary = summarizeMetrics(state, { now, agentNames });
+  if (stateChanged || summary.changed) saveState(statePath, state);
+  return summary.metrics;
 }
 
 /**
@@ -636,12 +389,16 @@ export function median(arr) {
  * owns that span.
  * @param {string} sessionId
  * @param {object} [opts]
+ * @param {number} [opts.deadline] absolute `performance.now()` deadline
+ * @param {number} [opts.readBudgetBytes] total wire bytes allowed this frame
  * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, activeAgents: number, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
   stateDir = HUD_DIR,
   now = Date.now(),
+  deadline = Infinity,
+  readBudgetBytes = WIRE_READ_BUDGET_BYTES,
 } = {}) {
   const empty = {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
@@ -651,257 +408,144 @@ export function getMetrics(sessionId, {
   };
   try {
     if (!sessionId) return empty;
-    const sessionDir = findSessionDir(sessionId, sessionsRoot);
-    if (!sessionDir) return empty;
     const statePath = statePathFor(sessionId, stateDir);
     const state = loadState(statePath);
-    let stateChanged = false;
-
-    // Enumerate every agent wire (main + subagents).
-    const agentsDir = path.join(sessionDir, 'agents');
-    const wires = [];
-    try {
-      for (const ent of fs.readdirSync(agentsDir, { withFileTypes: true })) {
-        if (!ent.isDirectory()) continue;
-        const p = path.join(agentsDir, ent.name, 'wire.jsonl');
-        try {
-          if (fs.statSync(p).isFile()) wires.push({ agent: ent.name, path: p });
-        } catch {
-          // no wire for this agent
-        }
-      }
-    } catch {
-      return empty;
+    let stateChanged = state[MIGRATED] === true;
+    if (!deadlineOpen(deadline)) {
+      return finishMetrics(state, statePath, stateChanged, now);
     }
-    if (!wires.length) return empty;
-    // main first so its config.update/goal/swarm events apply deterministically.
-    wires.sort((a, b) => (a.agent === 'main' ? -1 : b.agent === 'main' ? 1 : a.agent.localeCompare(b.agent)));
+    const sessionDir = resolveSessionDir(
+      sessionId,
+      sessionsRoot,
+      state.sessionDir,
+      { deadline },
+    );
+    if (!sessionDir) {
+      return deadlineOpen(deadline)
+        ? empty
+        : finishMetrics(state, statePath, stateChanged, now);
+    }
+    if (state.sessionDir !== sessionDir) {
+      state.sessionDir = sessionDir;
+      stateChanged = true;
+    }
+    if (!deadlineOpen(deadline)) {
+      return finishMetrics(state, statePath, stateChanged, now);
+    }
 
-    for (const { agent, path: wirePath } of wires) {
-      const stat = fs.statSync(wirePath);
-      const size = stat.size;
-      const fileId = `${stat.dev}:${stat.ino}`;
-      const isNew = !state.agents[agent];
-      const a = normAgent(state.agents[agent]);
-      state.agents[agent] = a;
-      if (isNew) stateChanged = true;
-      // A smaller file was truncated in place; a different device/inode means
-      // log rotation or replacement. In either case, old samples and offsets
-      // no longer describe this stream and are discarded together. On the
-      // main wire the derived state resets as well — the incremental pass
-      // below re-derives it from the new stream.
-      if (a.offset > size || (a.fileId && a.fileId !== fileId)) {
-        a.offset = 0;
-        a.samples = [];
-        a.lastTtftMs = null;
-        a.lastSampleAt = null;
-        a.lastRequestAt = null;
-        a.lastStepEndAt = null;
-        a.lastCompactionBeginAt = null;
-        a.lastCompactionEndAt = null;
-        a.lastCompactionMs = null;
-        if (agent === 'main') {
-          state.goal = null;
-          state.thinkingLevel = null;
-          state.modelAlias = null;
-          state.lastMedian = null;
-          state.swarmMode = false;
+    const requestedBudget = Number.isFinite(readBudgetBytes)
+      ? Math.max(0, Math.floor(readBudgetBytes))
+      : WIRE_READ_BUDGET_BYTES;
+    let remainingBytes = Math.min(WIRE_READ_BUDGET_BYTES, requestedBudget);
+    const prepared = [];
+    for (const wire of enumerateWires(sessionDir)) {
+      if (!deadlineOpen(deadline)) break;
+      const descriptor = prepareWire(state, wire);
+      if (descriptor) prepared.push(descriptor);
+    }
+    for (const wire of prepared) stateChanged ||= wire.changed;
+    if (!deadlineOpen(deadline)) {
+      return finishMetrics(state, statePath, stateChanged, now);
+    }
+    if (!prepared.length && !Object.keys(state.agents).length) return empty;
+    const visibleAgentNames = new Set(prepared.map((wire) => wire.agent));
+    const main = prepared.find((wire) => wire.agent === 'main') ?? null;
+
+    if (main) {
+      const startedAtZero = main.bucket.offset === 0;
+      // Cache migration must stop at the saved offset, before live bytes are
+      // folded, or appended step.end rows would be counted twice.
+      if (
+        (state.cacheScanV ?? 0) < CACHE_SCAN_V &&
+        (main.bucket.offset === 0 || deadlineOpen(deadline))
+      ) {
+        try {
+          const used = restoreCacheState(main.path, state, remainingBytes);
+          remainingBytes -= used;
+          stateChanged = true;
+        } catch {
           resetCacheState(state);
           delete state.cacheScanV;
-          delete state.backfillScanV;
-        }
-        stateChanged = true;
-      }
-      if (a.fileId !== fileId) {
-        a.fileId = fileId;
-        stateChanged = true;
-      }
-      if (agent === 'main') {
-        // One-time backfill: sessions whose offset predates a tracked key
-        // would otherwise never see earlier events (initial config.update,
-        // goal.create, swarm_mode.enter). Only worth a separate prefiltered
-        // full scan when the offset sits past those events — a fresh state
-        // (offset 0) consumes every row in the incremental pass below, and a
-        // second full read would just duplicate it.
-        if ((state.backfillScanV ?? 0) < BACKFILL_SCAN_V) {
-          if (a.offset > 0) {
-            try {
-              const text = fs.readFileSync(wirePath, 'utf8');
-              for (const line of text.split('\n')) {
-                if (!isBackfillLine(line)) continue;
-                try {
-                  const row = JSON.parse(line);
-                  if (
-                    row?.type === 'turn.prompt' ||
-                    row?.type === 'turn.cancel' ||
-                    row?.type === 'turn.ended' ||
-                    row?.type === 'context.append_loop_event'
-                  ) {
-                    applyTurnBoundaryRow(state, row);
-                  } else {
-                    processWireRow(state, row, 'main');
-                  }
-                } catch {
-                  // keep scanning
-                }
-              }
-            } catch {
-              // stay silent
-            }
-          }
-          state.backfillScanV = BACKFILL_SCAN_V;
-          stateChanged = true;
-        }
-        if ((state.cacheScanV ?? 0) < CACHE_SCAN_V) {
-          try {
-            restoreCacheState(wirePath, state);
-          } catch {
-            // Do not accept partially restored counters when restoration
-            // failed. Leave the version unset so a later refresh can retry.
-            resetCacheState(state);
-          }
           stateChanged = true;
         }
       }
-      if (size > a.offset) {
-        const fd = fs.openSync(wirePath, 'r');
+
+      if (deadlineOpen(deadline) && remainingBytes > 0 && main.stat.size > main.bucket.offset) {
         try {
-          const len = size - a.offset;
-          const buf = Buffer.alloc(len);
-          fs.readSync(fd, buf, 0, len, a.offset);
-          const text = buf.toString('utf8');
-          const lastNl = text.lastIndexOf('\n');
-          if (lastNl >= 0) {
-            processWireChunk(state, text.slice(0, lastNl + 1), agent);
-            a.offset += Buffer.byteLength(text.slice(0, lastNl + 1), 'utf8');
-            stateChanged = true;
-          }
-          // else: no complete line yet, keep offset for next run
-        } finally {
-          fs.closeSync(fd);
+          const result = readBoundedWire(
+            main.path,
+            main.bucket,
+            main.stat.size,
+            Math.min(MAIN_WIRE_SLICE_BYTES, remainingBytes),
+          );
+          remainingBytes -= result.bytesRead;
+          if (result.text) processWireChunk(state, result.text, 'main');
+          if (result.bytesRead > 0) stateChanged = true;
+        } catch {
+          // Keep the persisted projection and retry the same unread bytes.
+        }
+      }
+
+      // A cold reader starts at byte zero and will derive every projection
+      // incrementally. Migrated readers already past history need a separate
+      // versioned shadow scan before their replacement projection is installed.
+      if (startedAtZero && (state.backfillScanV ?? 0) < BACKFILL_SCAN_V) {
+        state.backfillScanV = BACKFILL_SCAN_V;
+        state.backfill = null;
+        stateChanged = true;
+      } else if ((state.backfillScanV ?? 0) < BACKFILL_SCAN_V) {
+        try {
+          const result = advanceBackfill(
+            main.path,
+            state,
+            main.fileId,
+            main.bucket.offset,
+            deadlineOpen(deadline)
+              ? Math.min(BACKFILL_WIRE_SLICE_BYTES, remainingBytes)
+              : 0,
+          );
+          remainingBytes -= result.bytesRead;
+          stateChanged ||= result.changed;
+        } catch {
+          // Preserve the visible projection and persisted cursor for retry.
         }
       }
     }
 
-    // Aggregate per agent: expire samples outside the freshness window,
-    // then split agents into active (in-flight request or recent sample)
-    // and idle.
-    const activeSpeeds = [];
-    const activeTtfts = [];
-    let activeAgents = 0;
-    let soleActive = null;
-    for (const [name, a] of Object.entries(state.agents)) {
-      const fresh = a.samples.filter(
-        (s) => s && typeof s.v === 'number' && typeof s.t === 'number' && s.t >= now - SAMPLE_WINDOW_MS,
-      );
-      if (fresh.length !== a.samples.length) {
-        a.samples = fresh;
-        stateChanged = true;
+    // Subagents share what remains via a persisted round-robin cursor. A busy
+    // fleet therefore cannot make an alphabetically-late agent starve.
+    const subagents = prepared.filter((wire) => wire.agent !== 'main');
+    if (subagents.length && remainingBytes > 0 && deadlineOpen(deadline)) {
+      const start = state.agentCursor % subagents.length;
+      let visited = 0;
+      while (visited < subagents.length && remainingBytes > 0 && deadlineOpen(deadline)) {
+        const wire = subagents[(start + visited) % subagents.length];
+        visited += 1;
+        if (wire.stat.size <= wire.bucket.offset) continue;
+        try {
+          const result = readBoundedWire(
+            wire.path,
+            wire.bucket,
+            wire.stat.size,
+            Math.min(AGENT_WIRE_SLICE_BYTES, remainingBytes),
+          );
+          remainingBytes -= result.bytesRead;
+          if (result.text) processWireChunk(state, result.text, wire.agent);
+          if (result.bytesRead > 0) stateChanged = true;
+        } catch {
+          // One disappearing agent wire must not hide the rest of the HUD.
+        }
       }
-      const speed = median(fresh.slice(-MAX_SAMPLES).map((s) => s.v));
-      const generating = a.lastRequestAt !== null
-        && now - a.lastRequestAt < SAMPLE_WINDOW_MS
-        && (a.lastStepEndAt === null || a.lastRequestAt > a.lastStepEndAt);
-      const recent = fresh.length > 0 && fresh[fresh.length - 1].t >= now - ACTIVE_WINDOW_MS;
-      if (!generating && !recent) continue;
-      activeAgents += 1;
-      soleActive = { name, bucket: a, fresh, speed };
-      if (speed !== null) activeSpeeds.push(speed);
-      if (a.lastTtftMs !== null && a.lastSampleAt !== null && a.lastSampleAt >= now - SAMPLE_WINDOW_MS) {
-        activeTtfts.push(a.lastTtftMs);
+      if (visited > 0) {
+        const next = (start + visited) % subagents.length;
+        if (state.agentCursor !== next) {
+          state.agentCursor = next;
+          stateChanged = true;
+        }
       }
     }
 
-    if (stateChanged) saveState(statePath, state);
-
-    let tps = null;
-    let tpsStale = false;
-    let tpsTotal = null;
-    let ttftMs = null;
-    const lastMedian = typeof state.lastMedian === 'number' ? state.lastMedian : null;
-    if (activeAgents >= 2) {
-      // Fleet: true per-agent average + total. TTFT is the median across
-      // active agents (one stuck agent, e.g. a provider retry with a 10min
-      // first token, cannot poison the display).
-      if (activeSpeeds.length > 0) {
-        tpsTotal = activeSpeeds.reduce((sum, v) => sum + v, 0);
-        tps = tpsTotal / activeSpeeds.length;
-      }
-      ttftMs = median(activeTtfts);
-    } else if (activeAgents === 1) {
-      // Solo: keep the hardened single-window gate — a live window needs
-      // MIN_SAMPLES samples whose newest is inside the TTL; otherwise the
-      // last median survives (dimmed) until a model switch cleared it.
-      const values = soleActive.fresh.slice(-MAX_SAMPLES).map((s) => s.v);
-      const windowMedian = soleActive.fresh.length >= MIN_SAMPLES ? median(values) : null;
-      const newest = soleActive.fresh.length
-        ? soleActive.fresh[soleActive.fresh.length - 1].t
-        : null;
-      const freshWindow =
-        windowMedian !== null && newest !== null && now - newest <= TPS_TTL_MS;
-      if (freshWindow) {
-        tps = windowMedian;
-      } else if (lastMedian !== null) {
-        tps = lastMedian;
-        tpsStale = true;
-      }
-      ttftMs = soleActive.bucket.lastTtftMs ?? null;
-    } else {
-      if (lastMedian !== null) {
-        tps = lastMedian;
-        tpsStale = true;
-      }
-      ttftMs = state.agents.main?.lastTtftMs ?? null;
-    }
-
-    // The turn-work timer anchors at the user's latest prompt and runs
-    // until the turn ends (turn.ended, or legacy end_turn / active cancel) —
-    // spanning tool calls and individual steps, not just one request.
-    const mainBucket = state.agents.main;
-    const turnStartedAt = mainBucket
-      && mainBucket.lastTurnPromptAt !== null
-      && (mainBucket.lastTurnEndAt === null || mainBucket.lastTurnPromptAt > mainBucket.lastTurnEndAt)
-      ? mainBucket.lastTurnPromptAt
-      : null;
-    // The compaction timer anchors at full_compaction.begin and runs until
-    // complete/cancel. A begin older than the sample window with no close
-    // means the terminal record was lost (host killed mid-compaction) — drop
-    // it rather than tick a runaway timer. The finished duration stays
-    // visible until the next prompt starts a new turn.
-    let compactingSince = null;
-    let compactionMs = null;
-    if (mainBucket) {
-      const beginAt = mainBucket.lastCompactionBeginAt;
-      const endAt = mainBucket.lastCompactionEndAt;
-      if (
-        beginAt !== null &&
-        (endAt === null || beginAt > endAt) &&
-        now - beginAt < SAMPLE_WINDOW_MS
-      ) {
-        compactingSince = beginAt;
-      } else if (
-        typeof mainBucket.lastCompactionMs === 'number' &&
-        endAt !== null &&
-        (mainBucket.lastTurnPromptAt === null || endAt > mainBucket.lastTurnPromptAt)
-      ) {
-        compactionMs = mainBucket.lastCompactionMs;
-      }
-    }
-    return {
-      tps,
-      tpsStale,
-      ttftMs,
-      thinkingLevel: state.thinkingLevel ?? null,
-      goal: state.goal ?? null,
-      modelAlias: state.modelAlias ?? null,
-      swarmMode: state.swarmMode === true,
-      cache: cacheMetricFromState(state),
-      tpsTotal,
-      activeAgents,
-      turnStartedAt,
-      compactingSince,
-      compactionMs,
-    };
+    return finishMetrics(state, statePath, stateChanged, now, visibleAgentNames);
   } catch {
     return empty;
   }

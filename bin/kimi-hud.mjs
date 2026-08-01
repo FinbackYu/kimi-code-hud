@@ -1,35 +1,34 @@
 #!/usr/bin/env node
-// kimi-code-hud: custom status line (HUD) for Kimi Code CLI.
-// Default mode renders a single status line from the stdin JSON snapshot.
-// The host kills us after 300ms and falls back silently on any failure, so
-// every error path degrades quietly — never log, and never exit non-zero
-// except for one deliberate case: running from a disabled/removed plugin
-// managed copy, where we strip our own [status_line] entry and exit
-// non-zero (that is what makes /plugins disable|remove work).
+// Thin command router. Rendering is the data plane (render-runtime.mjs);
+// config mutation is the control plane (management-service.mjs).
 
-import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { readPayload } from '../src/payload.mjs';
-import { isGitDirty } from '../src/git.mjs';
-import { getMetrics } from '../src/metrics.mjs';
-import { resolveThinkingLevel } from '../src/thinking.mjs';
-import { readQuotaCache, ensureFreshQuota, refreshQuota, HUD_DIR } from '../src/quota.mjs';
-import { resolveModelProvider, MANAGED_KIMI_PROVIDER } from '../src/model-config.mjs';
-import { renderHud } from '../src/render.mjs';
-import { resolveTheme } from '../src/theme.mjs';
-import { managedPluginDisabled } from '../src/plugin-state.mjs';
-import { setStatusLineCommand, removeStatusLineCommand } from '../src/toml.mjs';
-import { ensureHooksBlock, removeHooksBlock } from '../src/hooks.mjs';
+
+import {
+  disableHud,
+  enableHud,
+  installHud,
+  uninstallHud,
+} from '../src/management-service.mjs';
+import { resolveRuntimePaths } from '../src/paths.mjs';
+import { refreshQuota } from '../src/quota.mjs';
+import { renderStatusLine } from '../src/render-runtime.mjs';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
-const HOOK_SCRIPT_PATH = path.join(path.dirname(SCRIPT_PATH), '..', 'hooks', 'sync-status-line.mjs');
-const CONFIG_PATH = path.join(process.env.KIMI_HUD_HOME || HUD_DIR, 'config.json');
-const TUI_TOML_PATH = process.env.KIMI_HUD_TUI_TOML
-  || path.join(os.homedir(), '.kimi-code', 'tui.toml');
-const CONFIG_TOML_PATH = process.env.KIMI_HUD_CONFIG_TOML
-  || path.join(os.homedir(), '.kimi-code', 'config.toml');
+const HOOK_SCRIPT_PATH = path.join(
+  path.dirname(SCRIPT_PATH),
+  '..',
+  'hooks',
+  'sync-status-line.mjs',
+);
+const RUNTIME_PATHS = resolveRuntimePaths();
+const COMMAND_CONTEXT = {
+  scriptPath: SCRIPT_PATH,
+  hookScriptPath: HOOK_SCRIPT_PATH,
+  paths: RUNTIME_PATHS,
+  stdout: process.stdout,
+};
 
 const HELP = `kimi-code-hud — custom status line for Kimi Code CLI
 
@@ -48,214 +47,64 @@ Env:    KIMI_HUD_LAYOUT overrides config; NO_COLOR / KIMI_HUD_NO_COLOR disable c
         theme, with auto resolved via COLORFGBG, falling back to dark).
 `;
 
-function resolveLayout() {
-  const env = process.env.KIMI_HUD_LAYOUT;
-  if (env === 'compact' || env === 'normal' || env === 'full') return env;
+function adminFailure(action, err) {
+  const detail = err instanceof Error && err.message ? `: ${err.message}` : '';
+  try { process.stderr.write(`kimi-code-hud: ${action} failed${detail}\n`); } catch { /* ignore */ }
+  return 1;
+}
+
+async function renderMain() {
   try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    if (cfg && (cfg.layout === 'compact' || cfg.layout === 'normal' || cfg.layout === 'full')) {
-      return cfg.layout;
-    }
+    const result = await renderStatusLine({
+      scriptPath: SCRIPT_PATH,
+      paths: RUNTIME_PATHS,
+    });
+    if (result.line !== null) process.stdout.write(`${result.line}\n`);
+    return result.exitCode;
   } catch {
-    // no config -> default
+    // Rendering is fail-open: diagnostics never leak into the status line.
+    try { process.stdout.write('kimi-code-hud\n'); } catch { /* ignore */ }
+    return 0;
   }
-  return 'normal';
-}
-
-function colorEnabled() {
-  return !process.env.KIMI_HUD_NO_COLOR && !process.env.NO_COLOR;
-}
-
-function backupFile(filePath) {
-  try {
-    if (!fs.existsSync(filePath)) return;
-    const stamp = new Date().toISOString().slice(0, 19)
-      .replace(/[-:]/g, '').replace('T', '-');
-    fs.copyFileSync(filePath, `${filePath}.${stamp}.bak`);
-  } catch {
-    // best effort
-  }
-}
-
-// --off / --on are a reversible debugging switch (unlike --uninstall, which
-// also strips the config.toml hook block). The flag lives in config.json:
-// --off writes "disabled": true keeping other keys (e.g. layout), --on
-// deletes the key (absent == enabled, never written as false).
-function readHudConfig() {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    return cfg && typeof cfg === 'object' ? cfg : {};
-  } catch {
-    return {}; // missing or malformed -> start from an empty object
-  }
-}
-
-function writeHudConfig(cfg) {
-  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(cfg, null, 2)}\n`);
-}
-
-// The host rewrites tui.toml on some upgrades (wiping [status_line]) but
-// preserves config.toml [[hooks]], so install/uninstall maintain a managed
-// SessionStart hook there that re-points tui.toml at every session start.
-function syncHooksBlock(installing) {
-  const hookCommand = `node ${HOOK_SCRIPT_PATH}`;
-  let content = '';
-  try { content = fs.readFileSync(CONFIG_TOML_PATH, 'utf8'); } catch { /* new file */ }
-  const next = installing
-    ? ensureHooksBlock(content, hookCommand)
-    : removeHooksBlock(content, hookCommand);
-  if (next === content) return false;
-  backupFile(CONFIG_TOML_PATH);
-  fs.mkdirSync(path.dirname(CONFIG_TOML_PATH), { recursive: true });
-  fs.writeFileSync(CONFIG_TOML_PATH, next);
-  return true;
-}
-
-function install() {
-  const command = `node ${SCRIPT_PATH}`;
-  let content = '';
-  try { content = fs.readFileSync(TUI_TOML_PATH, 'utf8'); } catch { /* new file */ }
-  backupFile(TUI_TOML_PATH);
-  fs.mkdirSync(path.dirname(TUI_TOML_PATH), { recursive: true });
-  fs.writeFileSync(TUI_TOML_PATH, setStatusLineCommand(content, command));
-  process.stdout.write(`Installed status line command in ${TUI_TOML_PATH}\n`);
-  if (syncHooksBlock(true)) {
-    process.stdout.write(`Registered SessionStart self-heal hook in ${CONFIG_TOML_PATH}\n`);
-  }
-  process.stdout.write('重启 Kimi Code 或运行 /reload-tui 生效\n');
-}
-
-function uninstall() {
-  const command = `node ${SCRIPT_PATH}`;
-  let content = '';
-  try { content = fs.readFileSync(TUI_TOML_PATH, 'utf8'); } catch { /* nothing to do */ }
-  backupFile(TUI_TOML_PATH);
-  fs.writeFileSync(TUI_TOML_PATH, removeStatusLineCommand(content, command));
-  process.stdout.write(`Removed status line command from ${TUI_TOML_PATH}\n`);
-  if (syncHooksBlock(false)) {
-    process.stdout.write(`Removed SessionStart hook from ${CONFIG_TOML_PATH}\n`);
-  }
-  process.stdout.write('重启 Kimi Code 或运行 /reload-tui 生效\n');
-}
-
-function switchOff() {
-  const cfg = readHudConfig();
-  cfg.disabled = true;
-  writeHudConfig(cfg);
-  process.stdout.write(`Set "disabled": true in ${CONFIG_PATH}\n`);
-  const command = `node ${SCRIPT_PATH}`;
-  let content = '';
-  try { content = fs.readFileSync(TUI_TOML_PATH, 'utf8'); } catch { /* nothing to do */ }
-  backupFile(TUI_TOML_PATH);
-  fs.writeFileSync(TUI_TOML_PATH, removeStatusLineCommand(content, command));
-  process.stdout.write(`Removed status line command from ${TUI_TOML_PATH}\n`);
-  // The config.toml hook block stays in place on purpose: the SessionStart
-  // hook checks the disabled flag and stays silent while it is set.
-  process.stdout.write('重启 Kimi Code 或运行 /reload-tui 生效\n');
-}
-
-function switchOn() {
-  const cfg = readHudConfig();
-  if ('disabled' in cfg) {
-    delete cfg.disabled;
-    writeHudConfig(cfg);
-    process.stdout.write(`Removed "disabled" flag from ${CONFIG_PATH}\n`);
-  }
-  const command = `node ${SCRIPT_PATH}`;
-  let content = '';
-  try { content = fs.readFileSync(TUI_TOML_PATH, 'utf8'); } catch { /* new file */ }
-  backupFile(TUI_TOML_PATH);
-  fs.mkdirSync(path.dirname(TUI_TOML_PATH), { recursive: true });
-  fs.writeFileSync(TUI_TOML_PATH, setStatusLineCommand(content, command));
-  process.stdout.write(`Installed status line command in ${TUI_TOML_PATH}\n`);
-  if (syncHooksBlock(true)) {
-    process.stdout.write(`Registered SessionStart self-heal hook in ${CONFIG_TOML_PATH}\n`);
-  }
-  process.stdout.write('重启 Kimi Code 或运行 /reload-tui 生效\n');
-}
-
-async function render() {
-  const payload = await readPayload();
-  if (!payload) {
-    process.stdout.write('kimi-code-hud\n');
-    return;
-  }
-  const metrics = getMetrics(payload.sessionId);
-  // The quota API only describes the managed Kimi Code subscription. When the
-  // active model is served by a third-party provider (added via /provider,
-  // selected with /model), the bars would show a subscription the session is
-  // not consuming — suppress the whole quota section and skip the refresh.
-  // When the provider cannot be determined (no wire alias yet, unknown
-  // model), keep the historical behavior and show it.
-  const provider = resolveModelProvider({ modelAlias: metrics.modelAlias, modelDisplay: payload.model });
-  let quota = null;
-  if (provider === null || provider === MANAGED_KIMI_PROVIDER) {
-    // Hot path: serve the quota cache as-is (stale or not) and kick a
-    // detached background refresh when stale. Never blocks on the network.
-    ensureFreshQuota({ scriptPath: SCRIPT_PATH });
-    quota = readQuotaCache();
-  }
-  // The wire log's config.update events carry the effort (new hosts:
-  // `thinkingEffort`, including an initial event at session start; older
-  // hosts: `thinkingLevel`, only after an in-session change). The
-  // per-session snapshot fills the gap when the wire has no such event,
-  // so another session's /effort (which rewrites the global config.toml)
-  // never moves this session's display.
-  metrics.thinkingLevel = resolveThinkingLevel({
-    sessionLevel: metrics.thinkingLevel,
-    model: payload.model,
-    sessionId: payload.sessionId,
-  });
-  const gitDirty = payload.gitBranch ? isGitDirty(payload.cwd) : false;
-  const lines = renderHud({
-    payload,
-    quota,
-    metrics,
-    gitDirty,
-    layout: resolveLayout(),
-    color: colorEnabled(),
-    theme: resolveTheme({ tuiTomlPath: TUI_TOML_PATH }),
-  });
-  process.stdout.write(`${lines[0]}\n`);
 }
 
 async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     process.stdout.write(HELP);
-    return;
+    return 0;
   }
   if (args.includes('--refresh-quota')) {
-    await refreshQuota(); // silent by contract
-    return;
-  }
-  if (args.includes('--install')) { install(); return; }
-  if (args.includes('--uninstall')) { uninstall(); return; }
-  if (args.includes('--on')) { switchOn(); return; }
-  if (args.includes('--off')) { switchOff(); return; }
-  // Plugin on/off switch: when this script is the plugin managed copy and
-  // the plugin is disabled or removed, hand the line back to the builtin
-  // status line. Exiting non-zero alone is not enough — the host's
-  // StatusLineCommandRunner keeps rendering the last good line as long as
-  // our command stays in tui.toml — so strip the entry ourselves; the next
-  // /reload-tui or restart then shows the builtin line. If the plugin is
-  // re-enabled, its SessionStart hook writes the entry back.
-  if (managedPluginDisabled(SCRIPT_PATH)) {
     try {
-      const content = fs.readFileSync(TUI_TOML_PATH, 'utf8');
-      const next = removeStatusLineCommand(content, `node ${SCRIPT_PATH}`);
-      if (next !== content) fs.writeFileSync(TUI_TOML_PATH, next);
-    } catch { /* best effort */ }
-    process.exit(1);
+      await refreshQuota({
+        credentialsPath: RUNTIME_PATHS.credentialsPath,
+        cachePath: RUNTIME_PATHS.quotaCachePath,
+        lockPath: RUNTIME_PATHS.quotaLockPath,
+        lockToken: process.env.KIMI_HUD_QUOTA_LOCK_TOKEN,
+      });
+    } catch {
+      // Detached refresh is silent by contract.
+    }
+    return 0;
   }
-  await render();
+  const actions = [
+    ['--install', 'install', installHud],
+    ['--uninstall', 'uninstall', uninstallHud],
+    ['--on', 'enable', enableHud],
+    ['--off', 'disable', disableHud],
+  ];
+  for (const [flag, name, action] of actions) {
+    if (!args.includes(flag)) continue;
+    try {
+      action(COMMAND_CONTEXT);
+      return 0;
+    } catch (err) {
+      return adminFailure(name, err);
+    }
+  }
+  return renderMain();
 }
 
 main()
-  .then(() => process.exit(0))
-  .catch(() => {
-    // Last-resort degradation: emit something harmless and exit cleanly.
-    try { process.stdout.write('kimi-code-hud\n'); } catch { /* ignore */ }
-    process.exit(0);
-  });
+  .then((code) => process.exit(code))
+  .catch((err) => process.exit(adminFailure('command', err)));

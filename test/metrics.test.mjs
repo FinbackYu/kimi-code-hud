@@ -87,9 +87,8 @@ function makeSession({ withPrefix = true, agents = ['main'] } = {}) {
 
 function makeState() {
   return {
-    v: 6,
+    v: 7,
     agents: {},
-    lastMedian: null,
     modelAlias: null,
     thinkingLevel: null,
     goal: null,
@@ -127,7 +126,7 @@ test('processWireChunk computes TPS with timestamped per-agent samples', () => {
   assert.equal(bucket.samples[1].v, 50);
   assert.equal(bucket.lastTtftMs, 900);
   assert.equal(bucket.lastSampleAt, EVENT_TIME);
-  assert.equal(state.lastMedian, 150); // median of the freshest [50,100,150,200,250]
+  assert.equal(bucket.lastMedian, 150); // median of the freshest [50,100,150,200,250]
 });
 
 test('processWireChunk bounds the stored per-agent sample array', () => {
@@ -455,6 +454,19 @@ test('getMetrics main-wire rotation also resets the derived badge state', () => 
   assert.equal(m.tps, 200);
 });
 
+test('getMetrics wire rotation clears an open turn timer', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: EVENT_TIME + 1000 };
+  fs.writeFileSync(wirePath, turnPrompt('before rotation', EVENT_TIME) + '\n');
+  assert.equal(getMetrics(id, opts).turnStartedAt, EVENT_TIME);
+
+  const replacement = `${wirePath}.next`;
+  fs.writeFileSync(replacement, '{"type":"noop","time":1785400001000}\n');
+  fs.renameSync(replacement, wirePath);
+  assert.equal(getMetrics(id, opts).turnStartedAt, null);
+});
+
 test('getMetrics keeps a rolling 5-sample median after the 3-sample warmup', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
@@ -632,7 +644,7 @@ test('getMetrics drops legacy samples that lack freshness and model metadata', (
   assert.equal(m.tps, null);
   assert.equal(m.ttftMs, null);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.v, 6);
+  assert.equal(state.v, 8);
   assert.deepEqual(state.agents.main.samples, []);
   assert.equal(state.sampleStateV, undefined); // legacy marker not carried over
 });
@@ -668,13 +680,45 @@ test('getMetrics migrates flat states into buckets, preserving window and badges
   assert.deepEqual(m.goal, { status: 'active', turnsUsed: 1 });
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.v, 6);
+  assert.equal(state.v, 8);
   assert.equal(state.agents.main.offset, size);
   assert.deepEqual(
     state.agents.main.samples,
     [100, 200, 300].map((v) => ({ v, t: EVENT_TIME })),
   );
-  assert.equal(state.lastMedian, 200);
+  assert.equal(state.agents.main.lastMedian, 200);
+  assert.equal(state.lastMedian, undefined);
+});
+
+test('getMetrics migrates v6 global median into per-agent buckets without cross-agent guessing', () => {
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const sample = (v) => ({ v, t: EVENT_TIME });
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({
+      v: 6,
+      agents: {
+        main: { offset: 0, samples: [sample(10), sample(10), sample(10)] },
+        'agent-0': { offset: 0, samples: [sample(100), sample(100), sample(100)] },
+      },
+      lastMedian: 100,
+      modelAlias: null,
+      thinkingLevel: null,
+      goal: null,
+      swarmMode: false,
+      cacheScanV: 2,
+      backfillScanV: 8,
+      cache: { readTokens: 0, inputTokens: 0 },
+    }),
+  );
+  getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME });
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.equal(state.v, 8);
+  assert.equal(state.agents.main.lastMedian, 10);
+  assert.equal(state.agents['agent-0'].lastMedian, 100);
+  assert.equal(state.lastMedian, undefined);
+  assert.equal(fs.existsSync(wires.main), true);
 });
 
 test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => {
@@ -877,6 +921,39 @@ test('getMetrics fleet members contribute speed with a single fresh sample', () 
   assert.equal(m.activeAgents, 2);
   assert.equal(m.tpsTotal, 700);
   assert.equal(m.tps, 350); // mean of the main median (200) and the subagent sample
+});
+
+test('fleet-to-solo fallback uses the remaining agent median', () => {
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wires.main,
+    [0, 1, 2].map((n) => stepEnd({
+      output: 10, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n,
+    })).join('\n') + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    [0, 1, 2].map((n) => stepEnd({
+      output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n,
+    })).join('\n') + '\n',
+  );
+  const fleet = getMetrics(id, {
+    sessionsRoot: root, stateDir, now: EVENT_TIME + 2,
+  });
+  assert.equal(fleet.tps, 55);
+  assert.equal(fleet.tpsTotal, 110);
+
+  fs.appendFileSync(
+    wires.main,
+    llmRequest({ time: EVENT_TIME + 130_000 }) + '\n',
+  );
+  const solo = getMetrics(id, {
+    sessionsRoot: root, stateDir, now: EVENT_TIME + 130_000,
+  });
+  assert.equal(solo.activeAgents, 1);
+  assert.equal(solo.tps, 10);
+  assert.equal(solo.tpsStale, true);
 });
 
 test('getMetrics solo display keeps the 3-sample warmup gate', () => {

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { HUD_DIR } from './quota.mjs';
+import { atomicWriteFile } from './fs-store.mjs';
+import { HUD_DIR } from './paths.mjs';
 import {
   CONFIG_TOML_PATH,
   tableText,
@@ -34,8 +35,10 @@ function readSnapshot(snapshotDir, sessionId) {
 
 function writeSnapshot(snapshotDir, sessionId, level, model) {
   try {
-    fs.mkdirSync(snapshotDir, { recursive: true });
-    fs.writeFileSync(snapshotPath(snapshotDir, sessionId), JSON.stringify({ level, model }));
+    atomicWriteFile(
+      snapshotPath(snapshotDir, sessionId),
+      JSON.stringify({ level, model }),
+    );
   } catch { /* best effort */ }
 }
 
@@ -49,12 +52,16 @@ function writeSnapshot(snapshotDir, sessionId, level, model) {
  * @param {string} configPath
  * @returns {string}
  */
-function resolveFromConfig(model, configPath) {
+function resolveFromConfig(model, configPath, configText = undefined) {
   let text = '';
-  try {
-    text = fs.readFileSync(configPath, 'utf8');
-  } catch {
-    return 'on'; // host default: thinking enabled
+  if (typeof configText === 'string') {
+    text = configText;
+  } else {
+    try {
+      text = fs.readFileSync(configPath, 'utf8');
+    } catch {
+      return 'on'; // host default: thinking enabled
+    }
   }
 
   const thinking = tableText(text, 'thinking');
@@ -111,16 +118,22 @@ export function resolveThinkingLevel({
   configPath = CONFIG_TOML_PATH,
   sessionId = null,
   snapshotDir = HUD_DIR,
+  configText = undefined,
+  deadline = Infinity,
+  clock = Date.now,
 }) {
+  const canUseSnapshot = () => !Number.isFinite(deadline) || clock() < deadline;
   if (typeof sessionLevel === 'string' && sessionLevel.length > 0) {
-    if (sessionId) writeSnapshot(snapshotDir, sessionId, sessionLevel, model);
+    if (sessionId && canUseSnapshot()) {
+      writeSnapshot(snapshotDir, sessionId, sessionLevel, model);
+    }
     return sessionLevel;
   }
-  if (sessionId) {
+  if (sessionId && canUseSnapshot()) {
     const snap = readSnapshot(snapshotDir, sessionId);
     if (snap && snap.model === model) return snap.level;
   }
-  const level = resolveFromConfig(model, configPath);
-  if (sessionId) writeSnapshot(snapshotDir, sessionId, level, model);
+  const level = resolveFromConfig(model, configPath, configText);
+  if (sessionId && canUseSnapshot()) writeSnapshot(snapshotDir, sessionId, level, model);
   return level;
 }

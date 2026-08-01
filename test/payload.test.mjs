@@ -42,3 +42,11 @@ test('readPayload times out gracefully on a silent stream', async () => {
   const p = await readPayload({ stdin, timeoutMs: 50 });
   assert.equal(p, null);
 });
+
+test('readPayload rejects oversized stdin without retaining later chunks', async () => {
+  const stdin = new PassThrough();
+  const result = readPayload({ stdin, timeoutMs: 1000, maxBytes: 10 });
+  stdin.end(SAMPLE);
+  assert.equal(await result, null);
+  assert.equal(stdin.listenerCount('data'), 0);
+});

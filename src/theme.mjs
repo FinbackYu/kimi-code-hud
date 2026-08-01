@@ -13,8 +13,7 @@
 // A custom theme name can't be resolved here and falls back to dark.
 
 import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
+import { TUI_TOML_PATH } from './paths.mjs';
 
 // Background ANSI 16-color indices that read as dark, same rule as the
 // host's parseColorFgBg: 0-6 and 8 are dark, the rest light.
@@ -59,15 +58,20 @@ export function themeFromTuiToml(content) {
  */
 export function resolveTheme({
   env = process.env,
-  tuiTomlPath = path.join(os.homedir(), '.kimi-code', 'tui.toml'),
+  tuiTomlPath = TUI_TOML_PATH,
+  tuiTomlText = undefined,
 } = {}) {
   const override = env.KIMI_HUD_THEME;
   if (override === 'dark' || override === 'light') return override;
   let setting = null;
-  try {
-    setting = themeFromTuiToml(fs.readFileSync(tuiTomlPath, 'utf8'));
-  } catch {
-    // missing/unreadable -> treat as auto
+  if (typeof tuiTomlText === 'string') {
+    setting = themeFromTuiToml(tuiTomlText);
+  } else {
+    try {
+      setting = themeFromTuiToml(fs.readFileSync(tuiTomlPath, 'utf8'));
+    } catch {
+      // missing/unreadable -> treat as auto
+    }
   }
   if (setting === 'dark' || setting === 'light') return setting;
   if (setting === null || setting === 'auto') {
