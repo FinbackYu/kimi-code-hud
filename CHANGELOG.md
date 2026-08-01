@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-01
+
 ### Added
 
 - Add sanitized end-to-end status payload and wire fixtures, bounded 50 MiB
@@ -163,7 +165,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.5.1
 [0.5.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.5.0
 [0.4.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.4.0
 [0.3.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.2
