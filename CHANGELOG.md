@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-02
+
 ### Changed
 
 - Show the bare thinking effort level in the model segment (`K3 max` instead
@@ -188,7 +190,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.0
 [0.5.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.5.1
 [0.5.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.5.0
 [0.4.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.4.0
