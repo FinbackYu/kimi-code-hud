@@ -1,0 +1,13 @@
+export const MAX_SAMPLES = 5;
+export const MIN_SAMPLES = 3;
+export const MIN_STREAM_MS = 250;
+export const MAX_TPS = 1000;
+export const TPS_TTL_MS = 2 * 60 * 1000;
+export const SAMPLE_WINDOW_MS = 10 * 60 * 1000;
+export const ACTIVE_WINDOW_MS = TPS_TTL_MS;
+export const MAX_STORED_SAMPLES = 20;
+export const SAMPLE_STATE_V = 1;
+export const CACHE_SCAN_V = 2;
+export const CACHE_BACKFILL_MAX_BYTES = 1024 * 1024;
+export const BACKFILL_SCAN_V = 8;
+export const METRICS_STATE_V = 8;

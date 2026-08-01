@@ -8,19 +8,35 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Add a Node 18/20/22 CI matrix covering tests, syntax checks, an empty-input
-  smoke test, and a whitespace gate.
+- Add sanitized end-to-end status payload and wire fixtures, bounded 50 MiB
+  wire catch-up coverage, and a Node 18/20/22 CI matrix.
+
+### Changed
+
+- Split the executable into command routing, a configuration management
+  service, and a budgeted render runtime. Render frames now share one config
+  snapshot and a 220ms internal deadline across stdin, metrics, quota refresh,
+  and Git collection.
+- Split metrics into state migration/storage, session location, bounded wire
+  reading, and throughput, turn, compaction, cache, goal, and session metadata
+  reducers. Metrics state v8 caps aggregate wire reads at 1 MiB per frame,
+  rotates subagent priority, preserves split UTF-8 lines, and incrementally
+  replaces historical projections after they catch up.
 
 ### Fixed
 
 - Fail closed when the SessionStart hook cannot safely parse a status-line
   command, and quote generated commands whose paths contain spaces or shell
   metacharacters.
+- Make management command failures observable through stderr and exit status,
+  while preserving render and detached-refresh silent fallbacks.
 - Classify quota failures so authorization errors clear stale data while
   transient errors retain it, and make refresh locking atomic and
   ownership-safe.
 - Preserve zero-valued quota windows when the usages API omits `used`, deriving
   it from `limit - remaining` so the percentage and reset countdown stay visible.
+- Keep stale TPS medians inside their owning agent bucket and fully reset an
+  agent when its wire rotates or truncates.
 
 ## [0.5.0] - 2026-08-01
 

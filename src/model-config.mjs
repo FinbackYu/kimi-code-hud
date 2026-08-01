@@ -4,10 +4,9 @@
 // [models."<alias>"] tables, so the parsing lives here exactly once.
 
 import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
+import { CONFIG_TOML_PATH } from './paths.mjs';
 
-export const CONFIG_TOML_PATH = path.join(os.homedir(), '.kimi-code', 'config.toml');
+export { CONFIG_TOML_PATH };
 
 /**
  * The managed Kimi Code subscription provider. It is the only provider the
@@ -95,12 +94,21 @@ export function findModelTable(text, name) {
  * @param {string} [opts.configPath]
  * @returns {string|null}
  */
-export function resolveModelProvider({ modelAlias = null, modelDisplay = null, configPath = CONFIG_TOML_PATH } = {}) {
+export function resolveModelProvider({
+  modelAlias = null,
+  modelDisplay = null,
+  configPath = CONFIG_TOML_PATH,
+  configText = undefined,
+} = {}) {
   let text;
-  try {
-    text = fs.readFileSync(configPath, 'utf8');
-  } catch {
-    return null;
+  if (typeof configText === 'string') {
+    text = configText;
+  } else {
+    try {
+      text = fs.readFileSync(configPath, 'utf8');
+    } catch {
+      return null;
+    }
   }
   for (const name of [modelAlias, modelDisplay]) {
     if (!name) continue;

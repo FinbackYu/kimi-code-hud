@@ -1,0 +1,14 @@
+{
+  "compact-dark-plain": "[manual] K3 high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
+  "compact-dark-ansi": "\u001b[90m[manual]\u001b[0m \u001b[38;2;79;168;255mK3\u001b[0m high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
+  "compact-light-plain": "[manual] K3 high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
+  "compact-light-ansi": "\u001b[90m[manual]\u001b[0m \u001b[1m\u001b[38;2;21;101;192mK3\u001b[0m high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
+  "normal-dark-plain": "[manual] K3 thinking:high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h ███░░░░░░░ 31% ~2h17m · 7d ██░░░░░░░░ 25% ~2d11h",
+  "normal-dark-ansi": "\u001b[90m[manual]\u001b[0m \u001b[38;2;79;168;255mK3\u001b[0m thinking:high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h \u001b[32m███░░░░░░░\u001b[0m 31% ~2h17m · 7d \u001b[32m██░░░░░░░░\u001b[0m 25% ~2d11h",
+  "normal-light-plain": "[manual] K3 thinking:high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h ███░░░░░░░ 31% ~2h17m · 7d ██░░░░░░░░ 25% ~2d11h",
+  "normal-light-ansi": "\u001b[90m[manual]\u001b[0m \u001b[1m\u001b[38;2;21;101;192mK3\u001b[0m thinking:high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h \u001b[38;2;14;122;56m███░░░░░░░\u001b[0m 31% ~2h17m · 7d \u001b[38;2;14;122;56m██░░░░░░░░\u001b[0m 25% ~2d11h",
+  "full-dark-plain": "[manual] K3 thinking:high │ hud git:(main) │ Context ██████░░░░ 63% (160K/256K) │ ⚡ 30 t/s · gen 59s │ Cache 60% (900/1K) │ 5h ███░░░░░░░ 31% ~2h17m · 7d ██░░░░░░░░ 25% ~2d11h │ v0.31.1",
+  "full-dark-ansi": "\u001b[90m[manual]\u001b[0m \u001b[38;2;79;168;255mK3\u001b[0m thinking:high │ hud git:(main) │ Context \u001b[33m██████░░░░\u001b[0m 63% (160K/256K) │ ⚡ 30 t/s · gen 59s │ Cache 60% (900/1K) │ 5h \u001b[32m███░░░░░░░\u001b[0m 31% ~2h17m · 7d \u001b[32m██░░░░░░░░\u001b[0m 25% ~2d11h │ v0.31.1",
+  "full-light-plain": "[manual] K3 thinking:high │ hud git:(main) │ Context ██████░░░░ 63% (160K/256K) │ ⚡ 30 t/s · gen 59s │ Cache 60% (900/1K) │ 5h ███░░░░░░░ 31% ~2h17m · 7d ██░░░░░░░░ 25% ~2d11h │ v0.31.1",
+  "full-light-ansi": "\u001b[90m[manual]\u001b[0m \u001b[1m\u001b[38;2;21;101;192mK3\u001b[0m thinking:high │ hud git:(main) │ Context \u001b[38;2;217;119;6m██████░░░░\u001b[0m 63% (160K/256K) │ ⚡ 30 t/s · gen 59s │ Cache 60% (900/1K) │ 5h \u001b[38;2;14;122;56m███░░░░░░░\u001b[0m 31% ~2h17m · 7d \u001b[38;2;14;122;56m██░░░░░░░░\u001b[0m 25% ~2d11h │ v0.31.1"
+}

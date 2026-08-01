@@ -176,184 +176,163 @@ function goalBadge(goal, color, now, C) {
   return `${C.muted}${before}${RESET}${dotColor}●${RESET}${C.muted}${after}${RESET}`;
 }
 
-/**
- * Build the segment list for one layout tier.
- * compact: model <effort> │ git:(branch) │ ⚡tps │ Cache pct │ window pct+countdown
- * normal:  + project prefix, thinking suffix, t/s+TTFT, bars, weekly+countdown
- * full:    + Context segment, cache token counts, version
- * (Context only in full — the host's line 2 already shows the numbers)
- */
-function buildSegments(layout, ctx) {
-  const { payload, quota, metrics, gitDirty, color, now, C } = ctx;
-  const segs = [];
+const LAYOUT_LEVEL = { compact: 0, normal: 1, full: 2 };
 
-  // Model with thinking suffix, mirroring the host footer: boolean models
-  // show " thinking", effort-capable ones " thinking:<effort>" (halfwidth
-  // colon, no space — keeps the suffix compact). Compact drops the
-  // "thinking" label and keeps only " <effort>" (space-separated). The level comes from the
-  // session log's config.update events (the status-line payload does not
-  // carry thinking state). The model name is painted in the host's primary
-  // blue (#4FA8FF), the suffix stays in default text color.
-  const level = metrics && typeof metrics.thinkingLevel === 'string' ? metrics.thinkingLevel : null;
-  let modelSeg = colorize(color, C.primary, String(payload.model));
+function modelSegment({ layout, payload, metrics, color, C }) {
+  const level = metrics && typeof metrics.thinkingLevel === 'string'
+    ? metrics.thinkingLevel
+    : null;
+  let segment = colorize(color, C.primary, String(payload.model));
   if (level && level !== 'off') {
-    if (layout === 'compact') modelSeg += ` ${level}`;
-    else modelSeg += level === 'on' ? ' thinking' : ` thinking:${level}`;
+    segment += layout === 'compact'
+      ? ` ${level}`
+      : level === 'on' ? ' thinking' : ` thinking:${level}`;
   }
-  segs.push(modelSeg);
+  return segment;
+}
 
-  // Project + git in Claude HUD style: "my-project git:(main*)". Compact
-  // drops the project name; without a branch the project stands alone.
-  const project =
-    layout !== 'compact' && payload.cwd ? path.basename(payload.cwd) || payload.cwd : null;
+function projectSegment({ layout, payload, gitDirty }) {
+  const project = layout !== 'compact' && payload.cwd
+    ? path.basename(payload.cwd) || payload.cwd
+    : null;
   if (payload.gitBranch) {
     const git = `git:(${payload.gitBranch}${gitDirty ? '*' : ''})`;
-    segs.push(project ? `${project} ${git}` : git);
-  } else if (project) {
-    segs.push(project);
+    return project ? `${project} ${git}` : git;
   }
+  return project;
+}
 
-  // Context usage: bar + exact percentage + token counts. Only full shows
-  // it; compact/normal leave the exact numbers to the host's line 2.
-  if (layout === 'full') {
-    let ctxFrac = 0;
-    const hasCounts =
-      typeof payload.contextTokens === 'number' &&
-      typeof payload.maxContextTokens === 'number' &&
-      payload.maxContextTokens > 0;
-    if (hasCounts) {
-      ctxFrac = payload.contextTokens / payload.maxContextTokens;
-    } else if (typeof payload.contextUsage === 'number') {
-      ctxFrac = payload.contextUsage;
-    }
-    let ctxSeg = `Context ${bar(ctxFrac, color, C)} ${Math.round(ctxFrac * 100)}%`;
-    if (hasCounts) {
-      ctxSeg += ` (${formatTokens(payload.contextTokens)}/${formatTokens(payload.maxContextTokens)})`;
-    }
-    segs.push(ctxSeg);
+function contextSegment({ payload, color, C }) {
+  let fraction = 0;
+  const hasCounts =
+    typeof payload.contextTokens === 'number' &&
+    typeof payload.maxContextTokens === 'number' &&
+    payload.maxContextTokens > 0;
+  if (hasCounts) fraction = payload.contextTokens / payload.maxContextTokens;
+  else if (typeof payload.contextUsage === 'number') fraction = payload.contextUsage;
+  let segment = `Context ${bar(fraction, color, C)} ${Math.round(fraction * 100)}%`;
+  if (hasCounts) {
+    segment += ` (${formatTokens(payload.contextTokens)}/${formatTokens(payload.maxContextTokens)})`;
   }
+  return segment;
+}
 
-  // Speed segment. A fresh solo window (enough recent, reliable samples)
-  // renders bright; once it expires the last median stays visible in muted
-  // gray instead of disappearing. With several active agents
-  // (swarm/subagents) show the fleet total plus "N agents @avg". The tail of
-  // the segment is a slotted readout — the static last-step TTFT with two
-  // live stand-ins. While the turn is running (turnStartedAt set — from the
-  // user's prompt until end_turn/cancel) a "gen <elapsed>" turn-work timer
-  // takes the slot, so long generations and tool runs show how long the
-  // command has been working. A between-turns compaction (manual /compact;
-  // mid-turn auto-compactions never reach the HUD) ticks "compacting
-  // <elapsed>" the same way, and since a finished compaction has no TTFT of
-  // its own the dimmed "compacted <duration>" holds the slot until the next
-  // prompt's gen timer takes over. Only the initial warmup (no median yet,
-  // no turn in flight) falls back to a bare TTFT.
-  const turnStart = metrics && typeof metrics.turnStartedAt === 'number' ? metrics.turnStartedAt : null;
+function speedSegment({ layout, metrics, color, now, C }) {
+  const turnStart = metrics && typeof metrics.turnStartedAt === 'number'
+    ? metrics.turnStartedAt
+    : null;
   const multi = metrics && typeof metrics.tpsTotal === 'number' && metrics.activeAgents > 1;
-  const gen = turnStart !== null ? formatElapsed(now - turnStart) : null;
+  const generatedFor = turnStart !== null ? formatElapsed(now - turnStart) : null;
   const compacting =
-    !gen && metrics && typeof metrics.compactingSince === 'number'
+    !generatedFor && metrics && typeof metrics.compactingSince === 'number'
       ? formatElapsed(now - metrics.compactingSince)
       : null;
   const compacted =
-    !gen && !compacting && metrics && typeof metrics.compactionMs === 'number'
+    !generatedFor && !compacting && metrics && typeof metrics.compactionMs === 'number'
       ? formatElapsed(metrics.compactionMs)
       : null;
   if (metrics && typeof metrics.tps === 'number') {
-    const avg = Math.round(metrics.tps);
-    // Stale (2 min without samples) dims the speed/TTFT text only; a live
-    // timer stays bright — the session is actively working even though the
-    // last median is old.
-    const paint = (s) => (metrics.tpsStale === true ? colorize(color, C.muted, s) : s);
+    const average = Math.round(metrics.tps);
+    const paint = (text) => (
+      metrics.tpsStale === true ? colorize(color, C.muted, text) : text
+    );
     if (layout === 'compact') {
-      const head = multi ? `⚡ ${Math.round(metrics.tpsTotal)} (${metrics.activeAgents}@${avg})` : `⚡ ${avg}`;
-      // The compact tier carries only live timers in the slot; static
-      // numbers (TTFT, finished compaction) are dropped.
-      const live = gen ? `gen ${gen}` : compacting ? `compacting ${compacting}` : null;
-      segs.push(live ? `${paint(head)} ${live}` : paint(head));
-    } else {
-      const base = multi
-        ? `⚡ ${Math.round(metrics.tpsTotal)} t/s (${metrics.activeAgents} agents @${avg})`
-        : `⚡ ${avg} t/s`;
-      if (gen) {
-        segs.push(`${paint(base)} · gen ${gen}`);
-      } else if (compacting) {
-        segs.push(`${paint(base)} · compacting ${compacting}`);
-      } else if (compacted) {
-        segs.push(`${paint(base)}${colorize(color, C.muted, ` · compacted ${compacted}`)}`);
-      } else {
-        const ttft = formatTtft(metrics.ttftMs);
-        segs.push(paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`));
-      }
+      const head = multi
+        ? `⚡ ${Math.round(metrics.tpsTotal)} (${metrics.activeAgents}@${average})`
+        : `⚡ ${average}`;
+      const live = generatedFor
+        ? `gen ${generatedFor}`
+        : compacting ? `compacting ${compacting}` : null;
+      return live ? `${paint(head)} ${live}` : paint(head);
     }
-  } else if (metrics && turnStart !== null) {
-    const n = metrics.activeAgents > 1 ? ` (${metrics.activeAgents} agents)` : '';
-    segs.push(`⚡ gen ${gen}${n}`);
-  } else if (metrics && compacting) {
-    segs.push(`compacting ${compacting}`);
-  } else if (metrics && compacted && layout !== 'compact') {
-    segs.push(colorize(color, C.muted, `compacted ${compacted}`));
-  } else if (metrics) {
+    const base = multi
+      ? `⚡ ${Math.round(metrics.tpsTotal)} t/s (${metrics.activeAgents} agents @${average})`
+      : `⚡ ${average} t/s`;
+    if (generatedFor) return `${paint(base)} · gen ${generatedFor}`;
+    if (compacting) return `${paint(base)} · compacting ${compacting}`;
+    if (compacted) {
+      return `${paint(base)}${colorize(color, C.muted, ` · compacted ${compacted}`)}`;
+    }
     const ttft = formatTtft(metrics.ttftMs);
-    if (ttft) segs.push(`TTFT ${ttft}`);
+    return paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`);
   }
+  if (metrics && turnStart !== null) {
+    const agents = metrics.activeAgents > 1 ? ` (${metrics.activeAgents} agents)` : '';
+    return `⚡ gen ${generatedFor}${agents}`;
+  }
+  if (metrics && compacting) return `compacting ${compacting}`;
+  if (metrics && compacted && layout !== 'compact') {
+    return colorize(color, C.muted, `compacted ${compacted}`);
+  }
+  const ttft = metrics ? formatTtft(metrics.ttftMs) : null;
+  return ttft ? `TTFT ${ttft}` : null;
+}
 
-  // Session-cumulative prompt-cache hit rate. The reducer only counts
-  // step.end rows with complete usage; rendering stays neutral because a
-  // useful rate depends on provider and workload rather than universal
-  // thresholds. The ratio is session-cumulative, so it stays bright between
-  // turns — it is always the latest complete value, never one step behind.
+function cacheSegment({ layout, metrics }) {
   const cache = metrics?.cache;
   if (
-    cache &&
-    typeof cache.hitRate === 'number' &&
-    Number.isFinite(cache.hitRate) &&
-    cache.hitRate >= 0 &&
-    cache.hitRate <= 1
+    !cache ||
+    typeof cache.hitRate !== 'number' ||
+    !Number.isFinite(cache.hitRate) ||
+    cache.hitRate < 0 ||
+    cache.hitRate > 1
   ) {
-    let cacheSeg = `Cache ${Math.round(cache.hitRate * 100)}%`;
-    if (
-      layout === 'full' &&
-      typeof cache.readTokens === 'number' &&
-      typeof cache.inputTokens === 'number'
-    ) {
-      cacheSeg += ` (${formatTokens(cache.readTokens)}/${formatTokens(cache.inputTokens)})`;
-    }
-    segs.push(cacheSeg);
+    return null;
   }
-
-  // Quota group (omitted when no quota cache exists): all windows join into
-  // one segment with "·", lighter than the "│" between segments — the 5h and
-  // 7d windows read as one quota block. Compact drops the bar and keeps pct +
-  // reset countdown; other tiers show bar + pct, and all tiers show the
-  // countdown when the reset time is known.
-  if (quota) {
-    const parts = [];
-    for (const w of quota.windows || []) {
-      const frac = w.used / w.limit;
-      let s = layout === 'compact'
-        ? `${w.label} ${pctOf(w.used, w.limit)}%`
-        : `${w.label} ${bar(frac, color, C)} ${pctOf(w.used, w.limit)}%`;
-      const cd = formatCountdown(w.resetAt, now);
-      if (cd) s += ` ${cd}`;
-      parts.push(s);
-    }
-    // Weekly window, labeled "7d" to match the 5h-style window labels; its
-    // reset countdown shows from normal up (compact drops the segment).
-    if (layout !== 'compact' && quota.weekly) {
-      const frac = quota.weekly.used / quota.weekly.limit;
-      let s = `7d ${bar(frac, color, C)} ${pctOf(quota.weekly.used, quota.weekly.limit)}%`;
-      const cd = formatCountdown(quota.weekly.resetAt, now);
-      if (cd) s += ` ${cd}`;
-      parts.push(s);
-    }
-    if (parts.length) segs.push(parts.join(' · '));
+  let segment = `Cache ${Math.round(cache.hitRate * 100)}%`;
+  if (
+    layout === 'full' &&
+    typeof cache.readTokens === 'number' &&
+    typeof cache.inputTokens === 'number'
+  ) {
+    segment += ` (${formatTokens(cache.readTokens)}/${formatTokens(cache.inputTokens)})`;
   }
+  return segment;
+}
 
-  if (layout === 'full' && payload.version) {
-    segs.push(`v${payload.version}`);
+function quotaSegment({ layout, quota, color, now, C }) {
+  if (!quota) return null;
+  const parts = [];
+  for (const window of quota.windows || []) {
+    const fraction = window.used / window.limit;
+    let text = layout === 'compact'
+      ? `${window.label} ${pctOf(window.used, window.limit)}%`
+      : `${window.label} ${bar(fraction, color, C)} ${pctOf(window.used, window.limit)}%`;
+    const countdown = formatCountdown(window.resetAt, now);
+    if (countdown) text += ` ${countdown}`;
+    parts.push(text);
   }
+  if (layout !== 'compact' && quota.weekly) {
+    const fraction = quota.weekly.used / quota.weekly.limit;
+    let text = `7d ${bar(fraction, color, C)} ${pctOf(quota.weekly.used, quota.weekly.limit)}%`;
+    const countdown = formatCountdown(quota.weekly.resetAt, now);
+    if (countdown) text += ` ${countdown}`;
+    parts.push(text);
+  }
+  return parts.length ? parts.join(' · ') : null;
+}
 
-  return segs;
+function versionSegment({ payload }) {
+  return payload.version ? `v${payload.version}` : null;
+}
+
+// Each pure builder declares the minimum information tier at which it may
+// appear. Builders still receive the actual tier for compact representations.
+const SEGMENT_BUILDERS = [
+  { minLayout: 'compact', build: modelSegment },
+  { minLayout: 'compact', build: projectSegment },
+  { minLayout: 'full', build: contextSegment },
+  { minLayout: 'compact', build: speedSegment },
+  { minLayout: 'compact', build: cacheSegment },
+  { minLayout: 'compact', build: quotaSegment },
+  { minLayout: 'full', build: versionSegment },
+];
+
+function buildSegments(layout, ctx) {
+  return SEGMENT_BUILDERS
+    .filter(({ minLayout }) => LAYOUT_LEVEL[layout] >= LAYOUT_LEVEL[minLayout])
+    .map(({ build }) => build({ ...ctx, layout }))
+    .filter(Boolean);
 }
 
 /**

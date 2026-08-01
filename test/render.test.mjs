@@ -74,6 +74,18 @@ test('normal layout drops Context, adds project, t/s+TTFT, countdown and weekly'
   );
 });
 
+test('normal layout shows zero quota usage with its reset countdown', () => {
+  const [line] = renderHud(baseCtx({
+    layout: 'normal',
+    quota: {
+      weekly: { used: 0, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
+      windows: [{ label: '5h', used: 0, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
+    },
+  }));
+  assert.ok(line.includes('5h ░░░░░░░░░░ 0% ~2h18m'));
+  assert.ok(line.includes('7d ░░░░░░░░░░ 0% ~3d2h'));
+});
+
 test('full layout adds Context and version', () => {
   const [line] = renderHud(baseCtx({ layout: 'full', payload: basePayload({ planMode: true }) }));
   assert.equal(
