@@ -55,11 +55,13 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
   let tps = null;
   let tpsStale = false;
   let tpsTotal = null;
+  let tpsAgents = 0;
   let ttftMs = null;
   if (activeAgents >= 2) {
     if (activeSpeeds.length > 0) {
       tpsTotal = activeSpeeds.reduce((sum, value) => sum + value, 0);
-      tps = tpsTotal / activeSpeeds.length;
+      tpsAgents = activeSpeeds.length;
+      tps = tpsTotal / tpsAgents;
     }
     ttftMs = median(activeTtfts);
   } else if (activeAgents === 1) {
@@ -121,6 +123,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       swarmMode: state.swarmMode === true,
       cache: cacheMetricFromState(state),
       tpsTotal,
+      tpsAgents,
       activeAgents,
       turnStartedAt,
       compactingSince,

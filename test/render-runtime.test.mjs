@@ -52,6 +52,7 @@ function metrics() {
     swarmMode: false,
     cache: null,
     tpsTotal: null,
+    tpsAgents: 0,
     activeAgents: 0,
     turnStartedAt: null,
     compactingSince: null,
