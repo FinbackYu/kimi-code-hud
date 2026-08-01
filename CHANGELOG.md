@@ -4,7 +4,27 @@ All notable changes to this project are documented in this file.
 
 The project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.5.0] - 2026-08-01
+
+### Added
+
+- Compaction timer. The wire journal's `full_compaction.begin` / `complete` /
+  `cancel` rows feed the speed segment's TTFT slot the same way the turn
+  timer does: a between-turns compaction (manual `/compact`) ticks live
+  `compacting Ns` in place of TTFT, and since a finished compaction has no
+  TTFT of its own the dimmed `compacted Ns` holds the slot until the next
+  prompt's `gen` timer takes over. Compactions inside a turn
+  (auto-compaction) are never shown — the `gen` timer owns that span. A
+  begin whose close record was lost (host killed mid-compaction) expires
+  after 10 minutes instead of ticking a runaway timer; existing state files
+  re-scan once (backfill v8) to recover an in-flight compaction.
+
+### Changed
+
+- The session Cache ratio no longer dims between a prompt and its first
+  counted step. The number is session-cumulative, so at prompt time it is
+  already the latest complete value — the gray flash at every turn start
+  was noise, not a freshness signal.
 
 ## [0.4.0] - 2026-07-31
 

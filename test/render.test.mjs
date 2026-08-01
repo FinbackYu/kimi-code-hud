@@ -176,23 +176,6 @@ test('cache segment has no semantic threshold color', () => {
   assert.ok(!line.includes('\x1b[31mCache'));
 });
 
-test('stale cache ratio dims until the new turn contributes usage', () => {
-  const [dim] = renderHud(baseCtx({
-    layout: 'normal',
-    color: true,
-    metrics: { tps: 47, ttftMs: 1300, cache: { ...CACHE_METRIC, stale: true } },
-  }));
-  assert.ok(dim.includes('\x1b[90mCache 92%\x1b[0m'));
-
-  const [fresh] = renderHud(baseCtx({
-    layout: 'normal',
-    color: true,
-    metrics: { tps: 47, ttftMs: 1300, cache: { ...CACHE_METRIC, stale: false } },
-  }));
-  assert.ok(fresh.includes('Cache 92%'));
-  assert.ok(!fresh.includes('\x1b[90mCache'));
-});
-
 test('stale TPS stays visible in muted gray', () => {
   const metrics = { tps: 47, tpsStale: true, ttftMs: 1300 };
   const [normal] = renderHud(baseCtx({ layout: 'normal', color: true, metrics }));
@@ -427,4 +410,32 @@ test('fleet gen ticker appends to the fleet speed format', () => {
   assert.ok(normal.includes('⚡ 305 t/s (12 agents @25) · gen 3s'));
   const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
   assert.ok(compact.includes('⚡ 305 (12@25) gen 3s'));
+});
+
+test('live compaction takes the TTFT slot like the gen timer', () => {
+  const metrics = { tps: 47, ttftMs: 1300, compactingSince: NOW - 14_000 };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(normal.includes('⚡ 47 t/s · compacting 14s'));
+  assert.ok(!normal.includes('TTFT'));
+  const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
+  assert.ok(compact.includes('⚡ 47 compacting 14s'));
+});
+
+test('finished compaction holds the TTFT slot dimmed, drops in compact tier', () => {
+  const metrics = { tps: 47, ttftMs: 1300, compactionMs: 30_000 };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics, color: true }));
+  assert.ok(normal.includes('⚡ 47 t/s\x1b[90m · compacted 30s\x1b[0m'));
+  assert.ok(!normal.includes('TTFT'));
+  const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
+  assert.ok(!compact.includes('compacted'));
+});
+
+test('gen timer takes the slot back from a finished compaction', () => {
+  const metrics = {
+    tps: 47, ttftMs: 1300,
+    turnStartedAt: NOW - 60_000, compactionMs: 30_000,
+  };
+  const [line] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(line.includes('⚡ 47 t/s · gen 1m0s'));
+  assert.ok(!line.includes('compacted'));
 });

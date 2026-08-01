@@ -35,8 +35,9 @@ export const CACHE_BACKFILL_MAX_BYTES = 1024 * 1024;
 // `swarm_mode.enter/exit`, the wire journal's swarm-mode record; v6:
 // `turn.prompt`/`turn.cancel`/`end_turn`, the turn boundaries anchoring the
 // turn-work timer; v7: `turn.ended`, the authoritative terminal record added
-// by Kimi Code 0.31.1).
-const BACKFILL_SCAN_V = 7;
+// by Kimi Code 0.31.1; v8: `full_compaction.*`, the compaction timer's
+// boundaries — `full_compaction.complete` was already folded live before).
+const BACKFILL_SCAN_V = 8;
 // State format version; v6: per-agent sample buckets with timestamped
 // samples (v1..v5 states were flat single-wire shapes and are migrated).
 const STATE_V = 6;
@@ -115,6 +116,9 @@ function emptyAgent() {
     lastStepEndAt: null,
     lastTurnPromptAt: null,
     lastTurnEndAt: null,
+    lastCompactionBeginAt: null,
+    lastCompactionEndAt: null,
+    lastCompactionMs: null,
   };
 }
 
@@ -130,6 +134,9 @@ function normAgent(a) {
   if (typeof a.lastStepEndAt !== 'number') a.lastStepEndAt = null;
   if (typeof a.lastTurnPromptAt !== 'number') a.lastTurnPromptAt = null;
   if (typeof a.lastTurnEndAt !== 'number') a.lastTurnEndAt = null;
+  if (typeof a.lastCompactionBeginAt !== 'number') a.lastCompactionBeginAt = null;
+  if (typeof a.lastCompactionEndAt !== 'number') a.lastCompactionEndAt = null;
+  if (typeof a.lastCompactionMs !== 'number') a.lastCompactionMs = null;
   return a;
 }
 
@@ -238,10 +245,12 @@ function saveState(statePath, state) {
 /**
  * Fold one parsed wire row into the metrics state. Rows are bucketed per
  * agent: llm.request/step.end/full_compaction.complete/turn.cancel/turn.ended
- * drive the in-flight generation flag, step.end adds TPS samples and TTFT. The
- * main agent additionally feeds the state-level handlers — the session cache
- * counters, config.update (model alias + thinking level), goal ops and the
- * swarm_mode.enter/exit journal.
+ * drive the in-flight generation flag, step.end adds TPS samples and TTFT, and
+ * full_compaction.begin/complete/cancel anchor the compaction timer (main
+ * agent only, and only between turns — a mid-turn auto-compaction is not
+ * tracked). The main agent additionally feeds the state-level handlers —
+ * the session cache counters, config.update (model alias + thinking level),
+ * goal ops and the swarm_mode.enter/exit journal.
  * @param {object} state mutated in place
  * @param {object} row parsed wire.jsonl line
  * @param {string} [agent] which agent's wire this row comes from
@@ -294,6 +303,39 @@ export function processWireRow(state, row, agent = 'main') {
     }
     return;
   }
+  if (row?.type === 'full_compaction.begin') {
+    // Compaction is a main-agent context operation. The begin anchors the
+    // live "compacting Ns" timer until complete/cancel closes it — but only
+    // between turns (manual /compact). A begin while a turn is in flight is
+    // an auto-compaction inside the turn's work; the turn timer already owns
+    // the TTFT slot for that span, so it is never tracked.
+    if (agent !== 'main') return;
+    const turnInFlight =
+      bucket.lastTurnPromptAt !== null &&
+      (bucket.lastTurnEndAt === null || bucket.lastTurnPromptAt > bucket.lastTurnEndAt);
+    if (turnInFlight) return;
+    if (
+      rowTime !== null &&
+      (bucket.lastCompactionBeginAt === null || rowTime > bucket.lastCompactionBeginAt)
+    ) {
+      bucket.lastCompactionBeginAt = rowTime;
+    }
+    return;
+  }
+  if (row?.type === 'full_compaction.cancel') {
+    // A cancelled compaction closes the live timer but records no duration.
+    // Only an open (tracked) begin is closed; an untracked mid-turn cancel
+    // leaves an earlier finished duration untouched.
+    if (agent !== 'main') return;
+    const open =
+      bucket.lastCompactionBeginAt !== null &&
+      (bucket.lastCompactionEndAt === null ||
+        bucket.lastCompactionBeginAt > bucket.lastCompactionEndAt);
+    if (open && rowTime !== null) {
+      bucket.lastCompactionEndAt = rowTime;
+    }
+    return;
+  }
   const activeCancel = row?.type === 'turn.cancel' && row.target !== 'queued';
   if (row?.type === 'full_compaction.complete' || activeCancel) {
     // A compaction completion or active-turn cancellation closes an in-flight
@@ -305,6 +347,20 @@ export function processWireRow(state, row, agent = 'main') {
     if (agent === 'main' && activeCancel) {
       if (rowTime !== null && (bucket.lastTurnEndAt === null || rowTime > bucket.lastTurnEndAt)) {
         bucket.lastTurnEndAt = rowTime;
+      }
+    }
+    if (agent === 'main' && row?.type === 'full_compaction.complete' && rowTime !== null) {
+      // Close the compaction timer and keep the duration for the dimmed
+      // "compacted Ns" readout. Only an open (tracked) begin is closed: a
+      // mid-turn auto-compaction was never tracked, and a complete that
+      // predates tracking has no timer to close.
+      const open =
+        bucket.lastCompactionBeginAt !== null &&
+        (bucket.lastCompactionEndAt === null ||
+          bucket.lastCompactionBeginAt > bucket.lastCompactionEndAt);
+      if (open && rowTime >= bucket.lastCompactionBeginAt) {
+        bucket.lastCompactionEndAt = rowTime;
+        bucket.lastCompactionMs = rowTime - bucket.lastCompactionBeginAt;
       }
     }
     return;
@@ -517,6 +573,7 @@ function isBackfillLine(line) {
     line.includes('"type":"turn.prompt"') ||
     line.includes('"type":"turn.cancel"') ||
     line.includes('"type":"turn.ended"') ||
+    line.includes('"type":"full_compaction.') ||
     line.includes('"finishReason":"end_turn"')
   );
 }
@@ -571,9 +628,15 @@ export function median(arr) {
  * the last full-window median (flagged stale). `turnStartedAt` anchors the
  * live timer at the user's latest prompt (turn.prompt) until the turn ends
  * (turn.ended, or the legacy end_turn / active turn.cancel fallbacks).
+ * `compactingSince`/`compactionMs` mirror the full_compaction journal: a
+ * begin without a close anchors the live compaction timer (expires after
+ * SAMPLE_WINDOW_MS when the close record was lost), and the finished
+ * duration survives until the next prompt starts a turn. Compactions that
+ * run inside a turn (auto-compaction) are never tracked — the turn timer
+ * owns that span.
  * @param {string} sessionId
  * @param {object} [opts]
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, activeAgents: number, turnStartedAt: number|null}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, activeAgents: number, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
@@ -584,6 +647,7 @@ export function getMetrics(sessionId, {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
     modelAlias: null, swarmMode: false, cache: null,
     tpsTotal: null, activeAgents: 0, turnStartedAt: null,
+    compactingSince: null, compactionMs: null,
   };
   try {
     if (!sessionId) return empty;
@@ -633,6 +697,9 @@ export function getMetrics(sessionId, {
         a.lastSampleAt = null;
         a.lastRequestAt = null;
         a.lastStepEndAt = null;
+        a.lastCompactionBeginAt = null;
+        a.lastCompactionEndAt = null;
+        a.lastCompactionMs = null;
         if (agent === 'main') {
           state.goal = null;
           state.thinkingLevel = null;
@@ -796,6 +863,30 @@ export function getMetrics(sessionId, {
       && (mainBucket.lastTurnEndAt === null || mainBucket.lastTurnPromptAt > mainBucket.lastTurnEndAt)
       ? mainBucket.lastTurnPromptAt
       : null;
+    // The compaction timer anchors at full_compaction.begin and runs until
+    // complete/cancel. A begin older than the sample window with no close
+    // means the terminal record was lost (host killed mid-compaction) — drop
+    // it rather than tick a runaway timer. The finished duration stays
+    // visible until the next prompt starts a new turn.
+    let compactingSince = null;
+    let compactionMs = null;
+    if (mainBucket) {
+      const beginAt = mainBucket.lastCompactionBeginAt;
+      const endAt = mainBucket.lastCompactionEndAt;
+      if (
+        beginAt !== null &&
+        (endAt === null || beginAt > endAt) &&
+        now - beginAt < SAMPLE_WINDOW_MS
+      ) {
+        compactingSince = beginAt;
+      } else if (
+        typeof mainBucket.lastCompactionMs === 'number' &&
+        endAt !== null &&
+        (mainBucket.lastTurnPromptAt === null || endAt > mainBucket.lastTurnPromptAt)
+      ) {
+        compactionMs = mainBucket.lastCompactionMs;
+      }
+    }
     return {
       tps,
       tpsStale,
@@ -808,6 +899,8 @@ export function getMetrics(sessionId, {
       tpsTotal,
       activeAgents,
       turnStartedAt,
+      compactingSince,
+      compactionMs,
     };
   } catch {
     return empty;

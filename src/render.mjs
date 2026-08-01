@@ -236,31 +236,50 @@ function buildSegments(layout, ctx) {
   // Speed segment. A fresh solo window (enough recent, reliable samples)
   // renders bright; once it expires the last median stays visible in muted
   // gray instead of disappearing. With several active agents
-  // (swarm/subagents) show the fleet total plus "N agents @avg". While the
-  // turn is running (turnStartedAt set — from the user's prompt until
-  // end_turn/cancel) the segment swaps the static last-step TTFT for a live
-  // "gen <elapsed>" turn-work timer, so long generations and tool runs show
-  // how long the command has been working, not just one request. Only the
-  // initial warmup (no median yet, no turn in flight) falls back to a bare
-  // TTFT.
+  // (swarm/subagents) show the fleet total plus "N agents @avg". The tail of
+  // the segment is a slotted readout — the static last-step TTFT with two
+  // live stand-ins. While the turn is running (turnStartedAt set — from the
+  // user's prompt until end_turn/cancel) a "gen <elapsed>" turn-work timer
+  // takes the slot, so long generations and tool runs show how long the
+  // command has been working. A between-turns compaction (manual /compact;
+  // mid-turn auto-compactions never reach the HUD) ticks "compacting
+  // <elapsed>" the same way, and since a finished compaction has no TTFT of
+  // its own the dimmed "compacted <duration>" holds the slot until the next
+  // prompt's gen timer takes over. Only the initial warmup (no median yet,
+  // no turn in flight) falls back to a bare TTFT.
   const turnStart = metrics && typeof metrics.turnStartedAt === 'number' ? metrics.turnStartedAt : null;
   const multi = metrics && typeof metrics.tpsTotal === 'number' && metrics.activeAgents > 1;
   const gen = turnStart !== null ? formatElapsed(now - turnStart) : null;
+  const compacting =
+    !gen && metrics && typeof metrics.compactingSince === 'number'
+      ? formatElapsed(now - metrics.compactingSince)
+      : null;
+  const compacted =
+    !gen && !compacting && metrics && typeof metrics.compactionMs === 'number'
+      ? formatElapsed(metrics.compactionMs)
+      : null;
   if (metrics && typeof metrics.tps === 'number') {
     const avg = Math.round(metrics.tps);
-    // Stale (2 min without samples) dims the speed/TTFT text only; a live gen
-    // timer stays bright — the turn is actively working even though the last
-    // median is old.
+    // Stale (2 min without samples) dims the speed/TTFT text only; a live
+    // timer stays bright — the session is actively working even though the
+    // last median is old.
     const paint = (s) => (metrics.tpsStale === true ? colorize(color, C.muted, s) : s);
     if (layout === 'compact') {
       const head = multi ? `⚡ ${Math.round(metrics.tpsTotal)} (${metrics.activeAgents}@${avg})` : `⚡ ${avg}`;
-      segs.push(gen ? `${paint(head)} gen ${gen}` : paint(head));
+      // The compact tier carries only live timers in the slot; static
+      // numbers (TTFT, finished compaction) are dropped.
+      const live = gen ? `gen ${gen}` : compacting ? `compacting ${compacting}` : null;
+      segs.push(live ? `${paint(head)} ${live}` : paint(head));
     } else {
       const base = multi
         ? `⚡ ${Math.round(metrics.tpsTotal)} t/s (${metrics.activeAgents} agents @${avg})`
         : `⚡ ${avg} t/s`;
       if (gen) {
         segs.push(`${paint(base)} · gen ${gen}`);
+      } else if (compacting) {
+        segs.push(`${paint(base)} · compacting ${compacting}`);
+      } else if (compacted) {
+        segs.push(`${paint(base)}${colorize(color, C.muted, ` · compacted ${compacted}`)}`);
       } else {
         const ttft = formatTtft(metrics.ttftMs);
         segs.push(paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`));
@@ -269,6 +288,10 @@ function buildSegments(layout, ctx) {
   } else if (metrics && turnStart !== null) {
     const n = metrics.activeAgents > 1 ? ` (${metrics.activeAgents} agents)` : '';
     segs.push(`⚡ gen ${gen}${n}`);
+  } else if (metrics && compacting) {
+    segs.push(`compacting ${compacting}`);
+  } else if (metrics && compacted && layout !== 'compact') {
+    segs.push(colorize(color, C.muted, `compacted ${compacted}`));
   } else if (metrics) {
     const ttft = formatTtft(metrics.ttftMs);
     if (ttft) segs.push(`TTFT ${ttft}`);
@@ -277,9 +300,8 @@ function buildSegments(layout, ctx) {
   // Session-cumulative prompt-cache hit rate. The reducer only counts
   // step.end rows with complete usage; rendering stays neutral because a
   // useful rate depends on provider and workload rather than universal
-  // thresholds. Between a new prompt and its first counted step the ratio
-  // lags the live session — dim it instead of dropping the segment (which
-  // used to shift the whole line's width every turn).
+  // thresholds. The ratio is session-cumulative, so it stays bright between
+  // turns — it is always the latest complete value, never one step behind.
   const cache = metrics?.cache;
   if (
     cache &&
@@ -296,7 +318,7 @@ function buildSegments(layout, ctx) {
     ) {
       cacheSeg += ` (${formatTokens(cache.readTokens)}/${formatTokens(cache.inputTokens)})`;
     }
-    segs.push(cache.stale === true ? colorize(color, C.muted, cacheSeg) : cacheSeg);
+    segs.push(cacheSeg);
   }
 
   // Quota group (omitted when no quota cache exists): all windows join into
@@ -341,7 +363,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, activeAgents, turnStartedAt}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, activeAgents, turnStartedAt, compactingSince, compactionMs}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] full|normal|compact
  * @param {boolean} [ctx.color]
