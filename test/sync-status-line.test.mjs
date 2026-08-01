@@ -49,12 +49,62 @@ test('installs even when another section has its own command key', () => {
   );
 });
 
+test('rewrites a previous kimi-hud command that carries trailing arguments', () => {
+  const { home, pluginRoot, toml } = setup();
+  fs.writeFileSync(toml, '[status_line]\ncommand = "node /a/bin/kimi-hud.mjs --layout compact"\n');
+  runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
+  const out = fs.readFileSync(toml, 'utf8');
+  assert.equal(out, `[status_line]\ncommand = "node ${pluginRoot}/bin/kimi-hud.mjs"\n`);
+});
+
+test('leaves a foreign command with trailing arguments untouched', () => {
+  const { home, pluginRoot, toml } = setup();
+  const original = '[status_line]\ncommand = "node /a/other.mjs --foo"\n';
+  fs.writeFileSync(toml, original);
+  runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
+  assert.equal(fs.readFileSync(toml, 'utf8'), original);
+});
+
+test('leaves a kimi-hud command with unsafe trailing words untouched', () => {
+  const { home, pluginRoot, toml } = setup();
+  const original = '[status_line]\ncommand = "node /a/bin/kimi-hud.mjs extra"\n';
+  fs.writeFileSync(toml, original);
+  runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
+  assert.equal(fs.readFileSync(toml, 'utf8'), original);
+});
+
 test('leaves a foreign status line command untouched', () => {
   const { home, pluginRoot, toml } = setup();
   const original = '[status_line]\ncommand = "node /Users/test/my-own-statusline.mjs"\n';
   fs.writeFileSync(toml, original);
   runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
   assert.equal(fs.readFileSync(toml, 'utf8'), original);
+});
+
+test('leaves a single-quoted foreign status line command untouched', () => {
+  const { home, pluginRoot, toml } = setup();
+  const original = "[status_line]\ncommand = 'node /Users/test/my-own-statusline.mjs'\n";
+  fs.writeFileSync(toml, original);
+  runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
+  assert.equal(fs.readFileSync(toml, 'utf8'), original);
+});
+
+test('leaves an unknown command syntax untouched', () => {
+  const { home, pluginRoot, toml } = setup();
+  const original = '[status_line]\ncommand = bare-value\n';
+  fs.writeFileSync(toml, original);
+  runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
+  assert.equal(fs.readFileSync(toml, 'utf8'), original);
+});
+
+test('quotes a managed-copy path containing spaces', () => {
+  const { home, toml } = setup();
+  const pluginRoot = path.join(home, 'managed plugins', 'kimi-code-hud');
+  runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
+  assert.equal(
+    fs.readFileSync(toml, 'utf8'),
+    `[status_line]\ncommand = "node \\"${pluginRoot}/bin/kimi-hud.mjs\\""\n`,
+  );
 });
 
 test('preserves other sections and status_line keys', () => {

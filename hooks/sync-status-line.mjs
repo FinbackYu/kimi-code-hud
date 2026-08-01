@@ -12,9 +12,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getStatusLineCommand, setStatusLineCommand } from '../src/toml.mjs';
+import {
+  inspectStatusLineCommand,
+  isKimiHudCommand,
+  setStatusLineCommand,
+} from '../src/toml.mjs';
 import { isHudDisabled } from '../src/plugin-state.mjs';
-import { HUD_DIR } from '../src/quota.mjs';
+import { HUD_DIR } from '../src/paths.mjs';
+import { nodeCommand } from '../src/command.mjs';
+import { atomicWriteFile } from '../src/fs-store.mjs';
 
 function main() {
   // --off switch: honor the flag before touching anything.
@@ -32,13 +38,16 @@ function main() {
 
   // Guard only looks at [status_line]'s own command — a `command` key in any
   // other section (e.g. [editor]) must not trip it.
-  const existing = getStatusLineCommand(content);
-  if (existing !== null && !existing.includes('kimi-hud')) return;
+  const existing = inspectStatusLineCommand(content);
+  if (existing.kind === 'unknown') return;
+  if (existing.kind === 'parsed' && !isKimiHudCommand(existing.value)) return;
 
-  const next = setStatusLineCommand(content, `node ${path.join(pluginRoot, 'bin', 'kimi-hud.mjs')}`);
+  const next = setStatusLineCommand(
+    content,
+    nodeCommand(path.join(pluginRoot, 'bin', 'kimi-hud.mjs')),
+  );
   if (next === content) return;
-  fs.mkdirSync(path.dirname(tomlPath), { recursive: true });
-  fs.writeFileSync(tomlPath, next);
+  atomicWriteFile(tomlPath, next);
 }
 
 try { main(); } catch { /* fail-open */ }
