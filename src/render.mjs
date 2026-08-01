@@ -49,7 +49,7 @@ const LIGHT = {
 
 const BAR_WIDTH = 10;
 const MAX_WIDTH = 200;
-const LAYOUT_ORDER = ['full', 'normal', 'compact'];
+const LAYOUT_ORDER = ['normal', 'compact'];
 
 function colorize(enabled, color, str) {
   return enabled ? `${color}${str}${RESET}` : str;
@@ -124,15 +124,6 @@ function pctOf(used, limit) {
   return Math.round((used / limit) * 100);
 }
 
-/** 1024-based token count: 10485 -> "10K", 262144 -> "256K", 1048576 -> "1M". */
-function formatTokens(n) {
-  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return '?';
-  if (n < 1024) return String(Math.round(n));
-  if (n < 1048576) return `${Math.round(n / 1024)}K`;
-  const m = n / 1048576;
-  return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
-}
-
 function stripAnsi(s) {
   // eslint-disable-next-line no-control-regex
   return s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -176,7 +167,7 @@ function goalBadge(goal, color, now, C) {
   return `${C.muted}${before}${RESET}${dotColor}●${RESET}${C.muted}${after}${RESET}`;
 }
 
-const LAYOUT_LEVEL = { compact: 0, normal: 1, full: 2 };
+const LAYOUT_LEVEL = { compact: 0, normal: 1 };
 
 function modelSegment({ layout, payload, metrics, color, C }) {
   const level = metrics && typeof metrics.thinkingLevel === 'string'
@@ -184,9 +175,11 @@ function modelSegment({ layout, payload, metrics, color, C }) {
     : null;
   let segment = colorize(color, C.primary, String(payload.model));
   if (level && level !== 'off') {
-    segment += layout === 'compact'
-      ? ` ${level}`
-      : level === 'on' ? ' thinking' : ` thinking:${level}`;
+    // Effort-capable models show the bare level ("K3 max"); only boolean
+    // thinking keeps the " thinking" label (compact: " on").
+    segment += level === 'on' && layout !== 'compact'
+      ? ' thinking'
+      : ` ${level}`;
   }
   return segment;
 }
@@ -200,21 +193,6 @@ function projectSegment({ layout, payload, gitDirty }) {
     return project ? `${project} ${git}` : git;
   }
   return project;
-}
-
-function contextSegment({ payload, color, C }) {
-  let fraction = 0;
-  const hasCounts =
-    typeof payload.contextTokens === 'number' &&
-    typeof payload.maxContextTokens === 'number' &&
-    payload.maxContextTokens > 0;
-  if (hasCounts) fraction = payload.contextTokens / payload.maxContextTokens;
-  else if (typeof payload.contextUsage === 'number') fraction = payload.contextUsage;
-  let segment = `Context ${bar(fraction, color, C)} ${Math.round(fraction * 100)}%`;
-  if (hasCounts) {
-    segment += ` (${formatTokens(payload.contextTokens)}/${formatTokens(payload.maxContextTokens)})`;
-  }
-  return segment;
 }
 
 function speedSegment({ layout, metrics, color, now, C }) {
@@ -268,7 +246,7 @@ function speedSegment({ layout, metrics, color, now, C }) {
   return ttft ? `TTFT ${ttft}` : null;
 }
 
-function cacheSegment({ layout, metrics }) {
+function cacheSegment({ metrics }) {
   const cache = metrics?.cache;
   if (
     !cache ||
@@ -279,15 +257,7 @@ function cacheSegment({ layout, metrics }) {
   ) {
     return null;
   }
-  let segment = `Cache ${Math.round(cache.hitRate * 100)}%`;
-  if (
-    layout === 'full' &&
-    typeof cache.readTokens === 'number' &&
-    typeof cache.inputTokens === 'number'
-  ) {
-    segment += ` (${formatTokens(cache.readTokens)}/${formatTokens(cache.inputTokens)})`;
-  }
-  return segment;
+  return `Cache ${Math.round(cache.hitRate * 100)}%`;
 }
 
 function quotaSegment({ layout, quota, color, now, C }) {
@@ -312,20 +282,14 @@ function quotaSegment({ layout, quota, color, now, C }) {
   return parts.length ? parts.join(' · ') : null;
 }
 
-function versionSegment({ payload }) {
-  return payload.version ? `v${payload.version}` : null;
-}
-
 // Each pure builder declares the minimum information tier at which it may
 // appear. Builders still receive the actual tier for compact representations.
 const SEGMENT_BUILDERS = [
   { minLayout: 'compact', build: modelSegment },
   { minLayout: 'compact', build: projectSegment },
-  { minLayout: 'full', build: contextSegment },
   { minLayout: 'compact', build: speedSegment },
   { minLayout: 'compact', build: cacheSegment },
   { minLayout: 'compact', build: quotaSegment },
-  { minLayout: 'full', build: versionSegment },
 ];
 
 function buildSegments(layout, ctx) {
@@ -338,13 +302,13 @@ function buildSegments(layout, ctx) {
 /**
  * Render the HUD. Returns an array of lines (currently a single line; the
  * array shape leaves room for a future second line). Downgrades the layout
- * full -> normal -> compact when the line exceeds MAX_WIDTH visible chars.
+ * normal -> compact when the line exceeds MAX_WIDTH visible chars.
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
  * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, activeAgents, turnStartedAt, compactingSince, compactionMs}
  * @param {boolean} ctx.gitDirty
- * @param {string} [ctx.layout] full|normal|compact
+ * @param {string} [ctx.layout] normal|compact
  * @param {boolean} [ctx.color]
  * @param {string} [ctx.theme] dark|light — badge palette (default dark)
  * @param {number} [ctx.now]

@@ -41,9 +41,9 @@ export function captureRuntimeSnapshot({
 
 export function layoutFromSnapshot(snapshot, env = process.env) {
   const override = env.KIMI_HUD_LAYOUT;
-  if (override === 'compact' || override === 'normal' || override === 'full') return override;
+  if (override === 'compact' || override === 'normal') return override;
   const layout = snapshot?.hudConfig?.layout;
-  return layout === 'compact' || layout === 'normal' || layout === 'full'
+  return layout === 'compact' || layout === 'normal'
     ? layout
     : 'normal';
 }

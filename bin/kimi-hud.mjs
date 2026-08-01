@@ -41,7 +41,7 @@ Usage:
   kimi-code-hud --refresh-quota  refresh the quota cache (internal, silent)
   kimi-code-hud --help           show this help
 
-Config: ~/.kimi-code-hud/config.json  {"layout":"compact|normal|full"}
+Config: ~/.kimi-code-hud/config.json  {"layout":"compact|normal"}
 Env:    KIMI_HUD_LAYOUT overrides config; NO_COLOR / KIMI_HUD_NO_COLOR disable colors.
         KIMI_HUD_THEME=dark|light pins the badge palette (default: tui.toml's
         theme, with auto resolved via COLORFGBG, falling back to dark).

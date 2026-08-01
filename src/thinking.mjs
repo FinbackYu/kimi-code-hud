@@ -102,7 +102,7 @@ function resolveFromConfig(model, configPath, configText = undefined) {
  * Returns:
  *  - 'off'        thinking disabled (render no suffix)
  *  - 'on'         boolean thinking enabled (render " thinking")
- *  - '<effort>'   concrete effort like "high" (render " thinking:<effort>")
+ *  - '<effort>'   concrete effort like "high" (render " <effort>")
  *
  * @param {object} opts
  * @param {string|null} opts.sessionLevel thinkingLevel from the session log
