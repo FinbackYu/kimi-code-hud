@@ -188,6 +188,7 @@ test('a normal local render frame completes inside the 220ms internal budget', a
     scriptPath: '/tmp/kimi-hud.mjs',
     paths,
     stdin,
+    env: { NO_COLOR: '1' },
   });
   const elapsed = performance.now() - started;
   assert.equal(result.exitCode, 0);
