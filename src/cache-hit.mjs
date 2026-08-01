@@ -8,10 +8,6 @@ function emptyCache() {
   return {
     readTokens: 0,
     inputTokens: 0,
-    // True between a turn.prompt and that turn's first fully-counted
-    // step.end: the cumulative ratio then lags the live session and renders
-    // dimmed instead of disappearing (which used to jump the line width).
-    awaitsUsage: false,
   };
 }
 
@@ -21,7 +17,7 @@ function ensureCacheState(state) {
     validUsageNumber(cache?.readTokens) &&
     validUsageNumber(cache?.inputTokens) &&
     cache.readTokens <= cache.inputTokens;
-  if (!cache || typeof cache !== 'object' || !validCounters || typeof cache.awaitsUsage !== 'boolean') {
+  if (!cache || typeof cache !== 'object' || !validCounters) {
     state.cache = emptyCache();
   }
 }
@@ -39,21 +35,17 @@ function validUsageNumber(value) {
 }
 
 /**
- * Fold one wire row into the session cache counters. turn.prompt only marks
- * the ratio as awaiting fresh usage; step.end accumulates cumulatively — the
- * metric describes the whole session, not the current turn. usage.record is
- * deliberately ignored because it duplicates the step.end usage. A step.end
- * without complete usage fields is skipped rather than poisoning the ratio.
+ * Fold one wire row into the session cache counters. step.end accumulates
+ * cumulatively — the metric describes the whole session, not the current
+ * turn. usage.record is deliberately ignored because it duplicates the
+ * step.end usage. A step.end without complete usage fields is skipped
+ * rather than poisoning the ratio.
  * @param {object} state mutated in place
  * @param {object} row parsed wire.jsonl line
  */
 export function applyCacheWireRow(state, row) {
   ensureCacheState(state);
 
-  if (row?.type === 'turn.prompt') {
-    state.cache.awaitsUsage = true;
-    return;
-  }
   if (row?.type !== 'context.append_loop_event') return;
   const event = row.event;
   if (!event || event.type !== 'step.end') return;
@@ -69,15 +61,14 @@ export function applyCacheWireRow(state, row) {
   state.cache.readTokens += usage.inputCacheRead;
   state.cache.inputTokens +=
     usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation;
-  state.cache.awaitsUsage = false;
 }
 
 /**
  * Return the render-safe session cache metric, or null when nothing has been
- * counted yet. `stale` marks a turn that has prompted but not yet contributed
- * usage — the ratio shown is then one step behind the live session.
+ * counted yet. The ratio is session-cumulative, so between turns it is
+ * already the latest complete value — no freshness flag is attached.
  * @param {object} state
- * @returns {{hitRate: number, readTokens: number, inputTokens: number, stale: boolean}|null}
+ * @returns {{hitRate: number, readTokens: number, inputTokens: number}|null}
  */
 export function cacheMetricFromState(state) {
   ensureCacheState(state);
@@ -94,6 +85,5 @@ export function cacheMetricFromState(state) {
     hitRate: cache.readTokens / cache.inputTokens,
     readTokens: cache.readTokens,
     inputTokens: cache.inputTokens,
-    stale: cache.awaitsUsage,
   };
 }

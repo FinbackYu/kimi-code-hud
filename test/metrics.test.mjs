@@ -58,6 +58,18 @@ function turnEnded({ reason = 'completed', time = EVENT_TIME, turnId = 0 } = {})
   return JSON.stringify({ type: 'turn.ended', turnId, reason, time });
 }
 
+function compactionBegin({ source = 'manual', time = EVENT_TIME } = {}) {
+  return JSON.stringify({ type: 'full_compaction.begin', source, time });
+}
+
+function compactionComplete({ time = EVENT_TIME } = {}) {
+  return JSON.stringify({ type: 'full_compaction.complete', time });
+}
+
+function compactionCancel({ time = EVENT_TIME } = {}) {
+  return JSON.stringify({ type: 'full_compaction.cancel', time });
+}
+
 function makeSession({ withPrefix = true, agents = ['main'] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-ses-'));
   const id = 'abc123';
@@ -683,7 +695,7 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   assert.equal(m.thinkingLevel, 'high');
   // Second run must not rescan (versioned scan marker persisted).
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 7);
+  assert.equal(state.backfillScanV, 8);
 });
 
 test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
@@ -704,7 +716,7 @@ test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', ()
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 7);
+  assert.equal(state.backfillScanV, 8);
   assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
 });
 
@@ -725,7 +737,7 @@ test('getMetrics fresh sessions derive tracked rows without a separate backfill 
   assert.ok(m.goal);
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 7); // marker still set, no rescan later
+  assert.equal(state.backfillScanV, 8); // marker still set, no rescan later
 });
 
 test('getMetrics tracks swarm mode from the wire journal', () => {
@@ -769,7 +781,7 @@ test('getMetrics v6 backfill re-scans v5 states and anchors the turn timer', () 
   // end_turn means the timer is anchored right now.
   assert.equal(m.turnStartedAt, EVENT_TIME);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 7);
+  assert.equal(state.backfillScanV, 8);
 });
 
 test('getMetrics v7 backfill re-scans v6 states and recovers turn.ended', () => {
@@ -799,7 +811,7 @@ test('getMetrics v7 backfill re-scans v6 states and recovers turn.ended', () => 
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
   assert.equal(state.agents.main.lastTurnPromptAt, EVENT_TIME);
   assert.equal(state.agents.main.lastTurnEndAt, EVENT_TIME + 1000);
-  assert.equal(state.backfillScanV, 7);
+  assert.equal(state.backfillScanV, 8);
 });
 
 test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', () => {
@@ -819,7 +831,7 @@ test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', 
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 7);
+  assert.equal(state.backfillScanV, 8);
 });
 
 test('getMetrics aggregates an active fleet: total, average, count, TTFT median', () => {
@@ -965,7 +977,7 @@ test('getMetrics persists and incrementally updates session-cumulative cache usa
   );
 
   let m = getMetrics(id, opts);
-  assert.deepEqual(m.cache, { hitRate: 0.6, readTokens: 300, inputTokens: 500, stale: false });
+  assert.deepEqual(m.cache, { hitRate: 0.6, readTokens: 300, inputTokens: 500 });
 
   fs.appendFileSync(
     wirePath,
@@ -980,7 +992,7 @@ test('getMetrics persists and incrementally updates session-cumulative cache usa
     }) + '\n',
   );
   m = getMetrics(id, opts);
-  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000, stale: false });
+  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000 });
 
   const persisted = JSON.parse(
     fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'),
@@ -990,7 +1002,7 @@ test('getMetrics persists and incrementally updates session-cumulative cache usa
   assert.equal(persisted.cacheScanV, 2);
 });
 
-test('getMetrics dims the session cache value as soon as a new prompt arrives', () => {
+test('getMetrics keeps the session cache value unchanged across a new prompt', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
@@ -999,12 +1011,15 @@ test('getMetrics dims the session cache value as soon as a new prompt arrives', 
     turnPrompt('first') + '\n' +
       stepEnd({ output: 100, streamMs: 1000, ttftMs: 500, turnId: '1' }) + '\n',
   );
-  assert.equal(getMetrics(id, opts).cache.stale, false);
+  const expected = {
+    hitRate: 67840 / 68792,
+    readTokens: 67840,
+    inputTokens: 68792,
+  };
+  assert.deepEqual(getMetrics(id, opts).cache, expected);
 
   fs.appendFileSync(wirePath, turnPrompt('second') + '\n');
-  const cache = getMetrics(id, opts).cache;
-  assert.notEqual(cache, null);
-  assert.equal(cache.stale, true);
+  assert.deepEqual(getMetrics(id, opts).cache, expected);
 });
 
 test('cache migration restores only usage before the old offset then reads new bytes once', () => {
@@ -1047,7 +1062,7 @@ test('cache migration restores only usage before the old offset then reads new b
 
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.tps, 150); // only the newly appended TPS row was added
-  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000, stale: false });
+  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000 });
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
   assert.deepEqual(state.agents.main.samples.map((s) => s.v), [100, 200, 300, 100]);
 });
@@ -1080,7 +1095,6 @@ test('bounded cache migration counts tail step.end rows without their prompt', (
   // still counts toward the cumulative session ratio.
   const restored = getMetrics(id, opts).cache;
   assert.notEqual(restored, null);
-  assert.equal(restored.stale, false);
 
   fs.appendFileSync(
     wirePath,
@@ -1088,9 +1102,8 @@ test('bounded cache migration counts tail step.end rows without their prompt', (
       stepEnd({ output: 100, streamMs: 1000, ttftMs: 400, turnId: '2' }) + '\n',
   );
   const m = getMetrics(id, opts).cache;
-  // turnPrompt marks the ratio stale, then the new step.end folds in and
-  // clears it; identical usage doubles the cumulative counters.
-  assert.equal(m.stale, false);
+  // The new step.end folds in cumulatively; identical usage doubles the
+  // session counters.
   assert.equal(m.inputTokens, restored.inputTokens * 2);
   assert.equal(m.readTokens, restored.readTokens * 2);
 });
@@ -1104,5 +1117,153 @@ test('getMetrics returns nulls for unknown sessions', () => {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
     modelAlias: null, swarmMode: false, cache: null,
     tpsTotal: null, activeAgents: 0, turnStartedAt: null,
+    compactingSince: null, compactionMs: null,
   });
+});
+
+test('processWireChunk tracks the compaction timer (main agent only)', () => {
+  const state = makeState();
+  processWireChunk(
+    state,
+    compactionBegin({ time: EVENT_TIME }) + '\n' +
+      compactionComplete({ time: EVENT_TIME + 3000 }) + '\n',
+  );
+  const bucket = state.agents.main;
+  assert.equal(bucket.lastCompactionBeginAt, EVENT_TIME);
+  assert.equal(bucket.lastCompactionEndAt, EVENT_TIME + 3000);
+  assert.equal(bucket.lastCompactionMs, 3000);
+
+  // Subagent compaction rows never move the user-facing timer.
+  processWireChunk(state, compactionBegin({ time: EVENT_TIME + 10_000 }) + '\n', 'agent-0');
+  assert.equal(state.agents['agent-0'].lastCompactionBeginAt, null);
+  assert.equal(state.agents.main.lastCompactionBeginAt, EVENT_TIME);
+});
+
+test('compaction cancel closes the live timer without a duration', () => {
+  const state = makeState();
+  processWireChunk(
+    state,
+    compactionBegin({ time: EVENT_TIME }) + '\n' +
+      compactionCancel({ time: EVENT_TIME + 2000 }) + '\n',
+  );
+  const bucket = state.agents.main;
+  assert.equal(bucket.lastCompactionBeginAt, EVENT_TIME);
+  assert.equal(bucket.lastCompactionEndAt, EVENT_TIME + 2000);
+  assert.equal(bucket.lastCompactionMs, null);
+});
+
+test('mid-turn (auto) compaction is never tracked by the compaction timer', () => {
+  const state = makeState();
+  processWireChunk(
+    state,
+    turnPrompt('work', EVENT_TIME) + '\n' +
+      llmRequest({ time: EVENT_TIME + 1000 }) + '\n' +
+      compactionBegin({ source: 'auto', time: EVENT_TIME + 2000 }) + '\n' +
+      compactionComplete({ time: EVENT_TIME + 32_000 }) + '\n' +
+      turnEnded({ time: EVENT_TIME + 40_000 }) + '\n',
+  );
+  const bucket = state.agents.main;
+  assert.equal(bucket.lastCompactionBeginAt, null);
+  assert.equal(bucket.lastCompactionEndAt, null);
+  assert.equal(bucket.lastCompactionMs, null);
+  // The completion still closes the in-flight generation as before (the
+  // later turn.ended then takes over as the final terminal record).
+  assert.equal(bucket.lastStepEndAt, EVENT_TIME + 40_000);
+});
+
+test('a compaction after the turn ended is tracked normally', () => {
+  const state = makeState();
+  processWireChunk(
+    state,
+    turnPrompt('work', EVENT_TIME) + '\n' +
+      turnEnded({ time: EVENT_TIME + 10_000 }) + '\n' +
+      compactionBegin({ time: EVENT_TIME + 20_000 }) + '\n' +
+      compactionComplete({ time: EVENT_TIME + 50_000 }) + '\n',
+  );
+  const bucket = state.agents.main;
+  assert.equal(bucket.lastCompactionBeginAt, EVENT_TIME + 20_000);
+  assert.equal(bucket.lastCompactionEndAt, EVENT_TIME + 50_000);
+  assert.equal(bucket.lastCompactionMs, 30_000);
+});
+
+test('getMetrics anchors a live compaction timer at full_compaction.begin', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(wirePath, compactionBegin({ time: EVENT_TIME }) + '\n');
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME + 5000 });
+  assert.equal(m.compactingSince, EVENT_TIME);
+  assert.equal(m.compactionMs, null);
+});
+
+test('getMetrics keeps the finished compaction duration until the next prompt', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wirePath,
+    compactionBegin({ time: EVENT_TIME }) + '\n' +
+      compactionComplete({ time: EVENT_TIME + 30_000 }) + '\n',
+  );
+  let m = getMetrics(id, opts);
+  assert.equal(m.compactingSince, null);
+  assert.equal(m.compactionMs, 30_000);
+  // A new prompt takes over the slot; the stale duration drops out.
+  fs.appendFileSync(wirePath, turnPrompt('next', EVENT_TIME + 40_000) + '\n');
+  m = getMetrics(id, opts);
+  assert.equal(m.compactionMs, null);
+  assert.equal(m.turnStartedAt, EVENT_TIME + 40_000);
+});
+
+test('getMetrics hides an auto compaction that ran inside a turn', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    turnPrompt('work', EVENT_TIME) + '\n' +
+      compactionBegin({ source: 'auto', time: EVENT_TIME + 1000 }) + '\n' +
+      compactionComplete({ time: EVENT_TIME + 31_000 }) + '\n' +
+      turnEnded({ time: EVENT_TIME + 40_000 }) + '\n',
+  );
+  // The turn is over, yet neither a live timer nor a duration shows up.
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(m.turnStartedAt, null);
+  assert.equal(m.compactingSince, null);
+  assert.equal(m.compactionMs, null);
+});
+
+test('getMetrics drops a compaction begin whose close record was lost', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(wirePath, compactionBegin({ time: EVENT_TIME }) + '\n');
+  const m = getMetrics(id, {
+    sessionsRoot: root, stateDir, now: EVENT_TIME + 11 * 60_000,
+  });
+  assert.equal(m.compactingSince, null);
+  assert.equal(m.compactionMs, null);
+});
+
+test('getMetrics v8 backfill recovers an in-flight compaction', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(wirePath, compactionBegin({ time: EVENT_TIME }) + '\n');
+  // Pre-v8 state: offset already past the begin row, never scanned for it.
+  const size = fs.statSync(wirePath).size;
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({
+      v: 6,
+      agents: {
+        main: {
+          offset: size, fileId: null, samples: [], lastTtftMs: null,
+          lastSampleAt: null, lastRequestAt: null, lastStepEndAt: null,
+          lastTurnPromptAt: null, lastTurnEndAt: null,
+        },
+      },
+      backfillScanV: 7,
+    }),
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME + 5000 });
+  assert.equal(m.compactingSince, EVENT_TIME);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.equal(state.backfillScanV, 8);
 });
