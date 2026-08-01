@@ -196,17 +196,26 @@ function projectSegment({ layout, payload, gitDirty }) {
 }
 
 function speedSegment({ layout, metrics, color, now, C }) {
+  // While a goal badge is up it already carries the session clock, so the
+  // gen ticker, TTFT and the compaction state are all redundant — show
+  // throughput only, leaving the horizontal space to the badge. (Same
+  // reason auto-compactions inside a turn stay hidden: the clock that
+  // covers the task's duration already accounts for that span.)
+  const goalStatus = metrics?.goal?.status;
+  const goalLive =
+    goalStatus === 'active' || goalStatus === 'paused' || goalStatus === 'blocked';
   const turnStart = metrics && typeof metrics.turnStartedAt === 'number'
     ? metrics.turnStartedAt
     : null;
   const multi = metrics && typeof metrics.tpsTotal === 'number' && metrics.activeAgents > 1;
-  const generatedFor = turnStart !== null ? formatElapsed(now - turnStart) : null;
+  const generatedFor =
+    !goalLive && turnStart !== null ? formatElapsed(now - turnStart) : null;
   const compacting =
-    !generatedFor && metrics && typeof metrics.compactingSince === 'number'
+    !goalLive && !generatedFor && metrics && typeof metrics.compactingSince === 'number'
       ? formatElapsed(now - metrics.compactingSince)
       : null;
   const compacted =
-    !generatedFor && !compacting && metrics && typeof metrics.compactionMs === 'number'
+    !goalLive && !generatedFor && !compacting && metrics && typeof metrics.compactionMs === 'number'
       ? formatElapsed(metrics.compactionMs)
       : null;
   if (metrics && typeof metrics.tps === 'number') {
@@ -231,10 +240,10 @@ function speedSegment({ layout, metrics, color, now, C }) {
     if (compacted) {
       return `${paint(base)}${colorize(color, C.muted, ` · compacted ${compacted}`)}`;
     }
-    const ttft = formatTtft(metrics.ttftMs);
+    const ttft = goalLive ? null : formatTtft(metrics.ttftMs);
     return paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`);
   }
-  if (metrics && turnStart !== null) {
+  if (!goalLive && metrics && turnStart !== null) {
     const agents = metrics.activeAgents > 1 ? ` (${metrics.activeAgents} agents)` : '';
     return `⚡ gen ${generatedFor}${agents}`;
   }
@@ -242,7 +251,7 @@ function speedSegment({ layout, metrics, color, now, C }) {
   if (metrics && compacted && layout !== 'compact') {
     return colorize(color, C.muted, `compacted ${compacted}`);
   }
-  const ttft = metrics ? formatTtft(metrics.ttftMs) : null;
+  const ttft = metrics && !goalLive ? formatTtft(metrics.ttftMs) : null;
   return ttft ? `TTFT ${ttft}` : null;
 }
 

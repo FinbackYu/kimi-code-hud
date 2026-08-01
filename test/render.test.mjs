@@ -320,6 +320,42 @@ test('goal badge sits between mode badges and model, in every tier', () => {
   assert.ok(plain.startsWith('[manual] K3'));
 });
 
+test('goal badge keeps the speed segment at throughput only', () => {
+  const goal = { status: 'active', turnsUsed: 3, wallClockMs: 0, wallClockResumedAt: NOW - 60_000 };
+  // Idle turn: TTFT would normally tail the speed.
+  const [idle] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, goal } }));
+  assert.ok(idle.includes('⚡ 47 t/s'));
+  assert.ok(!idle.includes('TTFT'));
+  // Running turn: the gen ticker is redundant with the badge's own clock.
+  const [running] = renderHud(baseCtx({
+    metrics: { tps: 47, ttftMs: 1300, goal, turnStartedAt: NOW - 3000 },
+  }));
+  assert.ok(running.includes('⚡ 47 t/s'));
+  assert.ok(!running.includes('gen'));
+  assert.ok(!running.includes('TTFT'));
+  // Compact tier drops to the bare number too.
+  const [compact] = renderHud(baseCtx({
+    layout: 'compact',
+    metrics: { tps: 47, ttftMs: 1300, goal, turnStartedAt: NOW - 3000 },
+  }));
+  assert.ok(compact.split(' │ ').includes('⚡ 47'));
+  // Compaction state hides too — like auto-compactions inside a turn, the
+  // span is already covered by the badge's clock.
+  const [compacted] = renderHud(baseCtx({
+    metrics: { tps: 47, ttftMs: 1300, goal, compactionMs: 12_000 },
+  }));
+  assert.ok(!compacted.includes('compacted'));
+  const [compacting] = renderHud(baseCtx({
+    metrics: { tps: 47, ttftMs: 1300, goal, compactingSince: NOW - 5000 },
+  }));
+  assert.ok(!compacting.includes('compacting'));
+  // Goal cleared: ticker and TTFT come back.
+  const [cleared] = renderHud(baseCtx({
+    metrics: { tps: 47, ttftMs: 1300, turnStartedAt: NOW - 3000 },
+  }));
+  assert.ok(cleared.includes('⚡ 47 t/s · gen 3s'));
+});
+
 test('goal badge colors: dot by status, brackets muted', () => {
   const goal = { status: 'active', turnsUsed: 1, wallClockMs: 0, wallClockResumedAt: NOW };
   const [line] = renderHud(baseCtx({ color: true, metrics: { goal } }));
