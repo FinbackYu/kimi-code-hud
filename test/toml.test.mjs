@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setStatusLineCommand, removeStatusLineCommand } from '../src/toml.mjs';
+import {
+  getStatusLineCommand,
+  inspectStatusLineCommand,
+  isKimiHudCommand,
+  setStatusLineCommand,
+  removeStatusLineCommand,
+} from '../src/toml.mjs';
 
 const CMD = 'node /Users/test/kimi-code-hud/bin/kimi-hud.mjs';
 
@@ -32,6 +38,49 @@ test('install is idempotent', () => {
   const twice = setStatusLineCommand(once, CMD);
   assert.equal(once, twice);
   assert.equal(once.split('command =').length - 1, 1);
+});
+
+test('inspection distinguishes absent, parsed literal, and unknown commands', () => {
+  assert.deepEqual(inspectStatusLineCommand('[status_line]\nitems = []\n'), {
+    kind: 'absent', value: null,
+  });
+  const literal = "[status_line]\ncommand = 'node /opt/foreign.mjs' # keep\n";
+  assert.deepEqual(inspectStatusLineCommand(literal), {
+    kind: 'parsed', value: 'node /opt/foreign.mjs',
+  });
+  assert.equal(getStatusLineCommand(literal), 'node /opt/foreign.mjs');
+  assert.deepEqual(inspectStatusLineCommand('[status_line]\ncommand = bare\n'), {
+    kind: 'unknown', value: null,
+  });
+});
+
+test('HUD ownership requires the exact script basename', () => {
+  assert.equal(isKimiHudCommand('node /opt/kimi-code-hud/bin/kimi-hud.mjs'), true);
+  assert.equal(isKimiHudCommand('node "/opt/kimi code/bin/kimi-hud.mjs"'), true);
+  assert.equal(isKimiHudCommand('node /opt/not-kimi-hud-wrapper.mjs'), false);
+  assert.equal(isKimiHudCommand('echo /tmp/kimi-hud.mjs'), false);
+  assert.equal(isKimiHudCommand('node /tmp/kimi-hud.mjs && echo changed'), false);
+});
+
+test('HUD ownership accepts safe trailing flag arguments', () => {
+  assert.equal(isKimiHudCommand('node /opt/kimi-code-hud/bin/kimi-hud.mjs --layout compact'), true);
+  assert.equal(isKimiHudCommand('node /opt/kimi-code-hud/bin/kimi-hud.mjs --layout=compact'), true);
+  assert.equal(isKimiHudCommand('node /opt/kimi-code-hud/bin/kimi-hud.mjs --layout compact extra'), false);
+  assert.equal(isKimiHudCommand('node /opt/kimi-code-hud/bin/kimi-hud.mjs --layout; rm -rf /'), false);
+  assert.equal(isKimiHudCommand('node /opt/kimi-code-hud/bin/kimi-hud.mjs --theme=$(whoami)'), false);
+  assert.equal(isKimiHudCommand('node /opt/kimi-code-hud/bin/kimi-hud.mjs --'), false);
+  assert.equal(isKimiHudCommand('node /opt/kimi-code-hud/bin/kimi-hud.mjs -x'), false);
+});
+
+test('uninstall removes our command even with trailing arguments', () => {
+  const input = '[status_line]\ncommand = "node /a/bin/kimi-hud.mjs --layout compact"\nitems = ["model"]\n';
+  const out = removeStatusLineCommand(input, CMD);
+  assert.equal(out, '[status_line]\nitems = ["model"]\n');
+});
+
+test('uninstall leaves a foreign command with trailing arguments untouched', () => {
+  const input = '[status_line]\ncommand = "node /a/other.mjs --foo"\n';
+  assert.equal(removeStatusLineCommand(input, CMD), input);
 });
 
 test('uninstall removes only our command line', () => {

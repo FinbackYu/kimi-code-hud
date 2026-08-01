@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Add a Node 18/20/22 CI matrix covering tests, syntax checks, an empty-input
+  smoke test, and a whitespace gate.
+
+### Fixed
+
+- Fail closed when the SessionStart hook cannot safely parse a status-line
+  command, and quote generated commands whose paths contain spaces or shell
+  metacharacters.
+- Classify quota failures so authorization errors clear stale data while
+  transient errors retain it, and make refresh locking atomic and
+  ownership-safe.
+- Preserve zero-valued quota windows when the usages API omits `used`, deriving
+  it from `limit - remaining` so the percentage and reset countdown stay visible.
+
 ## [0.5.0] - 2026-08-01
 
 ### Added
@@ -129,7 +147,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.5.0
 [0.4.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.4.0
 [0.3.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.2
 [0.3.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.3.1

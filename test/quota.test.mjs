@@ -9,8 +9,14 @@ import {
   readQuotaCache,
   isQuotaStale,
   writeQuotaCache,
+  ensureFreshQuota,
+  acquireQuotaLock,
+  releaseQuotaLock,
+  requestQuota,
   refreshQuota,
+  QUOTA_RESULT,
   QUOTA_TTL_MS,
+  LOCK_STALE_MS,
 } from '../src/quota.mjs';
 
 // Real response captured from GET https://api.kimi.com/coding/v1/usages
@@ -30,6 +36,22 @@ test('parseQuotaPayload parses the real /usages response (string numbers)', () =
   assert.equal(q.windows.length, 1);
   assert.deepEqual(q.windows[0], {
     label: '5h', used: 8, limit: 100, resetAt: '2026-07-30T12:34:50Z',
+  });
+});
+
+test('parseQuotaPayload restores zero usage when the API omits default used fields', () => {
+  const q = parseQuotaPayload({
+    usage: { limit: '100', remaining: '100', resetTime: '2026-08-08T09:33:39Z' },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: { limit: '100', remaining: '100', resetTime: '2026-08-01T14:33:39Z' },
+      },
+    ],
+  });
+  assert.deepEqual(q.weekly, { used: 0, limit: 100, resetAt: '2026-08-08T09:33:39Z' });
+  assert.deepEqual(q.windows[0], {
+    label: '5h', used: 0, limit: 100, resetAt: '2026-08-01T14:33:39Z',
   });
 });
 
@@ -109,4 +131,185 @@ test('refreshQuota drops the stale cache when the token is missing or corrupt', 
     assert.equal(ok, false);
     assert.equal(fs.existsSync(cachePath), false);
   }
+});
+
+function response(status, body = null) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  };
+}
+
+test('refreshQuota clears stale cache on 401 and 403', async () => {
+  for (const status of [401, 403]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-auth-'));
+    const credentialsPath = path.join(dir, 'credentials.json');
+    const cachePath = path.join(dir, 'quota.json');
+    fs.writeFileSync(credentialsPath, JSON.stringify({ access_token: 'redacted' }));
+    writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+    const ok = await refreshQuota({
+      credentialsPath,
+      cachePath,
+      lockPath: path.join(dir, 'refresh.lock'),
+      fetchImpl: async () => response(status),
+    });
+    assert.equal(ok, false);
+    assert.equal(fs.existsSync(cachePath), false);
+  }
+});
+
+test('refreshQuota preserves stale cache for transient failures', async () => {
+  const cases = [
+    async () => response(429),
+    async () => response(503),
+    async () => { throw new Error('network down'); },
+  ];
+  for (const fetchImpl of cases) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-transient-'));
+    const credentialsPath = path.join(dir, 'credentials.json');
+    const cachePath = path.join(dir, 'quota.json');
+    fs.writeFileSync(credentialsPath, JSON.stringify({ access_token: 'redacted' }));
+    writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+    const ok = await refreshQuota({
+      credentialsPath,
+      cachePath,
+      lockPath: path.join(dir, 'refresh.lock'),
+      fetchImpl,
+    });
+    assert.equal(ok, false);
+    assert.notEqual(readQuotaCache(cachePath), null);
+  }
+});
+
+test('refreshQuota preserves stale cache when the request times out', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-timeout-'));
+  const credentialsPath = path.join(dir, 'credentials.json');
+  const cachePath = path.join(dir, 'quota.json');
+  fs.writeFileSync(credentialsPath, JSON.stringify({ access_token: 'redacted' }));
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+  const fetchImpl = async () => new Promise(() => {});
+  const ok = await refreshQuota({
+    credentialsPath,
+    cachePath,
+    lockPath: path.join(dir, 'refresh.lock'),
+    timeoutMs: 5,
+    fetchImpl,
+  });
+  assert.equal(ok, false);
+  assert.notEqual(readQuotaCache(cachePath), null);
+});
+
+test('requestQuota classifies success and refuses non-official credential targets', async () => {
+  const success = await requestQuota({
+    token: 'redacted',
+    fetchImpl: async () => response(200, REAL_RESPONSE),
+  });
+  assert.equal(success.status, QUOTA_RESULT.SUCCESS);
+  assert.equal(success.parsed.weekly.used, 29);
+
+  let called = false;
+  const invalid = await requestQuota({
+    token: 'redacted',
+    url: 'https://example.com/coding/v1/usages',
+    fetchImpl: async () => { called = true; return response(200, REAL_RESPONSE); },
+  });
+  assert.equal(invalid.status, QUOTA_RESULT.INVALID);
+  assert.equal(called, false);
+});
+
+test('atomic quota lock allows only one detached refresh', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-lock-'));
+  const lockPath = path.join(dir, 'refresh.lock');
+  let spawned = 0;
+  const spawnImpl = () => {
+    spawned += 1;
+    return { once() {}, unref() {} };
+  };
+  const opts = {
+    cachePath: path.join(dir, 'missing-cache.json'),
+    lockPath,
+    scriptPath: '/tmp/fake-kimi-hud.mjs',
+    now: 1000,
+    spawnImpl,
+    tokenFactory: () => 'fixed',
+  };
+  assert.equal(ensureFreshQuota(opts), true);
+  assert.equal(ensureFreshQuota(opts), false);
+  assert.equal(spawned, 1);
+});
+
+test('quota lock cleanup is ownership-safe', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-owner-'));
+  const lockPath = path.join(dir, 'refresh.lock');
+  const token = acquireQuotaLock({ lockPath, now: 1000, token: 'new-owner' });
+  assert.equal(token, 'new-owner');
+  assert.equal(releaseQuotaLock(lockPath, 'old-owner'), false);
+  assert.equal(fs.existsSync(lockPath), true);
+  assert.equal(releaseQuotaLock(lockPath, 'new-owner'), true);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test('parseQuotaPayload clamps bonus quota (remaining > limit) to zero usage', () => {
+  const q = parseQuotaPayload({
+    usage: { limit: '100', remaining: '150', resetTime: '2026-08-08T09:33:39Z' },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: { limit: '100', remaining: '120', resetTime: '2026-08-01T14:33:39Z' },
+      },
+    ],
+  });
+  assert.deepEqual(q.weekly, { used: 0, limit: 100, resetAt: '2026-08-08T09:33:39Z' });
+  assert.deepEqual(q.windows[0], {
+    label: '5h', used: 0, limit: 100, resetAt: '2026-08-01T14:33:39Z',
+  });
+});
+
+test('parseQuotaPayload still rejects negative remaining (fail-closed)', () => {
+  assert.equal(parseQuotaPayload({ usage: { limit: '100', remaining: '-5' } }), null);
+  assert.equal(parseQuotaPayload({
+    limits: [{ window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: 100, remaining: -1 } }],
+  }), null);
+});
+
+test('acquireQuotaLock collects a stale lock and re-acquires atomically', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-stale-'));
+  const lockPath = path.join(dir, 'refresh.lock');
+  fs.writeFileSync(lockPath, JSON.stringify({ pid: 1, at: 1000, token: 'old-owner' }));
+  const now = 1000 + LOCK_STALE_MS + 1;
+  assert.equal(acquireQuotaLock({ lockPath, now, token: 'new-owner' }), 'new-owner');
+  // Stale lock was renamed aside and unlinked: no leftovers, lock content
+  // appears complete and owned by the new token.
+  assert.deepEqual(fs.readdirSync(dir), ['refresh.lock']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(lockPath, 'utf8')), {
+    pid: process.pid, at: now, token: 'new-owner',
+  });
+});
+
+test('acquireQuotaLock collects a corrupt lock and re-acquires', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-corrupt-'));
+  const lockPath = path.join(dir, 'refresh.lock');
+  fs.writeFileSync(lockPath, '{broken');
+  assert.equal(acquireQuotaLock({ lockPath, now: 1000, token: 'new-owner' }), 'new-owner');
+  assert.deepEqual(fs.readdirSync(dir), ['refresh.lock']);
+  assert.equal(JSON.parse(fs.readFileSync(lockPath, 'utf8')).token, 'new-owner');
+});
+
+test('acquireQuotaLock fails closed when the stale-lock rename loses the race', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-rename-'));
+  const lockPath = path.join(dir, 'refresh.lock');
+  const staleBody = JSON.stringify({ pid: 1, at: 1000, token: 'old-owner' });
+  fs.writeFileSync(lockPath, staleBody);
+  // A non-empty directory at the rename target makes renameSync throw,
+  // simulating a competing process that is still handling the stale lock.
+  const blocker = `${lockPath}.stale-blocked`;
+  fs.mkdirSync(blocker);
+  fs.writeFileSync(path.join(blocker, 'held'), 'x');
+  const now = 1000 + LOCK_STALE_MS + 1;
+  assert.equal(acquireQuotaLock({ lockPath, now, token: 'blocked' }), null);
+  assert.equal(fs.readFileSync(lockPath, 'utf8'), staleBody); // stale lock untouched
+  fs.rmSync(blocker, { recursive: true });
+  assert.equal(acquireQuotaLock({ lockPath, now, token: 'winner' }), 'winner');
+  assert.equal(JSON.parse(fs.readFileSync(lockPath, 'utf8')).token, 'winner');
 });
