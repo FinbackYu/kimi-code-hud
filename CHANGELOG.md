@@ -11,6 +11,9 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Show the bare thinking effort level in the model segment (`K3 max` instead
   of `K3 thinking:max`) in every layout; boolean thinking keeps the
   ` thinking` label.
+- While the goal badge is up, the speed segment shows throughput only: the
+  gen timer, TTFT and the compaction state all hide (the badge already
+  carries the session clock), freeing space for the badge.
 
 ### Removed
 
