@@ -1,19 +1,30 @@
 # kimi-code-hud
 
-A zero-dependency custom status line (HUD) for **Kimi Code CLI** — shows model, git branch, context usage, generation speed (TPS/TTFT), session cache hit rate and API quota in the TUI footer.
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![GitHub release](https://img.shields.io/github/v/release/FinbackYu/kimi-code-hud)](https://github.com/FinbackYu/kimi-code-hud/releases)
 
-**[中文](README.md)**
+[中文](README.md) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/FinbackYu/kimi-code-hud/issues)
 
-<!-- screenshot placeholder -->
-<!-- ![screenshot](docs/screenshot.png) -->
+![kimi-code-hud in action](docs/media/hud-demo.png)
 
-```
-K3 high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ Cache 92% │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h
-```
+## What is kimi-code-hud
 
----
+A zero-dependency custom status line (HUD) for [Kimi Code CLI](https://www.kimi.com/) — shows model & thinking effort, git branch, generation speed (TPS / TTFT), compaction state, session cache hit rate and API quota in the TUI footer.
 
-### Install
+## Key features
+
+- **Model & thinking effort.** The model name is painted in the host's theme blue with a live suffix for thinking state / effort level (e.g. `K3 max`), pinned per session — another session running `/effort` never changes what this session shows.
+- **Git state.** Directory name plus a `git:(branch*)` dirty marker, with a 150ms timeout so rendering never blocks.
+- **Generation speed.** Streaming TPS median plus TTFT; while a turn runs, a live `gen Ns` timer takes over the slot; parallel agents aggregate into a fleet total (`⚡ 156 t/s (3 agents @52)`).
+- **Compaction timer.** A live `compacting Ns` ticker during `/compact`, then a dimmed `compacted Ns` holds the slot until the next prompt's `gen` timer takes over.
+- **Cache hit rate.** Token-weighted and accumulated across turns — stays bright between prompts instead of flashing gray.
+- **API quota.** 5h / 7d bars with percentage and reset countdown, colored green / yellow / red by usage; the whole section hides automatically for third-party provider models.
+- **Mode badges.** `[yolo]` / `[auto]` / `[plan]` / `[goal …]` / `[swarm]`, in the same slot order as the built-in footer.
+- **Dark & light themes.** Follows the host `theme` setting; light mode bolds badges and softens the bar colors.
+- **Hot-path safe.** Every render finishes within 300ms and all errors degrade silently — no logs, never blocking the TUI.
+
+![HUD state gallery (stacked for showcase; only the first line renders in real use)](docs/media/hud-states.png)
+
+## Install
 
 Requires Node.js ≥ 18 (global `fetch`). Zero npm dependencies.
 
@@ -40,12 +51,12 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 
 > Do not mix the two: while the plugin is enabled, its hook points `tui.toml` at the managed copy. To go back to a manual install, `/plugins remove kimi-code-hud` first, then re-run `--install`.
 
-### Update
+## Update
 
 - **Reinstall to update**: run `/plugins install https://github.com/FinbackYu/kimi-code-hud` again. The managed copy is replaced in place and the status line picks up the new version within ~1 second — no `/reload-tui` or new session needed.
 - See [CHANGELOG.md](CHANGELOG.md) for version history; stable versions are published through GitHub Releases.
 
-### Temporary off / on
+## Temporary off / on
 
 To fall back to the built-in status line while debugging, you don't need `--uninstall` (which also strips the self-heal hook):
 
@@ -59,7 +70,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --on
 
 **Restart Kimi Code or run `/reload-tui` to apply.**
 
-### Uninstall
+## Uninstall
 
 Plugin install: `/plugins remove kimi-code-hud` (per upstream behavior the managed copy stays on disk while the install record is deleted; the managed copy strips its own `tui.toml` entry on its next run, and `/reload-tui` or a new session brings back the built-in layout).
 
@@ -71,7 +82,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
 
 Backs up first, then removes this tool's `command` line from `[status_line]` and the self-heal hook block from `config.toml`.
 
-### Configuration
+## Configuration
 
 - `~/.kimi-code-hud/config.json`: `{"layout":"compact"|"normal"}` (default `normal`); `"disabled": true` is the switch flag written by `--off` (absent means enabled; `--on` deletes the key)
 - `KIMI_HUD_LAYOUT` env var overrides the config file
@@ -91,21 +102,22 @@ In /goal mode a goal badge is inserted between the mode badges and the model (sh
 [manual] [goal ● active · 4m · 7 turns] K3 high │ …
 ```
 
-The goal badge mirrors the built-in footer's format (`[goal ● <status> · <elapsed> · <turns>]`, `3/10 turns` when a turn budget is set; dot: active blue / blocked amber / paused muted). The status-line payload carries no goal field, so the state is rebuilt from the session log's `goal.create`/`goal.update`/`goal.clear`/`forked` ops in `wire.jsonl` (same incremental scan as TPS); an active goal ticks every second from `wallClockResumedAt`, and the badge disappears once the goal completes or is cleared. While the badge is up, the speed segment keeps throughput only: the `gen` timer, TTFT and the compaction state all hide — the badge already carries the session clock, the same reason auto-compactions inside a turn stay hidden.
+- Model name: painted in the host's primary blue (dark theme `#4FA8FF` / light theme `#1565C0`, the blue used for links and inline code in the conversation, following the resolved theme). The model suffix shows thinking state: ` thinking` for boolean models, a bare effort level for effort-capable ones (e.g. `K3 high`, compact keeps the same ` <effort>` suffix). The status-line payload does not carry it; prefer `config.update` events from the session log — new hosts write `thinkingEffort`, including an initial event at session start; older hosts wrote `thinkingLevel` only after an in-session change. When neither exists, pin the value per session in `~/.kimi-code-hud/thinking-<sessionId>.json`; only when no snapshot exists does it fall back to the `[thinking]` and model tables in `~/.kimi-code/config.toml` and write the snapshot — so another session running `/effort`, which rewrites the global config, no longer changes what this session shows;
+- Goal badge: mirrors the built-in footer's format (`[goal ● <status> · <elapsed> · <turns>]`, `3/10 turns` when a turn budget is set; dot: active blue / blocked amber / paused muted). The status-line payload carries no goal field, so the state is rebuilt from the session log's `goal.create`/`goal.update`/`goal.clear`/`forked` ops in `wire.jsonl` (same incremental scan as TPS); an active goal ticks every second from `wallClockResumedAt`, and the badge disappears once the goal completes or is cleared. While the badge is up, the speed segment keeps throughput only: the `gen` timer, TTFT and the compaction state all hide — the badge already carries the session clock, the same reason auto-compactions inside a turn stay hidden;
+- TPS: only accepts `step.end` samples whose streaming phase lasts at least 250ms and whose calculated rate is no higher than 1000 t/s. It appears after 3 valid samples and uses the median of the latest 5 at most. When the window expires (the last sample is older than 2 minutes) the segment does not disappear: the last median stays visible in muted gray until a fresh window warms up. A model change discards the old median and restarts the warmup. During the very first warmup (no median yet), the latest TTFT shows on its own;
+- Cache: the token-weighted prompt-cache hit rate for the whole session, `Σ inputCacheRead / Σ (inputOther + inputCacheRead + inputCacheCreation)`, accumulated across turns over every main-agent model request (steps with incomplete usage fields are skipped). Because the number is cumulative, it is always the latest complete value and stays bright between prompts instead of flashing gray at each turn start. The segment is omitted only while the session has no data at all. Both tiers show only the percentage; no red/yellow/green quality threshold is applied;
+- Quota: bar + percentage + reset countdown in normal; compact drops the bar and keeps percentage + countdown; the weekly (7d) segment appears only in normal. Quota shows only while the active model is served by the managed Kimi Code subscription (`managed:kimi-code`) — models from third-party providers added via `/provider` hide the whole section (the quota API describes the managed subscription only, not what the session is actually consuming); `/logout` deletes the cache together with the credentials;
+- Badges: `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast), `[manual]` (muted gray placeholder that keeps the left edge aligned) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is derived from the session wire journal's `swarm_mode.enter/exit` lines (the same derivation path as the goal badge — the status-line payload carries no swarm flag); a future `swarmMode` payload field would also activate it;
+- Bars are colored by usage: <60% green, <85% yellow, ≥85% red;
+- Output longer than 200 characters automatically degrades normal→compact.
 
-TPS only accepts `step.end` samples whose streaming phase lasts at least 250ms and whose calculated rate is no higher than 1000 t/s. It appears after 3 valid samples and uses the median of the latest 5 at most. When the window expires (the last sample is older than 2 minutes) the segment does not disappear: the last median stays visible in muted gray until a fresh window warms up. A model change discards the old median and restarts the warmup. During the very first warmup (no median yet), the latest TTFT shows on its own.
-
-Cache is the token-weighted prompt-cache hit rate for the whole session: `Σ inputCacheRead / Σ (inputOther + inputCacheRead + inputCacheCreation)`, accumulated across turns over every main-agent model request (steps with incomplete usage fields are skipped). Because the number is cumulative, it is always the latest complete value and stays bright between prompts instead of flashing gray at each turn start. The segment is omitted only while the session has no data at all. Both tiers show only the percentage. No red/yellow/green quality threshold is applied.
-
-The model name is painted in the host's primary blue (dark theme `#4FA8FF` / light theme `#1565C0`, the blue used for links and inline code in the conversation, following the resolved theme). The model suffix shows thinking state: ` thinking` for boolean models, a bare effort level for effort-capable ones (e.g. `K3 high`, with compact keeping the same ` <effort>` suffix) (the status-line payload does not carry it; prefer `config.update` events from the session log — new hosts write `thinkingEffort`, including an initial event at session start, older hosts wrote `thinkingLevel` only after an in-session change. When neither exists, pin the value per session in `~/.kimi-code-hud/thinking-<sessionId>.json`; only when no snapshot exists does it fall back to the `[thinking]` and model tables in `~/.kimi-code/config.toml` and write the snapshot — so another session running `/effort`, which rewrites the global config, no longer changes what this session shows). Quota segments show bar + percentage + reset countdown in normal; compact drops the bar and keeps percentage + countdown; the weekly (7d) segment appears only in normal. Quota appears only while the active model is served by the managed Kimi Code subscription (`managed:kimi-code`) — models from third-party providers added via `/provider` hide the whole section (the quota API describes the managed subscription only, not what the session is actually consuming), and `/logout` deletes the cache together with the credentials. Badges `[yolo]` (amber, matching the host default), `[auto]` (bright red, for contrast), `[manual]` (muted gray placeholder that keeps the left edge aligned) and `[plan]` (blue) appear at the line start; `[swarm]` (cyan) is derived from the session wire journal's `swarm_mode.enter/exit` lines (the same derivation path as the goal badge — the status-line payload carries no swarm flag); a future `swarmMode` payload field would also activate it. Bars are colored by usage (<60% green, <85% yellow, ≥85% red); lines longer than 200 chars automatically degrade full→normal→compact.
-
-### How it works
+## How it works
 
 Kimi Code's `~/.kimi-code/tui.toml` accepts a `[status_line]` custom command:
 
 - On each refresh (at most once per second) the host pipes a JSON snapshot to stdin (`model`, `cwd`, `gitBranch`, `permissionMode`, `planMode`, `contextTokens`, ...; reads are capped at 1 MiB with a 150ms timeout — past either limit the snapshot is treated as absent and the HUD silently falls back);
 - The **first line** of the command's stdout takes over footer line 1 (line 2 is always drawn by the host as `context: N%` and cannot be taken over);
-- The command must finish within **300ms**; on failure/timeout/empty output the host silently falls back to the built-in layout — so this script degrades silently on every error path and never logs anything. The single deliberate non-zero exit is when the script is the managed copy of a disabled/removed plugin: it strips its own `tui.toml` entry first, then exits non-zero (a bare non-zero exit is not enough — the host replays the last good frame as long as the entry remains), and `/reload-tui` or a new session restores the built-in layout (that is how the plugin on/off switch works).
+- The command must finish within **300ms**; before the first successful frame, failure/timeout/empty output makes the host render the built-in line 1, and once a good frame exists the host keeps replaying it — so this script degrades silently on every error path and never logs anything. The single deliberate non-zero exit is when the script is the managed copy of a disabled/removed plugin: it strips its own `tui.toml` entry first, then exits non-zero (a bare non-zero exit is not enough — the host replays the last good frame as long as the entry remains), and `/reload-tui` or a new session restores the built-in layout (that is how the plugin on/off switch works).
 
 Data sources:
 
@@ -115,11 +127,11 @@ Data sources:
 | TPS / TTFT / Cache / thinking / goal / swarm | incremental parsing of `turn.prompt`, `step.end`, `llm.request`, `turn.cancel`, `config.update`, `goal.*`, `swarm_mode.*` and `full_compaction.*` events in **all** `~/.kimi-code/sessions/*/session_<id>/agents/*/wire.jsonl` of the session (main + every subagent; legacy `ses_<id>` also supported). Samples carry the event timestamp and are bucketed per agent: only the freshest 5 within the last 10 minutes feed each agent's median, so resume continuations, long idle gaps and compactions never mix in stale numbers. With several agents active at once (swarm/subagent runs — a sample within 2 minutes or a request in flight) the segment shows the **fleet total plus head count and per-agent average** (`⚡ 305 t/s (12 agents @25)` — 305 is the sum of the active agents' median speeds, `@25` their mean), and TTFT is the median across active agents so one stuck agent cannot poison the display. While a turn is running (from `turn.prompt` until `end_turn`/`turn.cancel`) the segment swaps TTFT for a live `gen Ns` timer that spans tool calls and steps — how long the command has been working, not just one request (the timer, TTFT and the compaction state all hide while the goal badge is up, leaving throughput only). A between-turns compaction (manual `/compact`, from `full_compaction.begin` until `complete`/`cancel`) takes the same TTFT slot: a live `compacting Ns` ticker, then the dimmed `compacted Ns` holds the slot until the next prompt's `gen` timer takes over — auto-compactions inside a turn are not shown (the `gen` timer covers that span). Cache, thinking, goal and swarm read the main agent's wire only (per-agent byte offsets and session-cumulative Cache counters persist in `~/.kimi-code-hud/metrics-<sessionId>.json`; only new bytes are read each second, with a one-time Cache restoration capped at 1 MiB for old state files) |
 | quota (5h/7d) | `GET https://api.kimi.com/coding/v1/usages`, cached 60s in `~/.kimi-code-hud/quota.json`; when stale, the hot path renders the stale cache and spawns a detached background refresh — never blocking. Rendered and refreshed only while the active model belongs to `managed:kimi-code` (resolved from the session log's `modelAlias` via the `provider` key of the matching `config.toml` model table; undetermined → keep showing); the cache is deleted when the credentials are gone (`/logout`) |
 
-### Privacy & security
+## Privacy & security
 
 The access token is **read locally** from `~/.kimi-code/credentials/kimi-code.json` (Kimi Code CLI renews it; this tool never writes it) and is only used to call the official `api.kimi.com` quota endpoint. It is never written to logs, caches or output.
 
-### FAQ
+## FAQ
 
 **Nothing changed?** Make sure you ran `/reload-tui` or restarted; check `echo '{}' | node bin/kimi-hud.mjs` prints a line.
 
@@ -131,10 +143,17 @@ The access token is **read locally** from `~/.kimi-code/credentials/kimi-code.js
 
 **Where did the Context segment go?** The plugin no longer draws its own Context segment (the full tier was removed along with it) — read the host-drawn line 2 (`context: N% (tokens/max)`), which can never be taken over by a plugin.
 
+## Capabilities & known issues
+
+- [Capabilities](CAPABILITIES.md): coverage of Kimi Code 0.31.0's seven line-1 slots, data sources, and readable-but-unrendered Cache/token/goal/task/Git information;
+- [Known issues](KNOWN_ISSUES.md): open background-task, Git, terminal-width, and stale-frame problems with acceptance criteria.
+
 ## Development
 
 ```bash
 npm test        # node --test
 ```
 
-MIT © 2026 FinbackYu
+## License
+
+Released under the [MIT License](LICENSE). © 2026 FinbackYu

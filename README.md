@@ -1,19 +1,30 @@
 # kimi-code-hud
 
-自定义底部状态栏（HUD）for [Kimi Code CLI](https://www.kimi.com/) — 零依赖 Node.js 脚本，在终端 TUI 底部显示模型、Git 分支、上下文用量、生成速度（TPS/TTFT）、会话缓存命中率与 API 配额。
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![GitHub release](https://img.shields.io/github/v/release/FinbackYu/kimi-code-hud)](https://github.com/FinbackYu/kimi-code-hud/releases)
 
-**[English](README.en.md)**
+[English](README.en.md) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/FinbackYu/kimi-code-hud/issues)
 
-<!-- 效果截图占位 / screenshot placeholder -->
-<!-- ![screenshot](docs/screenshot.png) -->
+![kimi-code-hud 实际效果](docs/media/hud-demo.png)
 
-```
-K3 high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ Cache 92% │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h
-```
+## 什么是 kimi-code-hud
 
----
+自定义底部状态栏（HUD）for [Kimi Code CLI](https://www.kimi.com/) — 零依赖 Node.js 脚本，在终端 TUI 底部显示模型与思考强度、Git 分支、生成速度（TPS / TTFT）、压缩状态、会话缓存命中率与 API 配额。
 
-### 安装
+## 核心特性
+
+- **模型与思考强度** 模型名渲染为宿主主题蓝，后缀跟随 thinking 状态 / effort 强度（如 `K3 max`）；按会话固定取值，其他会话执行 `/effort` 不影响本会话显示。
+- **Git 状态** 目录名 + `git:(branch*)` 脏标记，150ms 超时兜底，永不阻塞渲染。
+- **生成速度** 流式 TPS 中位数 + TTFT；回合进行中换成每秒走字的 `gen Ns` 计时；多 agent 并行时聚合为舰队总速（`⚡ 156 t/s (3 agents @52)`）。
+- **压缩计时** `/compact` 期间实时 `compacting Ns` 走字，完成后暗灰保留 `compacted Ns`，直到下一条 prompt 的 gen 计时接手。
+- **缓存命中率** 跨回合累计的 token 加权 Cache 命中率，回合之间常亮不闪。
+- **API 配额** 5h / 7d 柱条 + 百分比 + 重置倒计时，按用量绿 / 黄 / 红分级；第三方 provider 模型自动隐藏整段。
+- **模式徽章** `[yolo]` / `[auto]` / `[plan]` / `[goal …]` / `[swarm]`，槽位顺序与宿主默认 footer 一致。
+- **深浅双主题** 跟随宿主 `theme` 设置；light 下徽标加粗，柱条换柔和真彩色。
+- **热路径安全** 每次渲染都在 300ms 内完成，所有错误静默降级——不打印日志，绝不阻塞 TUI。
+
+![HUD 状态示例（堆叠展示，实际使用只渲染第一行）](docs/media/hud-states.png)
+
+## 安装
 
 要求 Node.js ≥ 18（用到全局 `fetch`），无 npm 依赖。
 
@@ -40,12 +51,12 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --install
 
 > 两种方式不要混用：插件启用期间，hook 会把 `tui.toml` 指向托管副本。想回到手动安装，先 `/plugins remove kimi-code-hud`，再重新 `--install`。
 
-### 更新
+## 更新
 
 - **重装即更新**：再跑一遍 `/plugins install https://github.com/FinbackYu/kimi-code-hud`。托管副本原地替换，状态栏约 1 秒内自动用上新版本，无需 `/reload-tui` 或新会话。
 - 版本变化见 [CHANGELOG.md](CHANGELOG.md)；稳定版本在 GitHub Releases 发布。
 
-### 临时关闭 / 开启
+## 临时关闭 / 开启
 
 调试时想临时退回内置状态栏，不必 `--uninstall`（那会一并摘掉自愈 hook）：
 
@@ -59,7 +70,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --on
 
 **重启 Kimi Code 或运行 `/reload-tui` 生效。**
 
-### 卸载
+## 卸载
 
 插件方式安装：`/plugins remove kimi-code-hud`（按官方行为托管副本仍留在磁盘上、安装记录被删除；托管副本下次运行时自动清除 `tui.toml` 里的条目，`/reload-tui` 或新会话后回退内置布局）。
 
@@ -71,7 +82,7 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
 
 同样先备份，然后移除 `[status_line]` 中本工具的 `command` 行，并一并移除 `config.toml` 里的自检 hook 块。
 
-### 配置
+## 配置
 
 - `~/.kimi-code-hud/config.json`：`{"layout":"compact"|"normal"}`（默认 `normal`）；`"disabled": true` 是 `--off` 写入的开关旗标（缺省即启用，`--on` 删除该键）
 - 环境变量 `KIMI_HUD_LAYOUT` 优先于配置文件
@@ -100,13 +111,13 @@ normal:  [manual] K3 high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1
 - 柱条按用量分级着色：<60% 绿、<85% 黄、≥85% 红；
 - 输出超过 200 字符自动降级 normal→compact。
 
-### 原理
+## 原理
 
 Kimi Code 的 `~/.kimi-code/tui.toml` 支持 `[status_line]` 自定义命令：
 
 - 每次刷新（每秒最多一次）宿主通过 stdin 传入一个 JSON 快照（model、cwd、gitBranch、permissionMode、planMode、contextTokens 等字段；读取上限 1 MiB、150ms 超时，超限按无快照静默回退）；
 - 命令 stdout 的**第一行**接管底部 Footer 第一行（第二行固定由宿主绘制 `context: N%`，插件无法接管）；
-- 命令须在 **300ms** 内完成，失败/超时/空输出时宿主静默回退内置布局——所以本脚本对所有错误静默降级、绝不打印日志；唯一的非零退出是有意为之：当脚本是"已禁用/已移除插件的托管副本"时，它会先自我清除 `tui.toml` 里的条目再非零退出（宿主在条目仍存在时会一直重播最后一帧，仅非零退出不足以交还状态栏），`/reload-tui` 或新会话后回退内置布局（插件开关即由此实现）。
+- 命令须在 **300ms** 内完成；首次尚无成功输出时，失败/超时/空输出会让宿主渲染内置第一行，已有成功帧后则继续重播上一帧——所以本脚本对所有错误静默降级、绝不打印日志；唯一的非零退出是有意为之：当脚本是"已禁用/已移除插件的托管副本"时，它会先自我清除 `tui.toml` 里的条目再非零退出（宿主在条目仍存在时会一直重播最后一帧，仅非零退出不足以交还状态栏），`/reload-tui` 或新会话后回退内置布局（插件开关即由此实现）。
 
 三段数据来源：
 
@@ -116,11 +127,11 @@ Kimi Code 的 `~/.kimi-code/tui.toml` 支持 `[status_line]` 自定义命令：
 | TPS / TTFT / Cache / thinking / goal / swarm | 增量解析会话目录下**所有** `~/.kimi-code/sessions/*/session_<id>/agents/*/wire.jsonl`（main + 全部 subagent；旧版 `ses_<id>` 前缀兼容）的 `turn.prompt`、`step.end`、`llm.request`、`turn.cancel`、`config.update`、`goal.*`、`swarm_mode.*` 与 `full_compaction.*` 事件。速度样本带事件时间戳并按 agent 分桶，只取最近 10 分钟内的最多 5 个做中位数——resume 接续、长时间空闲、compact 之后不会混入陈旧样本。多个 agent 同时活跃（swarm/subagent，2 分钟内有样本或有请求在飞）时显示**舰队总速度 + agent 数 + 平均速度**（`⚡ 305 t/s (12 agents @25)`：305 是各活跃 agent 中位速度的合计，`@25` 是其均值），TTFT 取活跃 agent 的中位数（单个卡住的 agent 不会污染显示）。回合进行中（从 `turn.prompt` 到 `end_turn`/`turn.cancel`）速度段把 TTFT 换成每秒走字的 `gen Ns` 工作计时——跨工具调用与多个 step 累计，回答「这条命令一共跑了多久」（goal 徽章显示期间该计时、TTFT 与压缩状态一并隐藏，只留速度）。回合之外的上下文压缩（手动 `/compact`，从 `full_compaction.begin` 到 `complete`/`cancel`）同样占 TTFT 槽位：实时 `compacting Ns` 走字，完成后暗灰保留 `compacted Ns` 直到下一条 prompt 的 `gen` 计时接手；回合内触发的自动压缩不显示（该时段由 `gen` 计时覆盖）。Cache、thinking、goal、swarm 只取主 agent wire（per-agent byte offset 与会话累计 Cache 计数存 `~/.kimi-code-hud/metrics-<sessionId>.json`，每秒只读新增字节；旧状态仅做一次最多 1 MiB 的 Cache 回填） |
 | 配额（5h/7d） | `GET https://api.kimi.com/coding/v1/usages`，60 秒 TTL 缓存于 `~/.kimi-code-hud/quota.json`，过期时热路径用过期缓存渲染并 spawn 后台刷新，绝不阻塞。仅当前模型属 `managed:kimi-code`（按会话日志的 `modelAlias` → `config.toml` 模型表的 `provider` 键判定，判不出来时保持显示）时渲染与刷新；凭证缺失（`/logout`）时缓存一并删除 |
 
-### 隐私与安全
+## 隐私与安全
 
 access token 仅从 `~/.kimi-code/credentials/kimi-code.json` **本地读取**（Kimi Code CLI 自己负责续期，本工具只读不写），仅用于请求官方 `api.kimi.com` 配额接口，不写入任何日志、缓存或输出。
 
-### FAQ
+## FAQ
 
 **状态栏没变化？** 确认 `/reload-tui` 或重启过；确认 `node <path>` 直接 `echo '{}' | node bin/kimi-hud.mjs` 有输出。
 
@@ -132,10 +143,17 @@ access token 仅从 `~/.kimi-code/credentials/kimi-code.json` **本地读取**�
 
 **Context 段去哪了？** 插件不再自绘 Context 段（full 档已一并移除），直接看宿主第二行的 `context: N% (tokens/max)`（该行永远由宿主绘制，插件无法接管）。
 
-## Development
+## 能力与已知问题
+
+- [能力清单](CAPABILITIES.md)：Kimi Code 0.31.0 七个第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
+- [已知问题](KNOWN_ISSUES.md)：后台任务、Git、终端宽度与失败帧等待处理问题及验收条件。
+
+## 本地开发
 
 ```bash
 npm test        # node --test
 ```
 
-MIT © 2026 FinbackYu
+## 许可证
+
+基于 [MIT](LICENSE) 协议发布。© 2026 FinbackYu
