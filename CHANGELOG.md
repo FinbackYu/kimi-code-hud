@@ -6,6 +6,15 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-02
+
+### Added
+
+- Label fleet head counts "main+N" whenever the main agent feeds the figure
+  (e.g. `⚡ 465 t/s (main+4 @93)`), so the count can't be misread as a pure
+  subagent figure while a swarm runs; it settles back to subagents only once
+  the idle main agent ages out of the activity window.
+
 ## [0.6.2] - 2026-08-02
 
 ### Added
@@ -229,7 +238,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.3
 [0.6.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.2
 [0.6.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.1
 [0.6.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.0
