@@ -216,10 +216,20 @@ function speedSegment({ layout, metrics, color, now, C }) {
   const turnStart = metrics && typeof metrics.turnStartedAt === 'number'
     ? metrics.turnStartedAt
     : null;
+  // Live subagents: every active agent except main. A swarm that has run
+  // down to its last member is still a fleet, so fleet style holds while at
+  // least one subagent lives; once only main remains it falls back to solo.
+  const liveSubagents =
+    metrics && typeof metrics.activeAgents === 'number'
+      ? metrics.activeAgents - (metrics.mainActive === true ? 1 : 0)
+      : 0;
   // The parenthetical head count must match the agents actually feeding the
   // total/average: an agent still waiting on its first step counts as active
   // (gen ticker) but has no speed reading yet (tpsAgents).
-  const multi = metrics && typeof metrics.tpsTotal === 'number' && metrics.tpsAgents > 1;
+  const multi =
+    metrics &&
+    typeof metrics.tpsAgents === 'number' &&
+    (metrics.tpsAgents > 1 || (metrics.swarmMode === true && liveSubagents >= 1 && metrics.tpsAgents >= 1));
   const generatedFor =
     !goalLive && turnStart !== null ? formatElapsed(now - turnStart) : null;
   const compacting =
@@ -259,7 +269,7 @@ function speedSegment({ layout, metrics, color, now, C }) {
     return paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`);
   }
   if (!goalLive && metrics && turnStart !== null) {
-    const agents = metrics.activeAgents > 1
+    const agents = metrics.activeAgents > 1 || (metrics.swarmMode === true && liveSubagents >= 1)
       ? ` (${fleetLabel(metrics.activeAgents, metrics.mainActive)})`
       : '';
     return `⚡ gen ${generatedFor}${agents}`;
@@ -275,13 +285,14 @@ function speedSegment({ layout, metrics, color, now, C }) {
 /**
  * Fleet head-count label. The main agent is named explicitly whenever it is
  * part of the figure, so "main+4 agents" can't be misread as a pure subagent
- * count while a swarm is running.
+ * count while a swarm is running. A lone member is singular ("1 agent").
  * @param {number} count agents feeding the figure
  * @param {boolean} [includesMain]
  * @returns {string}
  */
 function fleetLabel(count, includesMain) {
-  return includesMain === true ? `main+${count - 1} agents` : `${count} agents`;
+  if (includesMain === true) return `main+${count - 1} agents`;
+  return `${count} ${count === 1 ? 'agent' : 'agents'}`;
 }
 
 function cacheSegment({ metrics }) {
