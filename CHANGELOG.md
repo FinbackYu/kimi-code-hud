@@ -6,6 +6,21 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-02
+
+### Added
+
+- Color the compact-layout quota percentage by usage level (yellow ≥60%,
+  red ≥85%) so it takes over the level signal from the missing bar; the
+  comfortable green level stays default-colored.
+
+### Fixed
+
+- Drop subagents from the fleet count the moment their turn ends instead of
+  waiting for the two-minute activity window to expire.
+- Keep the quota cache on a 401/403 while a refresh_token remains, so the
+  5h/7d segment no longer disappears during idle access-token expiry.
+
 ### Changed
 
 - Clarify in both READMEs that the 5h/7d quota windows represent Kimi managed
@@ -214,7 +229,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.2
 [0.6.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.1
 [0.6.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.0
 [0.5.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.5.1
