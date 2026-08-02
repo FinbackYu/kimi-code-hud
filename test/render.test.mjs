@@ -281,6 +281,30 @@ test('light theme tones the quota bar down to calmer truecolor hues', () => {
   assert.ok(!light.includes('\x1b[31m'));
 });
 
+test('compact layout colors the quota percentage by level, green stays default', () => {
+  const quotaAt = (used) => ({
+    weekly: null,
+    windows: [{ label: '5h', used, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
+  });
+  // Green level (<60%): no color — comfortable usage shouldn't stand out.
+  const [green] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAt(31) }));
+  assert.ok(green.includes('5h 31% ~2h18m'));
+  // Yellow (>=60%) and red (>=85%) paint the bare percentage, taking over
+  // the level signal the compact layout's missing bar would carry.
+  const [yellow] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAt(70) }));
+  assert.ok(yellow.includes('5h \x1b[33m70%\x1b[0m ~2h18m'));
+  const [red] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAt(90) }));
+  assert.ok(red.includes('5h \x1b[31m90%\x1b[0m ~2h18m'));
+  // Light theme uses its calmer truecolor hues; colors off stays plain.
+  const [light] = renderHud(baseCtx({
+    layout: 'compact', color: true, theme: 'light', quota: quotaAt(90),
+  }));
+  assert.ok(light.includes('5h \x1b[38;2;185;28;28m90%\x1b[0m ~2h18m'));
+  const [plain] = renderHud(baseCtx({ layout: 'compact', quota: quotaAt(90) }));
+  assert.ok(plain.includes('5h 90% ~2h18m'));
+  assert.ok(!plain.includes('\x1b['));
+});
+
 test('swarm badge renders in accent cyan when payload exposes swarmMode', () => {
   const [line] = renderHud(baseCtx({
     color: true,

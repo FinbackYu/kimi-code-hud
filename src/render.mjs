@@ -63,6 +63,15 @@ function levelColor(frac, C = DARK) {
   return C.barGreen;
 }
 
+/** Compact-mode percentage color: same 60/85% thresholds as the bar, but the
+ * comfortable green level stays default-colored — a bare percentage only
+ * paints when usage is actually worth attention. */
+function numberLevelColor(frac, C) {
+  if (frac >= 0.85) return C.barRed;
+  if (frac >= 0.6) return C.barYellow;
+  return null;
+}
+
 /**
  * Render a 10-cell progress bar for a 0..1 fraction.
  * @param {number} frac
@@ -277,9 +286,16 @@ function quotaSegment({ layout, quota, color, now, C }) {
   const parts = [];
   for (const window of quota.windows || []) {
     const fraction = window.used / window.limit;
-    let text = layout === 'compact'
-      ? `${window.label} ${pctOf(window.used, window.limit)}%`
-      : `${window.label} ${bar(fraction, color, C)} ${pctOf(window.used, window.limit)}%`;
+    const pct = `${pctOf(window.used, window.limit)}%`;
+    // Compact drops the bar, so the percentage itself takes over the
+    // usage-level signal the bar color carries in the normal layout.
+    let text;
+    if (layout === 'compact') {
+      const level = numberLevelColor(fraction, C);
+      text = `${window.label} ${level ? colorize(color, level, pct) : pct}`;
+    } else {
+      text = `${window.label} ${bar(fraction, color, C)} ${pct}`;
+    }
     const countdown = formatCountdown(window.resetAt, now);
     if (countdown) text += ` ${countdown}`;
     parts.push(text);
