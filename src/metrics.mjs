@@ -373,7 +373,10 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * MAX_SAMPLES within SAMPLE_WINDOW_MS feed an agent's median, so resume
  * continuations, long idle gaps and compactions never mix stale numbers in.
  * Agents with a request in flight or a sample newer than ACTIVE_WINDOW_MS
- * count as active: with several active (swarm/subagent runs) the result
+ * count as active, except that a subagent whose turn has ended drops out
+ * immediately (its wire's closing end_turn step.end settles it, so finished
+ * swarm members never linger in the head count): with several active
+ * (swarm/subagent runs) the result
  * carries the fleet total (`tpsTotal`), the per-agent average (`tps`) and
  * the head counts, and TTFT is the median across active agents so one
  * stuck agent cannot poison the display. `activeAgents` counts every live

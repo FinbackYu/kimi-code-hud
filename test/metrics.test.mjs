@@ -256,7 +256,9 @@ test('processWireChunk subagent turn.ended closes only that agent generation', (
     'agent-0',
   );
   assert.equal(state.agents['agent-0'].lastStepEndAt, EVENT_TIME + 500);
-  assert.equal(state.agents['agent-0'].lastTurnEndAt, null);
+  // The turn-end marker is per agent: agent-0's turn.ended settles its own
+  // bucket (so the fleet summary can drop it) without touching main's clock.
+  assert.equal(state.agents['agent-0'].lastTurnEndAt, EVENT_TIME + 500);
   assert.equal(state.agents.main.lastTurnEndAt, null);
 });
 
@@ -535,7 +537,7 @@ test('getMetrics modelAlias change resets every agent bucket', () => {
   );
   fs.writeFileSync(
     wires['agent-0'],
-    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100 }) + '\n',
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
   );
   assert.equal(getMetrics(id, opts).tpsTotal, 700); // fleet of 2
 
@@ -888,11 +890,11 @@ test('getMetrics aggregates an active fleet: total, average, count, TTFT median'
   );
   fs.writeFileSync(
     wires['agent-0'],
-    stepEnd({ output: 300, streamMs: 1000, ttftMs: 600 }) + '\n',
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 600, finishReason: 'tool_use' }) + '\n',
   );
   fs.writeFileSync(
     wires['agent-1'],
-    stepEnd({ output: 500, streamMs: 1000, ttftMs: 600_000 }) + '\n', // stuck retry
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 600_000, finishReason: 'tool_use' }) + '\n', // stuck retry
   );
   const m = getMetrics(id, opts);
   assert.equal(m.activeAgents, 3);
@@ -916,7 +918,7 @@ test('getMetrics fleet members contribute speed with a single fresh sample', () 
   );
   fs.writeFileSync(
     wires['agent-0'],
-    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100 }) + '\n',
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
   );
   const m = getMetrics(id, opts);
   assert.equal(m.activeAgents, 2);
@@ -937,7 +939,7 @@ test('getMetrics fleet speed head count excludes agents without samples', () => 
   );
   fs.writeFileSync(
     wires['agent-0'],
-    stepEnd({ output: 62, streamMs: 1000, ttftMs: 100 }) + '\n',
+    stepEnd({ output: 62, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
   );
   fs.writeFileSync(wires['agent-1'], llmRequest() + '\n'); // generating, no sample
   const m = getMetrics(id, opts);
@@ -976,7 +978,7 @@ test('fleet-to-solo fallback uses the remaining agent median', () => {
   fs.writeFileSync(
     wires['agent-0'],
     [0, 1, 2].map((n) => stepEnd({
-      output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n,
+      output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n, finishReason: 'tool_use',
     })).join('\n') + '\n',
   );
   const fleet = getMetrics(id, {
@@ -995,6 +997,70 @@ test('fleet-to-solo fallback uses the remaining agent median', () => {
   assert.equal(solo.activeAgents, 1);
   assert.equal(solo.tps, 10);
   assert.equal(solo.tpsStale, true);
+});
+
+test('getMetrics drops a subagent from the fleet the moment its turn ends', () => {
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0', 'agent-1'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-1'],
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  let m = getMetrics(id, opts);
+  assert.equal(m.activeAgents, 3);
+  assert.equal(m.tpsTotal, 900);
+
+  // A subagent wire never carries turn.ended; its closing end_turn step.end
+  // settles it, so it leaves the head count and stops feeding the
+  // total/average immediately instead of lingering on the recency window.
+  fs.appendFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000 }) + '\n',
+  );
+  m = getMetrics(id, opts);
+  assert.equal(m.activeAgents, 2);
+  assert.equal(m.tpsAgents, 2);
+  assert.equal(m.tpsTotal, 600);
+  assert.equal(m.tps, 300);
+});
+
+test('getMetrics re-activates a settled subagent when a later request arrives', () => {
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n' +
+      stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000 }) + '\n',
+  );
+  // end_turn settles agent-0: only main stays active (tpsTotal/tpsAgents are
+  // fleet-only figures, so a single active agent reports tpsTotal null).
+  let m = getMetrics(id, opts);
+  assert.equal(m.activeAgents, 1);
+  assert.equal(m.tpsAgents, 0);
+  assert.equal(m.tpsTotal, null);
+
+  // A resumed run (resume_agent_ids) starts a fresh request, so the subagent
+  // re-joins the fleet even before its next sample lands.
+  fs.appendFileSync(wires['agent-0'], llmRequest({ time: EVENT_TIME + 2000 }) + '\n');
+  m = getMetrics(id, opts);
+  assert.equal(m.activeAgents, 2);
+  assert.equal(m.tpsAgents, 2);
+  assert.equal(m.tpsTotal, 600);
+  assert.equal(m.tps, 300);
 });
 
 test('getMetrics solo display keeps the 3-sample warmup gate', () => {

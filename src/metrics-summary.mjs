@@ -39,7 +39,16 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
     const recent =
       fresh.length > 0 &&
       fresh[fresh.length - 1].t >= now - ACTIVE_WINDOW_MS;
-    if (!generating && !recent) continue;
+    // A subagent whose turn has ended (closing end_turn step.end, turn.ended
+    // or an active turn.cancel) leaves the fleet immediately; the recency
+    // window only keeps genuinely mid-turn agents counted. Main is exempt so
+    // its just-finished speed survives until the stale TTL as before.
+    const settled =
+      name !== 'main' &&
+      agent.lastTurnEndAt !== null &&
+      (fresh.length === 0 || agent.lastTurnEndAt >= fresh[fresh.length - 1].t) &&
+      (agent.lastRequestAt === null || agent.lastTurnEndAt >= agent.lastRequestAt);
+    if (!generating && (!recent || settled)) continue;
     activeAgents += 1;
     soleActive = { bucket: agent, fresh };
     if (speed !== null) activeSpeeds.push(speed);
