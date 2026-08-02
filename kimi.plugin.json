@@ -1,6 +1,6 @@
 {
   "name": "kimi-code-hud",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Zero-dependency HUD status line for Kimi Code CLI: model, thinking, git, context, token speed, cache hit rate and quota.",
   "keywords": [
     "kimi-code",
