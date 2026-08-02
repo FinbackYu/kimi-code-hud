@@ -141,11 +141,12 @@ function response(status, body = null) {
   };
 }
 
-test('refreshQuota clears stale cache on 401 and 403', async () => {
+test('refreshQuota clears stale cache on 401 and 403 once the refresh_token is gone', async () => {
   for (const status of [401, 403]) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-auth-'));
     const credentialsPath = path.join(dir, 'credentials.json');
     const cachePath = path.join(dir, 'quota.json');
+    // No refresh_token: the /logout shape, so the cache must go too.
     fs.writeFileSync(credentialsPath, JSON.stringify({ access_token: 'redacted' }));
     writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
     const ok = await refreshQuota({
@@ -156,6 +157,30 @@ test('refreshQuota clears stale cache on 401 and 403', async () => {
     });
     assert.equal(ok, false);
     assert.equal(fs.existsSync(cachePath), false);
+  }
+});
+
+test('refreshQuota keeps the stale cache on 401/403 while a refresh_token remains', async () => {
+  // An idle session's on-disk access_token is often expired (the CLI refreshes
+  // lazily), which earns the same 401 as /logout. With a refresh_token present
+  // the account is still logged in, so the last good cache must survive.
+  for (const status of [401, 403]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-expired-'));
+    const credentialsPath = path.join(dir, 'credentials.json');
+    const cachePath = path.join(dir, 'quota.json');
+    fs.writeFileSync(
+      credentialsPath,
+      JSON.stringify({ access_token: 'redacted', refresh_token: 'redacted' }),
+    );
+    writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+    const ok = await refreshQuota({
+      credentialsPath,
+      cachePath,
+      lockPath: path.join(dir, 'refresh.lock'),
+      fetchImpl: async () => response(status),
+    });
+    assert.equal(ok, false);
+    assert.notEqual(readQuotaCache(cachePath), null);
   }
 });
 

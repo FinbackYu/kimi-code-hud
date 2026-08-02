@@ -326,7 +326,9 @@ export async function requestQuota({
  * Completely silent on success and on failure; never writes to stdout/stderr.
  * When the credentials are gone or carry no token (/logout, corrupt file),
  * the stale cache is deleted along the way so the HUD stops rendering quota
- * for a logged-out account.
+ * for a logged-out account. A 401/403 with a refresh_token still present is
+ * only an expired access_token — the cache survives until the CLI's lazy
+ * refresh lets the next attempt succeed.
  * @param {object} [opts]
  * @returns {Promise<boolean>} true when the cache was updated
  */
@@ -353,7 +355,16 @@ export async function refreshQuota({
     }
     const result = await requestQuota({ token, url, timeoutMs, fetchImpl });
     if (result.status === QUOTA_RESULT.UNAUTHORIZED) {
-      try { fs.unlinkSync(cachePath); } catch { /* no cache to drop */ }
+      // 401/403 only means /logout when the refresh_token is gone too (the
+      // CLI persists both as empty strings then). An expired access_token
+      // earns the same 401, but the CLI refreshes lazily — no background
+      // loop — so an idle session's on-disk token is often stale while the
+      // account is still logged in; keep the last good cache for that case.
+      const canRefresh =
+        cred && typeof cred.refresh_token === 'string' && cred.refresh_token.length > 0;
+      if (!canRefresh) {
+        try { fs.unlinkSync(cachePath); } catch { /* no cache to drop */ }
+      }
       return false;
     }
     if (result.status !== QUOTA_RESULT.SUCCESS) return false;
