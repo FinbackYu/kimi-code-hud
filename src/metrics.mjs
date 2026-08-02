@@ -382,7 +382,10 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * stuck agent cannot poison the display. `activeAgents` counts every live
  * agent (the gen-ticker head count); `tpsAgents` counts only those with a
  * fresh speed reading, so an agent still waiting on its first step never
- * inflates the fleet figure and `tpsTotal ≈ tpsAgents × tps` always holds. A single active
+ * inflates the fleet figure and `tpsTotal ≈ tpsAgents × tps` always holds;
+ * `mainActive`/`mainSpeed` flag whether the main agent feeds those counts,
+ * so the renderer can label the head count "main+N" instead of letting it
+ * pass as a pure subagent figure. A single active
  * agent keeps the hardened MIN_SAMPLES gate; an idle session falls back to
  * the last full-window median (flagged stale). `turnStartedAt` anchors the
  * live timer at the user's latest prompt (turn.prompt) until the turn ends
@@ -397,7 +400,7 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * @param {object} [opts]
  * @param {number} [opts.deadline] absolute `performance.now()` deadline
  * @param {number} [opts.readBudgetBytes] total wire bytes allowed this frame
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
@@ -409,8 +412,8 @@ export function getMetrics(sessionId, {
   const empty = {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
     modelAlias: null, swarmMode: false, cache: null,
-    tpsTotal: null, tpsAgents: 0, activeAgents: 0, turnStartedAt: null,
-    compactingSince: null, compactionMs: null,
+    tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
+    turnStartedAt: null, compactingSince: null, compactionMs: null,
   };
   try {
     if (!sessionId) return empty;

@@ -407,6 +407,24 @@ test('fleet speed shows total, head count and per-agent average', () => {
   assert.ok(!colored.includes('\x1b[90m⚡'));
 });
 
+test('fleet head count names the main agent when it feeds the figures', () => {
+  // While the main agent also has fresh samples (it just launched the swarm,
+  // or is streaming alongside it), a bare "12 agents" would read as
+  // "12 subagents" — label it "main+11" instead.
+  const metrics = {
+    tps: 25, tpsTotal: 305, tpsAgents: 12, activeAgents: 12,
+    mainSpeed: true, mainActive: true, ttftMs: 1300,
+  };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(normal.includes('⚡ 305 t/s (main+11 agents @25) · TTFT 1.3s'));
+  const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
+  assert.ok(compact.includes('⚡ 305 (main+11@25)'));
+  // The gen ticker head count follows the same labeling.
+  const ticking = { tps: null, ttftMs: null, turnStartedAt: NOW - 3000, activeAgents: 106, mainActive: true };
+  const [line] = renderHud(baseCtx({ layout: 'normal', metrics: ticking }));
+  assert.ok(line.includes('⚡ gen 3s (main+105 agents)'));
+});
+
 test('fleet speed head count matches the agents feeding the total', () => {
   // An agent with a request in flight but no speed sample yet stays in
   // activeAgents but not in the parenthetical count.
