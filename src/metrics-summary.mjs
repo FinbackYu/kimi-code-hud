@@ -13,6 +13,8 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
   const activeSpeeds = [];
   const activeTtfts = [];
   let activeAgents = 0;
+  let mainActive = false;
+  let mainSpeed = false;
   let soleActive = null;
   let changed = false;
   const names = agentNames && agentNames.size ? [...agentNames] : Object.keys(state.agents);
@@ -51,7 +53,11 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
     if (!generating && (!recent || settled)) continue;
     activeAgents += 1;
     soleActive = { bucket: agent, fresh };
-    if (speed !== null) activeSpeeds.push(speed);
+    if (name === 'main') mainActive = true;
+    if (speed !== null) {
+      activeSpeeds.push(speed);
+      if (name === 'main') mainSpeed = true;
+    }
     if (
       agent.lastTtftMs !== null &&
       agent.lastSampleAt !== null &&
@@ -134,6 +140,11 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       tpsTotal,
       tpsAgents,
       activeAgents,
+      // Whether the main agent is part of the fleet figures — the renderer
+      // labels such head counts "main+N" so they can't be misread as a pure
+      // subagent count while a swarm is running.
+      mainActive,
+      mainSpeed,
       turnStartedAt,
       compactingSince,
       compactionMs,

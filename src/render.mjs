@@ -236,8 +236,11 @@ function speedSegment({ layout, metrics, color, now, C }) {
       metrics.tpsStale === true ? colorize(color, C.muted, text) : text
     );
     if (layout === 'compact') {
+      const count = multi && metrics.mainSpeed === true
+        ? `main+${metrics.tpsAgents - 1}`
+        : metrics.tpsAgents;
       const head = multi
-        ? `⚡ ${Math.round(metrics.tpsTotal)} (${metrics.tpsAgents}@${average})`
+        ? `⚡ ${Math.round(metrics.tpsTotal)} (${count}@${average})`
         : `⚡ ${average}`;
       const live = generatedFor
         ? `gen ${generatedFor}`
@@ -245,7 +248,7 @@ function speedSegment({ layout, metrics, color, now, C }) {
       return live ? `${paint(head)} ${live}` : paint(head);
     }
     const base = multi
-      ? `⚡ ${Math.round(metrics.tpsTotal)} t/s (${metrics.tpsAgents} agents @${average})`
+      ? `⚡ ${Math.round(metrics.tpsTotal)} t/s (${fleetLabel(metrics.tpsAgents, metrics.mainSpeed)} @${average})`
       : `⚡ ${average} t/s`;
     if (generatedFor) return `${paint(base)} · gen ${generatedFor}`;
     if (compacting) return `${paint(base)} · compacting ${compacting}`;
@@ -256,7 +259,9 @@ function speedSegment({ layout, metrics, color, now, C }) {
     return paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`);
   }
   if (!goalLive && metrics && turnStart !== null) {
-    const agents = metrics.activeAgents > 1 ? ` (${metrics.activeAgents} agents)` : '';
+    const agents = metrics.activeAgents > 1
+      ? ` (${fleetLabel(metrics.activeAgents, metrics.mainActive)})`
+      : '';
     return `⚡ gen ${generatedFor}${agents}`;
   }
   if (metrics && compacting) return `compacting ${compacting}`;
@@ -265,6 +270,18 @@ function speedSegment({ layout, metrics, color, now, C }) {
   }
   const ttft = metrics && !goalLive ? formatTtft(metrics.ttftMs) : null;
   return ttft ? `TTFT ${ttft}` : null;
+}
+
+/**
+ * Fleet head-count label. The main agent is named explicitly whenever it is
+ * part of the figure, so "main+4 agents" can't be misread as a pure subagent
+ * count while a swarm is running.
+ * @param {number} count agents feeding the figure
+ * @param {boolean} [includesMain]
+ * @returns {string}
+ */
+function fleetLabel(count, includesMain) {
+  return includesMain === true ? `main+${count - 1} agents` : `${count} agents`;
 }
 
 function cacheSegment({ metrics }) {
@@ -334,7 +351,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, tpsAgents, activeAgents, turnStartedAt, compactingSince, compactionMs}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] normal|compact
  * @param {boolean} [ctx.color]

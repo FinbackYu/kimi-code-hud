@@ -904,6 +904,31 @@ test('getMetrics aggregates an active fleet: total, average, count, TTFT median'
   assert.equal(m.tpsStale, false);
   // TTFT is the median across active agents: the stuck one cannot poison it.
   assert.equal(m.ttftMs, 600);
+  // The main agent feeds the figures, so the renderer labels them "main+N".
+  assert.equal(m.mainActive, true);
+  assert.equal(m.mainSpeed, true);
+});
+
+test('getMetrics fleet of subagents only leaves the main flags off', () => {
+  // Mid-swarm the main agent waits without producing samples, so the head
+  // count is a pure subagent figure and needs no "main+" label.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0', 'agent-1'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-1'],
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  const m = getMetrics(id, opts);
+  assert.equal(m.activeAgents, 2);
+  assert.equal(m.tpsAgents, 2);
+  assert.equal(m.tpsTotal, 800);
+  assert.equal(m.mainActive, false);
+  assert.equal(m.mainSpeed, false);
 });
 
 test('getMetrics fleet members contribute speed with a single fresh sample', () => {
@@ -1300,8 +1325,8 @@ test('getMetrics returns nulls for unknown sessions', () => {
   assert.deepEqual(m, {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
     modelAlias: null, swarmMode: false, cache: null,
-    tpsTotal: null, tpsAgents: 0, activeAgents: 0, turnStartedAt: null,
-    compactingSince: null, compactionMs: null,
+    tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
+    turnStartedAt: null, compactingSince: null, compactionMs: null,
   });
 });
 
