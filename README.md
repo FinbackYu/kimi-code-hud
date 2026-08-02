@@ -8,7 +8,7 @@
 
 ## 什么是 kimi-code-hud
 
-自定义底部状态栏（HUD）for [Kimi Code CLI](https://www.kimi.com/) — 零依赖 Node.js 脚本，在终端 TUI 底部显示模型与思考强度、Git 分支、生成速度（TPS / TTFT）、压缩状态、会话缓存命中率与 API 配额。
+自定义底部状态栏（HUD）for [Kimi Code CLI](https://www.kimi.com/) — 零依赖 Node.js 脚本，在终端 TUI 底部显示模型与思考强度、Git 分支、生成速度（TPS / TTFT）、压缩状态、会话缓存命中率与 Kimi 托管订阅额度。
 
 ## 核心特性
 
@@ -17,7 +17,7 @@
 - **生成速度** 流式 TPS 中位数 + TTFT；回合进行中换成每秒走字的 `gen Ns` 计时；多 agent 并行时聚合为舰队总速（`⚡ 156 t/s (3 agents @52)`）。
 - **压缩计时** `/compact` 期间实时 `compacting Ns` 走字，完成后暗灰保留 `compacted Ns`，直到下一条 prompt 的 gen 计时接手。
 - **缓存命中率** 跨回合累计的 token 加权 Cache 命中率，回合之间常亮不闪。
-- **API 配额** 5h / 7d 柱条 + 百分比 + 重置倒计时，按用量绿 / 黄 / 红分级；第三方 provider 模型自动隐藏整段。
+- **Kimi 托管订阅额度** 5h / 7d 柱条 + 百分比 + 重置倒计时，按用量绿 / 黄 / 红分级；第三方 provider 模型自动隐藏整段，不代表 API 余额或费用。
 - **模式徽章** `[yolo]` / `[auto]` / `[plan]` / `[goal …]` / `[swarm]`，槽位顺序与宿主默认 footer 一致。
 - **深浅双主题** 跟随宿主 `theme` 设置；light 下徽标加粗，柱条换柔和真彩色。
 - **热路径安全** 每次渲染都在 300ms 内完成，所有错误静默降级——不打印日志，绝不阻塞 TUI。
