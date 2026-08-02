@@ -1,14 +1,19 @@
 import { normAgent } from './metrics-agent.mjs';
 
-/** Fold the main user-turn clock without touching TPS samples. */
+/**
+ * Fold the user-turn clock without touching TPS samples. The prompt anchor is
+ * main-only (the footer turn timer belongs to the user), but the turn-end
+ * marker is kept per agent: a subagent's wire never carries `turn.ended`, so
+ * its closing `end_turn` step.end is what lets the fleet summary drop it the
+ * moment it finishes instead of waiting out the recency window.
+ */
 export function applyTurnRow(state, row, agent = 'main') {
-  if (agent !== 'main') return;
   if (!state.agents || typeof state.agents !== 'object') state.agents = {};
-  const bucket = normAgent(state.agents.main);
-  state.agents.main = bucket;
+  const bucket = normAgent(state.agents[agent]);
+  state.agents[agent] = bucket;
   const rowTime = Number.isFinite(row?.time) && row.time >= 0 ? row.time : null;
   if (rowTime === null) return;
-  if (row?.type === 'turn.prompt') {
+  if (agent === 'main' && row?.type === 'turn.prompt') {
     if (bucket.lastTurnPromptAt === null || rowTime > bucket.lastTurnPromptAt) {
       bucket.lastTurnPromptAt = rowTime;
     }
