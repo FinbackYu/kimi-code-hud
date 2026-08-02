@@ -8,7 +8,7 @@
 
 ## What is kimi-code-hud
 
-A zero-dependency custom status line (HUD) for [Kimi Code CLI](https://www.kimi.com/) — shows model & thinking effort, git branch, generation speed (TPS / TTFT), compaction state, session cache hit rate and API quota in the TUI footer.
+A zero-dependency custom status line (HUD) for [Kimi Code CLI](https://www.kimi.com/) — shows model & thinking effort, git branch, generation speed (TPS / TTFT), compaction state, session cache hit rate and Kimi managed-subscription usage in the TUI footer.
 
 ## Key features
 
@@ -17,7 +17,7 @@ A zero-dependency custom status line (HUD) for [Kimi Code CLI](https://www.kimi.
 - **Generation speed.** Streaming TPS median plus TTFT; while a turn runs, a live `gen Ns` timer takes over the slot; parallel agents aggregate into a fleet total (`⚡ 156 t/s (3 agents @52)`).
 - **Compaction timer.** A live `compacting Ns` ticker during `/compact`, then a dimmed `compacted Ns` holds the slot until the next prompt's `gen` timer takes over.
 - **Cache hit rate.** Token-weighted and accumulated across turns — stays bright between prompts instead of flashing gray.
-- **API quota.** 5h / 7d bars with percentage and reset countdown, colored green / yellow / red by usage; the whole section hides automatically for third-party provider models.
+- **Kimi managed-subscription usage.** 5h / 7d bars with percentage and reset countdown, colored green / yellow / red by usage; the whole section hides automatically for third-party provider models and does not represent API balance or spend.
 - **Mode badges.** `[yolo]` / `[auto]` / `[plan]` / `[goal …]` / `[swarm]`, in the same slot order as the built-in footer.
 - **Dark & light themes.** Follows the host `theme` setting; light mode bolds badges and softens the bar colors.
 - **Hot-path safe.** Every render finishes within 300ms and all errors degrade silently — no logs, never blocking the TUI.

@@ -6,6 +6,13 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Clarify in both READMEs that the 5h/7d quota windows represent Kimi managed
+  subscription usage, not general API balance or spend.
+- Point contributor guidance at the canonical capability and known-issue
+  documents so future footer changes update the right knowledge layer.
+
 ## [0.6.1] - 2026-08-02
 
 ### Added
