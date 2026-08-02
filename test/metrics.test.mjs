@@ -377,7 +377,8 @@ test('getMetrics reads incrementally and survives truncation', () => {
   fs.appendFileSync(wirePath, stepEnd({ output: 200, streamMs: 1000, ttftMs: 700 }) + '\n');
   m = getMetrics(id, opts);
   assert.equal(m.tps, 200); // first display: median(100, 300, 200)
-  assert.equal(m.tpsTotal, null); // solo: no fleet total
+  assert.equal(m.tpsTotal, 200); // a lone live agent still feeds the fleet figure
+  assert.equal(m.tpsAgents, 1);
 
   // incomplete trailing line is held for next run
   fs.appendFileSync(wirePath, stepEnd({ output: 999, streamMs: 1000 }).slice(0, 20));
@@ -1024,6 +1025,29 @@ test('fleet-to-solo fallback uses the remaining agent median', () => {
   assert.equal(solo.tpsStale, true);
 });
 
+test('getMetrics lone live subagent still reports the one-agent fleet figure', () => {
+  // A swarm that has run down to its last member: agent-0 keeps streaming
+  // while main waits idle. The renderer needs tpsTotal/tpsAgents here to
+  // keep fleet style, so the lone reading is exposed as a one-agent fleet
+  // figure instead of a bare solo tps.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires['agent-0'],
+    [0, 1, 2].map((n) => stepEnd({
+      output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n, finishReason: 'tool_use',
+    })).join('\n') + '\n',
+  );
+  const m = getMetrics(id, opts);
+  assert.equal(m.activeAgents, 1);
+  assert.equal(m.tpsAgents, 1);
+  assert.equal(m.tpsTotal, 100);
+  assert.equal(m.tps, 100);
+  assert.equal(m.mainActive, false);
+  assert.equal(m.mainSpeed, false);
+});
+
 test('getMetrics drops a subagent from the fleet the moment its turn ends', () => {
   const { root, id, wires } = makeSession({ agents: ['main', 'agent-0', 'agent-1'] });
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
@@ -1071,8 +1095,9 @@ test('getMetrics re-activates a settled subagent when a later request arrives', 
     stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n' +
       stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000 }) + '\n',
   );
-  // end_turn settles agent-0: only main stays active (tpsTotal/tpsAgents are
-  // fleet-only figures, so a single active agent reports tpsTotal null).
+  // end_turn settles agent-0: only main stays active, and with a single
+  // sample below MIN_SAMPLES it has no speed reading, so the fleet figures
+  // stay empty.
   let m = getMetrics(id, opts);
   assert.equal(m.activeAgents, 1);
   assert.equal(m.tpsAgents, 0);

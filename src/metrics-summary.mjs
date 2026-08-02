@@ -91,6 +91,13 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       tps = soleActive.bucket.lastMedian;
       tpsStale = true;
     }
+    // A lone live agent still reports its reading as a one-agent fleet
+    // figure: a swarm that has run down to its last subagent must keep
+    // feeding the renderer's fleet style.
+    if (tps !== null) {
+      tpsTotal = tps;
+      tpsAgents = 1;
+    }
     ttftMs = soleActive.bucket.lastTtftMs ?? null;
   } else {
     const mainMedian = state.agents.main?.lastMedian ?? null;

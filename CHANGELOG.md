@@ -6,6 +6,15 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the fleet speed style when a swarm runs down to its last live
+  subagent: falling back to the solo-agent `⚡ 45 t/s · TTFT 1.2s` made the
+  HUD look like swarm mode had been exited. A lone live agent with a speed
+  reading now reports a one-agent fleet figure (`tpsTotal = tps`,
+  `tpsAgents = 1`), and while swarm mode is on the speed segment and gen
+  ticker keep the fleet head count, singularized as `1 agent`.
+
 ## [0.6.3] - 2026-08-02
 
 ### Added

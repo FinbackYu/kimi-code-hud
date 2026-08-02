@@ -379,7 +379,10 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * (swarm/subagent runs) the result
  * carries the fleet total (`tpsTotal`), the per-agent average (`tps`) and
  * the head counts, and TTFT is the median across active agents so one
- * stuck agent cannot poison the display. `activeAgents` counts every live
+ * stuck agent cannot poison the display. A single live agent with a speed
+ * reading reports `tpsTotal`/`tpsAgents` too (1 × `tps`), so a swarm that
+ * has run down to its last subagent keeps the fleet display. `activeAgents`
+ * counts every live
  * agent (the gen-ticker head count); `tpsAgents` counts only those with a
  * fresh speed reading, so an agent still waiting on its first step never
  * inflates the fleet figure and `tpsTotal ≈ tpsAgents × tps` always holds;

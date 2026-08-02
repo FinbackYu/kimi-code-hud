@@ -483,6 +483,95 @@ test('fleet gen ticker appends to the fleet speed format', () => {
   assert.ok(compact.includes('⚡ 305 (12@25) gen 3s'));
 });
 
+test('swarm with a single live subagent keeps the fleet style', () => {
+  // The swarm has run down to its last member: main is idle and only one
+  // subagent feeds the speed. A bare "45 t/s" would read like the swarm
+  // never happened — keep the fleet parenthetical with a singular head.
+  const metrics = {
+    tps: 45, tpsTotal: 45, tpsAgents: 1, activeAgents: 1,
+    swarmMode: true, mainActive: false, mainSpeed: false,
+  };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(normal.includes('⚡ 45 t/s (1 agent @45)'));
+  assert.ok(!normal.includes('TTFT'));
+  assert.ok(!normal.includes(' gen '));
+});
+
+test('swarm over: only main active falls back to the single-agent style', () => {
+  // swarm_mode is still latched true, but the last subagent ended: the sole
+  // live agent is main itself, so the fleet parenthetical goes away.
+  const metrics = {
+    tps: 45, tpsTotal: 45, tpsAgents: 1, activeAgents: 1,
+    swarmMode: true, mainActive: true, mainSpeed: true, ttftMs: 1300,
+  };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(normal.includes('⚡ 45 t/s · TTFT 1.3s'));
+  assert.ok(!normal.includes('agents'));
+});
+
+test('non-swarm single subagent keeps the single-agent style', () => {
+  const metrics = {
+    tps: 45, tpsTotal: 45, tpsAgents: 1, activeAgents: 1,
+    swarmMode: false, ttftMs: 1300,
+  };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(normal.includes('⚡ 45 t/s · TTFT 1.3s'));
+  assert.ok(!normal.includes('agents'));
+});
+
+test('swarm with two subagents renders the fleet style verbatim', () => {
+  const metrics = {
+    tps: 45, tpsTotal: 90, tpsAgents: 2, activeAgents: 2,
+    swarmMode: true, mainActive: false, mainSpeed: false, ttftMs: 1300,
+  };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.equal(
+    normal,
+    '[manual] [swarm] K3 │ kimi-code-hud git:(main*) │ ⚡ 90 t/s (2 agents @45) · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h',
+  );
+});
+
+test('gen ticker keeps the head count for a swarm down to one subagent', () => {
+  const [lone] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: {
+      tps: null, ttftMs: null, turnStartedAt: NOW - 3000,
+      activeAgents: 1, swarmMode: true, mainActive: false,
+    },
+  }));
+  assert.ok(lone.includes('⚡ gen 3s (1 agent)'));
+  // Two live subagents still label the fleet.
+  const [pair] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: {
+      tps: null, ttftMs: null, turnStartedAt: NOW - 3000,
+      activeAgents: 2, swarmMode: true, mainActive: false,
+    },
+  }));
+  assert.ok(pair.includes('⚡ gen 3s (2 agents)'));
+  // Main-only after the swarm: the ticker goes solo again.
+  const [mainOnly] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: {
+      tps: null, ttftMs: null, turnStartedAt: NOW - 3000,
+      activeAgents: 1, swarmMode: true, mainActive: true,
+    },
+  }));
+  assert.ok(mainOnly.includes('⚡ gen 3s'));
+  assert.ok(!mainOnly.includes('agents'));
+});
+
+test('compact layout keeps the fleet head count for a lone swarm subagent', () => {
+  const [line] = renderHud(baseCtx({
+    layout: 'compact',
+    metrics: {
+      tps: 45, tpsTotal: 45, tpsAgents: 1, activeAgents: 1,
+      swarmMode: true, mainActive: false, mainSpeed: false,
+    },
+  }));
+  assert.ok(line.includes('⚡ 45 (1@45)'));
+});
+
 test('live compaction takes the TTFT slot like the gen timer', () => {
   const metrics = { tps: 47, ttftMs: 1300, compactingSince: NOW - 14_000 };
   const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
