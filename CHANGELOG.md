@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-03
+
 ### Added
 
 - Render the built-in footer's background-task badges — `[N task(s) running]`
@@ -259,7 +261,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.4
 [0.6.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.3
 [0.6.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.2
 [0.6.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.1
