@@ -4,6 +4,7 @@ import path from 'node:path';
 import { resetCacheState } from './cache-hit.mjs';
 import { atomicWriteFile } from './fs-store.mjs';
 import { emptyAgent, normAgent } from './metrics-agent.mjs';
+import { emptyTasksState, normalizeTasks } from './metrics-tasks.mjs';
 import {
   BACKFILL_SCAN_V,
   CACHE_SCAN_V,
@@ -33,6 +34,7 @@ export function emptyState() {
     goal: null,
     swarmMode: false,
     cacheScanV: CACHE_SCAN_V,
+    tasks: emptyTasksState(),
   };
   resetCacheState(state);
   return state;
@@ -164,6 +166,7 @@ export function loadState(statePath) {
           state.agentCursor = 0;
         }
         state.backfill = normalizeBackfill(state.backfill);
+        state.tasks = normalizeTasks(state.tasks);
         delete state.cacheTurn;
         delete state.cacheNeedsPrompt;
         return state;

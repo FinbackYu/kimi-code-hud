@@ -11,7 +11,7 @@ readable-but-unrendered data are documented separately in
 
 ## KI-1: Background task badges are absent
 
-Status: open
+Status: closed (fixed in the Unreleased series after HUD `v0.6.3`)
 
 Affected upstream slot: `tasks`
 
@@ -25,6 +25,24 @@ only `status === "running"`, and group `kind === "process"` separately from
 `kind === "agent"`. It must not reuse `metrics.activeAgents`: that metric
 includes the main agent and describes recent LLM generation, not durable
 background-task state.
+
+Resolution:
+
+- `src/metrics-tasks.mjs` keeps a bounded `taskId -> { kind, status,
+  updatedAt }` reducer over the main-wire `task.started` / `task.terminated`
+  Ops and reconciles `agents/main/tasks/<taskId>.json` sidecars once per
+  frame (64 files / 16 KiB caps, deadline-aware); hosts that predate the
+  journaled Ops (e.g. 0.31.x binaries) are covered entirely by the sidecar
+  projection. The fresher record wins per task id, so a lagging incremental
+  reader cannot resurrect a finished task.
+- `summarizeMetrics` reports `tasks: { bash, agents }` — running counts only,
+  `agent` kind split from every other kind, handled for completed, failed,
+  timed-out, killed, and lost terminal states, and fully separate from
+  `activeAgents` / `tpsAgents`.
+- `src/render.mjs` renders `[N task(s) running]` / `[N agent(s) running]`
+  between the model and project segments (the upstream `model → tasks → cwd`
+  slot order), counts only — never command text, descriptions, or output
+  tails — and the wire read keeps the shared 220ms frame deadline.
 
 Acceptance criteria:
 

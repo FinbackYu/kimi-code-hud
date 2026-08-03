@@ -599,3 +599,31 @@ test('gen timer takes the slot back from a finished compaction', () => {
   assert.ok(line.includes('⚡ 47 t/s · gen 1m0s'));
   assert.ok(!line.includes('compacted'));
 });
+
+test('task badges render between model and project in the upstream slot order', () => {
+  const metrics = { tps: 47, tasks: { bash: 1, agents: 2 } };
+  const [line] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(line.includes('[1 task running] [2 agents running]'));
+  // Upstream slot order is model → tasks → cwd/git.
+  assert.ok(line.indexOf('K3') < line.indexOf('[1 task running]'));
+  assert.ok(line.indexOf('[1 task running]') < line.indexOf('kimi-code-hud git:(main*)'));
+  const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
+  assert.ok(compact.includes('[1 task running] [2 agents running]'));
+});
+
+test('task badges pluralize, hide at zero and paint primary blue', () => {
+  const [both] = renderHud(baseCtx({ metrics: { tasks: { bash: 2, agents: 1 } } }));
+  assert.ok(both.includes('[2 tasks running] [1 agent running]'));
+
+  const [none] = renderHud(baseCtx({ metrics: { tasks: { bash: 0, agents: 0 } } }));
+  assert.ok(!none.includes('running]'));
+
+  const [missing] = renderHud(baseCtx({ metrics: { tps: 47 } }));
+  assert.ok(!missing.includes('running]'));
+
+  const [colored] = renderHud(baseCtx({
+    color: true,
+    metrics: { tasks: { bash: 1, agents: 0 } },
+  }));
+  assert.ok(colored.includes('\x1b[38;2;79;168;255m[1 task running]\x1b[0m'));
+});
