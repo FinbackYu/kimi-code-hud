@@ -19,6 +19,7 @@
 - **缓存命中率** 跨回合累计的 token 加权 Cache 命中率，回合之间常亮不闪。
 - **Kimi 托管订阅额度** 5h / 7d 柱条 + 百分比 + 重置倒计时，按用量绿 / 黄 / 红分级；第三方 provider 模型自动隐藏整段，不代表 API 余额或费用。
 - **模式徽章** `[yolo]` / `[auto]` / `[plan]` / `[goal …]` / `[swarm]`，槽位顺序与宿主默认 footer 一致。
+- **后台任务徽章** 后台 Shell 任务与后台子代理分别计数：`[N task(s) running]` / `[N agent(s) running]`，插在模型与目录之间，与宿主默认 footer 槽位顺序一致。
 - **深浅双主题** 跟随宿主 `theme` 设置；light 下徽标加粗，柱条换柔和真彩色。
 - **热路径安全** 每次渲染都在 300ms 内完成，所有错误静默降级——不打印日志，绝不阻塞 TUI。
 
@@ -102,12 +103,19 @@ normal:  [manual] K3 high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1
 [manual] [goal ● active · 4m · 7 turns] K3 high │ …
 ```
 
+后台任务运行时，模型与目录之间插入任务徽章（两档都显示，为 0 的类别各自隐藏）：
+
+```
+[manual] K3 high │ [1 task running] [2 agents running] │ kimi-code-hud git:(main*) │ …
+```
+
 - 模型名以宿主主蓝色（dark 主题 `#4FA8FF` / light 主题 `#1565C0`，即对话中链接/行内代码的蓝，随主题切换）显示；模型后缀显示 thinking 状态：布尔模型为 ` thinking`，支持 effort 的模型直接显示强度（如 `K3 high`，compact 档同样只保留 ` <effort>`）（status line payload 不含此字段；优先取会话日志 `config.update` 事件——新版宿主键为 `thinkingEffort`，会话启动即有初始记录；旧版为 `thinkingLevel`，只在会话内切换过 effort 时记录。两者都没有时按会话快照固定取值，快照存 `~/.kimi-code-hud/thinking-<sessionId>.json`；快照不存在时才回退解析 `~/.kimi-code/config.toml` 的 `[thinking]` 与模型表并写入快照——这样其他会话执行 `/effort` 改写全局配置后，本会话显示不会跟着变）；
 - goal 徽章：格式与宿主默认 footer 一致（`[goal ● <status> · <计时> · <轮数>]`；设了 turn 预算显示 `3/10 turns`；圆点 active 蓝 / blocked 琥珀 / paused 暗灰）。status line payload 不含 goal 字段，状态从会话日志 `wire.jsonl` 的 `goal.create`/`goal.update`/`goal.clear`/`forked` op 重建（与 TPS 同一次增量扫描）；active 时按 `wallClockResumedAt` 每秒走动计时，goal 完成或清除后徽章消失。徽章显示期间速度段只留吞吐——`gen` 计时、TTFT 与压缩状态一并隐藏（徽章已自带会话计时，与回合内自动压缩不展示同一逻辑：该时段已被任务计时覆盖）；
 - TPS 只接纳流式阶段至少 250ms、且不超过 1000 t/s 的 `step.end` 样本；积累 3 个有效样本后开始显示，取最近最多 5 个样本的中位数。窗口过期（最后一个样本超过 2 分钟）后不隐藏：最后一次中位数以暗灰继续显示，直到新窗口预热完成；模型切换时旧中位数一并清除、重新预热。首次预热（还没有中位数）期间仍显示最近一次 TTFT；
 - Cache 为本次会话的 token 加权缓存命中率：`Σ inputCacheRead / Σ (inputOther + inputCacheRead + inputCacheCreation)`，跨回合累计主 Agent 的全部模型请求（usage 字段不完整的 step 跳过不计）。数值本身即跨回合累计的最新值，回合之间常亮不闪烁；会话尚无数据时整段省略。各档只显示百分比；不使用红黄绿阈值；
 - 配额段：normal 档为柱+百分比+重置倒计时；compact 档去掉柱体，保留百分比和倒计时；周配额（7d）只在 normal 档显示。仅当当前模型由 Kimi Code 托管订阅（`managed:kimi-code`）提供时显示——经 `/provider` 接入、用 `/model` 切到的第三方 provider 模型整段隐藏（配额接口只描述托管订阅，与当前会话实际用量无关）；`/logout` 删除凭证后配额缓存一并清除；
 - 行首徽章与权限模式对齐：`[yolo]`（琥珀黄，对齐宿主默认）/`[auto]`（亮红，便于区分）/`[manual]`（暗灰占位，保持行首对齐），plan 模式加 `[plan]`（蓝色）；`[swarm]`（青色）取自会话 wire 日志的 `swarm_mode.enter/exit` 事件（与 goal 徽章同一推导路径——status line payload 不含 swarm 状态），宿主以后若在 payload 携带 `swarmMode` 字段同样生效；
+- 后台任务徽章：格式与宿主默认 footer 一致（`[N task(s) running]` 对应 Shell 进程、`[N agent(s) running]` 对应后台子代理，蓝色，为 0 各自隐藏）。status line payload 不含任务字段，运行计数从主 agent wire 日志的 `task.started`/`task.terminated` op 重建，并每帧核对 `agents/main/tasks/<taskId>.json` 旁车文件（旧版宿主不记录 wire op，全靠旁车兜底），同一任务取时间更新的记录；只统计 `running` 状态（completed/failed/timed_out/killed/lost 不计）、只渲染计数（命令、描述、输出永不进 footer），与吞吐统计的 `activeAgents` 完全分离；
 - 用量分级着色：<60% 绿、<85% 黄、≥85% 红；normal 档作用于柱条，compact 档没有柱体、由百分比数字接替（绿档不醒目化处理、保持默认色，只有黄 / 红上色）；
 - 输出超过 200 字符自动降级 normal→compact。
 

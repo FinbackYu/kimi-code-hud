@@ -32,16 +32,16 @@ does not need to be redrawn by the command.
 | swarm mode | `swarm` in the mode slot | Rebuilds state from main-wire `swarm_mode.enter` / `swarm_mode.exit`; a future `payload.swarmMode` also works | covered since HUD 0.2.7 |
 | goal | status, elapsed time, turns, optional turn budget | Rebuilds `goal.create` / `goal.update` / `goal.clear` / `forked` and renders the same lifecycle fields | covered |
 | model and thinking | display name plus `thinking` or `thinking: <effort>` | Uses payload model plus wire/config snapshot; renders bare effort (`K3 high`) | covered, presentation variant |
-| background Shell | `[N task(s) running]` for running `process` / `bash-*` tasks | Does not reduce `task.started` / `task.terminated` | missing — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) |
-| background Agent | `[N agent(s) running]` for running `agent` tasks | Does not reduce `task.started` / `task.terminated` | missing — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) |
+| background Shell | `[N task(s) running]` for running `process` / `bash-*` tasks | Reduces main-wire `task.started` / `task.terminated` and reconciles `tasks/<taskId>.json` sidecars; renders the same badge between model and cwd | covered — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) closed |
+| background Agent | `[N agent(s) running]` for running `agent` tasks | Same reducer; `agent` kind is counted and badged separately | covered — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) closed |
 | cwd | home-aware path shortened to at most three segments | Normal shows only `basename(cwd)`; compact omits cwd | intentional degradation |
 | Git | branch, diff `+N/-N` or `±`, ahead/behind, and linked PR number | Payload branch plus synchronous dirty check, rendered as `git:(branch*)` | degraded — [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer) |
 | rotating tips | width-aware, weighted 10-second rotation | omitted | intentional omission |
 | Context and transient hint | context percentage and exact current/max tokens; transient hint at left | still rendered by the host on line 2 | host-owned, preserved |
 
-The two task rows are two user-visible missing states but one implementation
-area. They must not be inferred from `metrics.activeAgents`: that value includes
-the main agent and means "recently generating or holding an LLM request", not
+The two task rows share one implementation area (`src/metrics-tasks.mjs`).
+They are not inferred from `metrics.activeAgents`: that value includes the
+main agent and means "recently generating or holding an LLM request", not
 "background agent task still running".
 
 ## How to use the displayed capabilities
@@ -63,6 +63,7 @@ commands are documented in [README.md](README.md#安装) and
 | TPS, TTFT, and generation time | run normal prompts; no separate command is required | live `gen`; TPS and TTFT after enough valid samples exist | available, automatic |
 | compaction | use `/compact [instruction]`, or allow automatic compaction | live and most recent compaction duration | available, automatic |
 | prompt-cache ratio | continue using the session normally; the first complete model-step usage record initializes it | rounded session-cumulative `Cache N%` | available, automatic |
+| background tasks | start a background shell task or a detached subagent; no HUD action is required | `[N task(s) running]` and `[N agent(s) running]` between model and cwd | available, automatic |
 | Git and cwd | run Kimi Code inside a Git worktree; branch/dirty state changes as the worktree changes | shortened cwd, branch, and dirty `*` | partial — [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer) |
 | Context | no HUD action; Kimi Code owns footer line 2 | context percentage and exact current/max tokens remain on line 2 | available, host-owned |
 | Kimi subscription quota | use a managed Kimi model with a valid Kimi Code login; refresh is automatic | short and weekly usage percentage, bar, and reset countdown | available, automatic |
@@ -70,9 +71,7 @@ commands are documented in [README.md](README.md#安装) and
 | color and theme | set `NO_COLOR=1` or `KIMI_HUD_NO_COLOR=1`; optionally set `KIMI_HUD_THEME=dark\|light` | plain text or the selected ANSI palette | available |
 
 `--refresh-quota` is a troubleshooting/internal command; normal quota use does
-not require invoking it manually. Background Shell and Agent badges do not have
-a HUD usage path yet because their task reducer and renderer are still missing
-([KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent)).
+not require invoking it manually.
 
 ## Readable but not rendered
 
@@ -90,7 +89,7 @@ public contract.
 | `usage.record` | the same four usage counters, model, and optional session/turn scope | deliberately ignored | may support a model-scoped ledger or fallback, but must never be added to the duplicate `step.end` usage |
 | per-agent wires | per-agent TPS samples, TTFT, request/turn timestamps, and agent directory identity | aggregates fleet total, contributing-agent count, average, and median TTFT | an expanded/debug view could expose per-agent rows; the one-line footer should stay aggregated |
 | goal records | objective, criterion, status/reason, turns, tokens, elapsed time, and turn/token/time budgets | status, elapsed time, turns, and turn budget | numeric token/time budget progress is readable with a reducer extension; objective, criterion, and reasons are content and should not enter the footer by default |
-| task records | task ID, kind, status, timestamps, timeout, plus kind-specific process/agent details | unused | safe footer value is the two running counts; command, PID, description, subagent type, stop reason, and output tail belong in task/debug views |
+| task records | task ID, kind, status, timestamps, timeout, plus kind-specific process/agent details | the two running counts (`tasks.bash` / `tasks.agents`) | command, PID, description, subagent type, stop reason, and output tail stay out of the footer; they belong in task/debug views |
 | compaction records | begin/end timing; compaction records also carry message counts and summaries | live and last compaction duration | compaction count/message count could support diagnostics; summaries are content and should remain hidden |
 | Git commands | diff stats, upstream divergence, PR number and URL | dirty boolean only | the data is available locally, but safe collection requires persistent TTL caches and async PR lookup |
 | quota cache | exact `used`, `limit`, `resetAt`, and `fetchedAt` for short and weekly windows | percentage, bar, and reset countdown | exact units and cache freshness are available for a detail/debug surface; do not relabel subscription quota as token billing or API balance |

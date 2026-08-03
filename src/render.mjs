@@ -204,6 +204,25 @@ function projectSegment({ layout, payload, gitDirty }) {
   return project;
 }
 
+/**
+ * Background-task badges, mirroring the built-in footer's `tasks` slot
+ * (`model → tasks → cwd`): `[N task(s) running]` for shell processes and
+ * `[N agent(s) running]` for background subagents, primary blue, each hidden
+ * at zero. Counts come from the durable task registry (wire journal +
+ * sidecar reconcile), never from the throughput head counts.
+ */
+function taskSegment({ metrics, color, C }) {
+  const tasks = metrics?.tasks;
+  if (!tasks || typeof tasks !== 'object') return null;
+  const bash = Number.isInteger(tasks.bash) && tasks.bash > 0 ? tasks.bash : 0;
+  const agents = Number.isInteger(tasks.agents) && tasks.agents > 0 ? tasks.agents : 0;
+  if (bash === 0 && agents === 0) return null;
+  const badges = [];
+  if (bash > 0) badges.push(`[${bash} ${bash === 1 ? 'task' : 'tasks'} running]`);
+  if (agents > 0) badges.push(`[${agents} ${agents === 1 ? 'agent' : 'agents'} running]`);
+  return colorize(color, C.primary, badges.join(' '));
+}
+
 function speedSegment({ layout, metrics, color, now, C }) {
   // While a goal badge is up it already carries the session clock, so the
   // gen ticker, TTFT and the compaction state are all redundant — show
@@ -342,6 +361,7 @@ function quotaSegment({ layout, quota, color, now, C }) {
 // appear. Builders still receive the actual tier for compact representations.
 const SEGMENT_BUILDERS = [
   { minLayout: 'compact', build: modelSegment },
+  { minLayout: 'compact', build: taskSegment },
   { minLayout: 'compact', build: projectSegment },
   { minLayout: 'compact', build: speedSegment },
   { minLayout: 'compact', build: cacheSegment },
@@ -362,7 +382,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs, tasks}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] normal|compact
  * @param {boolean} [ctx.color]

@@ -1352,6 +1352,7 @@ test('getMetrics returns nulls for unknown sessions', () => {
     modelAlias: null, swarmMode: false, cache: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
     turnStartedAt: null, compactingSince: null, compactionMs: null,
+    tasks: { bash: 0, agents: 0 },
   });
 });
 

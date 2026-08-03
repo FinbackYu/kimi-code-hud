@@ -1,4 +1,5 @@
 import { cacheMetricFromState } from './cache-hit.mjs';
+import { taskCountsFromState } from './metrics-tasks.mjs';
 import {
   ACTIVE_WINDOW_MS,
   MAX_SAMPLES,
@@ -155,6 +156,11 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       turnStartedAt,
       compactingSince,
       compactionMs,
+      // Durable background-task running counts (bash processes vs background
+      // subagents). Kept apart from the throughput head counts above: those
+      // describe recent LLM generation and include the main agent, these
+      // describe the task registry.
+      tasks: taskCountsFromState(state),
     },
   };
 }

@@ -40,6 +40,11 @@ import {
   applyCacheWireRow,
   resetCacheState,
 } from './cache-hit.mjs';
+import {
+  applyTaskRow,
+  reconcileTaskSidecars,
+  resetWireTasks,
+} from './metrics-tasks.mjs';
 
 export { SESSIONS_ROOT, findSessionDir, findWirePath, CACHE_BACKFILL_MAX_BYTES, median };
 
@@ -51,7 +56,8 @@ export { SESSIONS_ROOT, findSessionDir, findWirePath, CACHE_BACKFILL_MAX_BYTES, 
  * agent only, and only between turns — a mid-turn auto-compaction is not
  * tracked). The main agent additionally feeds the state-level handlers —
  * the session cache counters, config.update (model alias + thinking level),
- * goal ops and the swarm_mode.enter/exit journal.
+ * goal ops, the background-task registry and the swarm_mode.enter/exit
+ * journal.
  * @param {object} state mutated in place
  * @param {object} row parsed wire.jsonl line
  * @param {string} [agent] which agent's wire this row comes from
@@ -60,6 +66,7 @@ export function processWireRow(state, row, agent = 'main') {
   if (!state.agents || typeof state.agents !== 'object') state.agents = {};
   state.agents[agent] = normAgent(state.agents[agent]);
   if (agent === 'main') applyCacheWireRow(state, row);
+  if (agent === 'main') applyTaskRow(state, row);
   applyTurnRow(state, row, agent);
   applyThroughputRow(state, row, agent);
   applyCompactionRow(state, row, agent);
@@ -295,6 +302,7 @@ function resetMainDerivedState(state) {
   state.modelAlias = null;
   state.swarmMode = false;
   resetCacheState(state);
+  resetWireTasks(state);
   state.cacheScanV = CACHE_SCAN_V;
   state.backfillScanV = BACKFILL_SCAN_V;
   state.backfill = null;
@@ -398,12 +406,15 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * SAMPLE_WINDOW_MS when the close record was lost), and the finished
  * duration survives until the next prompt starts a turn. Compactions that
  * run inside a turn (auto-compaction) are never tracked — the turn timer
- * owns that span.
+ * owns that span. `tasks` carries the durable background-task registry as
+ * two running counts (`bash` for `process`/`bash-*` tasks, `agents` for
+ * background subagents) — separate from `activeAgents`/`tpsAgents`, which
+ * describe recent LLM generation and include the main agent.
  * @param {string} sessionId
  * @param {object} [opts]
  * @param {number} [opts.deadline] absolute `performance.now()` deadline
  * @param {number} [opts.readBudgetBytes] total wire bytes allowed this frame
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null, tasks: {bash: number, agents: number}}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
@@ -417,6 +428,7 @@ export function getMetrics(sessionId, {
     modelAlias: null, swarmMode: false, cache: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
     turnStartedAt: null, compactingSince: null, compactionMs: null,
+    tasks: { bash: 0, agents: 0 },
   };
   try {
     if (!sessionId) return empty;
@@ -554,6 +566,21 @@ export function getMetrics(sessionId, {
           state.agentCursor = next;
           stateChanged = true;
         }
+      }
+    }
+
+    // The task sidecar files are rewritten by the host on every lifecycle
+    // transition, so a bounded re-scan per frame reconciles what the
+    // incremental wire journal cannot see (pre-journal hosts, migrated
+    // readers). A closing deadline keeps the previous projection.
+    if (deadlineOpen(deadline)) {
+      try {
+        // No `||=` short-circuit here: the sidecar scan must run even when
+        // an earlier stage already marked the state dirty.
+        const tasksChanged = reconcileTaskSidecars(state, sessionDir, deadline);
+        stateChanged ||= tasksChanged;
+      } catch {
+        // The task badge is best effort and must stay silent.
       }
     }
 

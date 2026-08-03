@@ -6,6 +6,18 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Render the built-in footer's background-task badges — `[N task(s) running]`
+  for shell processes and `[N agent(s) running]` for background subagents,
+  between the model and project segments. Counts come from a bounded
+  `taskId -> { kind, status }` reducer over the main-wire `task.started` /
+  `task.terminated` Ops, reconciled per frame against the
+  `agents/main/tasks/<taskId>.json` sidecars so hosts that predate the
+  journaled Ops are covered too; the fresher record wins per task id. The
+  counts stay separate from the throughput `activeAgents` / `tpsAgents`
+  figures and only `running` tasks badge.
+
 ### Fixed
 
 - Keep the fleet speed style when a swarm runs down to its last live
