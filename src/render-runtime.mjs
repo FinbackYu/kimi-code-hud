@@ -60,6 +60,7 @@ export async function renderStatusLine({
     sessionsRoot: paths.sessionsRoot,
     stateDir: paths.hudDir,
     deadline,
+    hostVersion: payload.version || null,
   });
   const provider = resolveModelProvider({
     modelAlias: metrics.modelAlias,

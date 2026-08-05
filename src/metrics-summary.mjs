@@ -143,6 +143,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       thinkingLevel: state.thinkingLevel ?? null,
       goal: state.goal ?? null,
       modelAlias: state.modelAlias ?? null,
+      hostVersion: state.hostVersion ?? null,
       swarmMode: state.swarmMode === true,
       cache: cacheMetricFromState(state),
       tpsTotal,
