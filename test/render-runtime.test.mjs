@@ -123,6 +123,7 @@ test('runtime shares one deadline and skips refresh and Git when budget is gone'
   let refreshes = 0;
   let gitChecks = 0;
   let metricsDeadline = null;
+  let metricsHostVersion = null;
   const result = await renderStatusLine({
     scriptPath: '/tmp/kimi-hud.mjs',
     paths,
@@ -138,6 +139,7 @@ test('runtime shares one deadline and skips refresh and Git when budget is gone'
       }),
       getMetrics: (_sessionId, options) => {
         metricsDeadline = options.deadline;
+        metricsHostVersion = options.hostVersion;
         return metrics();
       },
       ensureFreshQuota: () => { refreshes += 1; },
@@ -145,6 +147,7 @@ test('runtime shares one deadline and skips refresh and Git when budget is gone'
     },
   });
   assert.equal(metricsDeadline, RUNTIME_BUDGET_MS);
+  assert.equal(metricsHostVersion, '0.31.1');
   assert.equal(refreshes, 0);
   assert.equal(gitChecks, 0);
   assert.equal(result.exitCode, 0);

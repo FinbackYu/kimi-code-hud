@@ -414,6 +414,7 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * @param {object} [opts]
  * @param {number} [opts.deadline] absolute `performance.now()` deadline
  * @param {number} [opts.readBudgetBytes] total wire bytes allowed this frame
+ * @param {string|null} [opts.hostVersion] Kimi Code version from the status-line payload
  * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null, tasks: {bash: number, agents: number}}}
  */
 export function getMetrics(sessionId, {
@@ -422,10 +423,11 @@ export function getMetrics(sessionId, {
   now = Date.now(),
   deadline = Infinity,
   readBudgetBytes = WIRE_READ_BUDGET_BYTES,
+  hostVersion = null,
 } = {}) {
   const empty = {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
-    modelAlias: null, swarmMode: false, cache: null,
+    modelAlias: null, swarmMode: false, hostVersion: null, cache: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
     turnStartedAt: null, compactingSince: null, compactionMs: null,
     tasks: { bash: 0, agents: 0 },
@@ -435,6 +437,10 @@ export function getMetrics(sessionId, {
     const statePath = statePathFor(sessionId, stateDir);
     const state = loadState(statePath);
     let stateChanged = state[MIGRATED] === true;
+    if (hostVersion !== null && hostVersion !== state.hostVersion) {
+      state.hostVersion = hostVersion;
+      stateChanged = true;
+    }
     if (!deadlineOpen(deadline)) {
       return finishMetrics(state, statePath, stateChanged, now);
     }

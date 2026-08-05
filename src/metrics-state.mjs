@@ -33,6 +33,7 @@ export function emptyState() {
     thinkingLevel: null,
     goal: null,
     swarmMode: false,
+    hostVersion: null,
     cacheScanV: CACHE_SCAN_V,
     tasks: emptyTasksState(),
   };
@@ -144,6 +145,7 @@ function migrateV7State(raw) {
     ? raw.agentCursor
     : 0;
   state.backfill = null;
+  state.hostVersion = typeof raw.hostVersion === 'string' ? raw.hostVersion : null;
   state[MIGRATED] = true;
   return state;
 }
@@ -167,6 +169,7 @@ export function loadState(statePath) {
         }
         state.backfill = normalizeBackfill(state.backfill);
         state.tasks = normalizeTasks(state.tasks);
+        if (typeof state.hostVersion !== 'string') state.hostVersion = null;
         delete state.cacheTurn;
         delete state.cacheNeedsPrompt;
         return state;
