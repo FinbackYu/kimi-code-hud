@@ -37,7 +37,7 @@ function payload() {
     planMode: false,
     contextUsage: 0.1,
     sessionId: 'runtime-session',
-    version: '0.31.1',
+    version: '0.33.0',
   };
 }
 
@@ -147,7 +147,7 @@ test('runtime shares one deadline and skips refresh and Git when budget is gone'
     },
   });
   assert.equal(metricsDeadline, RUNTIME_BUDGET_MS);
-  assert.equal(metricsHostVersion, '0.31.1');
+  assert.equal(metricsHostVersion, '0.33.0');
   assert.equal(refreshes, 0);
   assert.equal(gitChecks, 0);
   assert.equal(result.exitCode, 0);
