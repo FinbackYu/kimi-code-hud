@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-08-06
+
 ### Fixed
 
 - Track the session model and thinking effort from the host's `profile.bind`
@@ -270,7 +272,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.4...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.5...HEAD
+[0.6.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.5
 [0.6.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.4
 [0.6.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.3
 [0.6.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.2
