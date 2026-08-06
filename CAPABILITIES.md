@@ -1,8 +1,8 @@
 # HUD capabilities
 
-- Last verified: 2026-08-05
-- HUD behavior baseline: `v0.6.4` (`c9918fad`)
-- Kimi Code baseline: `0.32.0` (`4ac7240fff595b41a94a63c4b4ca74840ad95cf8`)
+- Last verified: 2026-08-06
+- HUD behavior baseline: `v0.6.4-2` (`77b108c`)
+- Kimi Code baseline: `0.33.0` (`53c832dfdf9566afd59a8b3d54ebd36d3cb03d72`)
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
@@ -12,11 +12,23 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/4ac7240fff595b41a94a63c4b4ca74840ad95cf8/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/4ac7240fff595b41a94a63c4b4ca74840ad95cf8/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/4ac7240fff595b41a94a63c4b4ca74840ad95cf8/apps/kimi-code/src/utils/git/git-status.ts)
-- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/4ac7240fff595b41a94a63c4b4ca74840ad95cf8/packages/agent-core-v2/docs/wire-manifest.d.ts)
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/4ac7240fff595b41a94a63c4b4ca74840ad95cf8/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/53c832dfdf9566afd59a8b3d54ebd36d3cb03d72/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/53c832dfdf9566afd59a8b3d54ebd36d3cb03d72/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/53c832dfdf9566afd59a8b3d54ebd36d3cb03d72/apps/kimi-code/src/utils/git/git-status.ts)
+- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/53c832dfdf9566afd59a8b3d54ebd36d3cb03d72/packages/agent-core-v2/docs/wire-manifest.d.ts)
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/53c832dfdf9566afd59a8b3d54ebd36d3cb03d72/apps/kimi-code/src/tui/commands/registry.ts)
+
+Baseline delta (0.32.0 → 0.33.0):
+
+- The `status_line.command` payload/runner contract, footer slot order, and the
+  Git status model are unchanged.
+- The persisted wire manifest only adds optional fields
+  (`environmentDisclosure`, `renderGeneration` on `config.update` /
+  `profile.bind`); HUD reducers read known fields and ignore extras.
+- The built-in registry adds `/bug` as a `/feedback` alias and rewords
+  `/fork`; neither affects the HUD line.
+- The v2 engine is the default and still fires `SessionStart` external hooks
+  and persists the main-agent `wire.jsonl` journal.
 
 ## Footer coverage
 
@@ -25,7 +37,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.32.0 | HUD v0.6.4 | Status |
+| Official line-1 slot or state | Upstream 0.33.0 | HUD v0.6.4-2 | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows `[manual]`, and makes `[auto]` red | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
@@ -48,7 +60,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 0.32.0. HUD installation, configuration, and lifecycle
+built into Kimi Code 0.33.0. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 

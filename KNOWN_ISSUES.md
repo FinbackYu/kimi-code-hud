@@ -1,8 +1,8 @@
 # Known issues
 
-- Last verified: 2026-08-05
-- HUD behavior baseline: `v0.6.4` (`c9918fad`)
-- Kimi Code baseline: `0.32.0` (`4ac7240fff595b41a94a63c4b4ca74840ad95cf8`)
+- Last verified: 2026-08-06
+- HUD behavior baseline: `v0.6.4-2` (`77b108c`)
+- Kimi Code baseline: `0.33.0` (`53c832dfdf9566afd59a8b3d54ebd36d3cb03d72`)
 
 This file tracks open footer parity problems and information boundaries. Close
 or move an entry when its acceptance criteria are met. Current coverage and

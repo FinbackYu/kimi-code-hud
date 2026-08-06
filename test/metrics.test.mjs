@@ -1346,11 +1346,11 @@ test('getMetrics persists and reports the host version from the payload', () => 
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   fs.writeFileSync(wirePath, '');
-  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW, hostVersion: '0.32.0' };
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW, hostVersion: '0.31.1' };
   let m = getMetrics(id, opts);
-  assert.equal(m.hostVersion, '0.32.0');
+  assert.equal(m.hostVersion, '0.31.1');
   let state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.hostVersion, '0.32.0');
+  assert.equal(state.hostVersion, '0.31.1');
   m = getMetrics(id, { ...opts, hostVersion: '0.33.0' });
   assert.equal(m.hostVersion, '0.33.0');
   state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
