@@ -6,6 +6,15 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Track the session model and thinking effort from the host's `profile.bind`
+  wire row: newer hosts bind the active profile once at session start
+  (`profile.bind` with `modelAlias` + `thinkingEffort`) instead of emitting a
+  `config.update` row, so such sessions fell back to the config.toml
+  `[thinking]` effort — e.g. showing `high` while the model actually ran at
+  `max`.
+
 ## [0.6.4] - 2026-08-03
 
 ### Added

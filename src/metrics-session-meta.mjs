@@ -3,7 +3,10 @@ import { resetFleetWindows } from './metrics-throughput.mjs';
 /** Fold main-wire model/thinking/swarm metadata. */
 export function applySessionMetaRow(state, row, agent = 'main') {
   if (agent !== 'main') return;
-  if (row?.type === 'config.update') {
+  // Newer hosts bind the session profile once at start as `profile.bind`
+  // (model alias + thinking effort) instead of a `config.update` row; both
+  // carry the same modelAlias / thinkingEffort / thinkingLevel fields.
+  if (row?.type === 'config.update' || row?.type === 'profile.bind') {
     const modelAlias = typeof row.modelAlias === 'string' && row.modelAlias
       ? row.modelAlias
       : null;

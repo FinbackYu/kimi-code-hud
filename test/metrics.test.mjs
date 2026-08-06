@@ -191,6 +191,18 @@ test('processWireChunk accepts the newer thinkingEffort key', () => {
   assert.equal(state.thinkingLevel, 'max');
 });
 
+test('processWireChunk tracks model and thinkingEffort from profile.bind', () => {
+  const state = makeState();
+  const lines = [
+    '{"type":"profile.bind","modelAlias":"deepseek/deepseek-v4-flash","profileName":"agent","thinkingEffort":"max","time":1}',
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }),
+  ].join('\n') + '\n';
+  processWireChunk(state, lines);
+  assert.equal(state.modelAlias, 'deepseek/deepseek-v4-flash');
+  assert.equal(state.thinkingLevel, 'max');
+  assert.equal(state.agents.main.samples.length, 1); // step.end still processed
+});
+
 test('processWireChunk ignores subagent config/goal/swarm/turn rows', () => {
   const state = makeState();
   const lines = [
