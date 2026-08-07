@@ -117,3 +117,35 @@ Acceptance criteria for closing as a HUD problem:
 - disable, remove, failure, and recovery behavior is covered by an end-to-end
   contract test;
 - README instructions remain consistent with the observed runner behavior.
+
+## KI-5: In-session effort switches are invisible to the status line
+
+Status: open upstream API gap
+
+Affected upstream slot: `model` / status-line payload
+
+The built-in footer follows an in-session effort switch instantly because it
+renders the host's in-memory session state (`state.thinkingEffort`, updated by
+the model picker via `session.setThinking` → `getStatus` → `setAppState`). The
+custom status line cannot: `StatusLinePayload` (10 fields) carries no
+thinking-effort field, and the wire journal records effort only in
+`profile.bind` (session start) and `llm.request` (per request) — the switch
+itself emits no local event (only an ACP `config_option_update` session
+notification, which never reaches the wire file).
+
+Consequence: the HUD shows the effort the last request actually ran with and
+updates on the next request after a switch (typically within a second of
+sending a message). The built-in footer shows the session's current runtime
+effort immediately. Both are truthful; they differ only in the switch →
+next-request window. Verified against host source `footer.ts` /
+`status-line-command.ts` and real 0.34.0 session wires.
+
+Acceptance criteria:
+
+- the host exposes the current thinking effort in the status-line payload
+  (e.g. `thinkingEffort` alongside `model`), or emits a local event on an
+  in-session switch;
+- the HUD prefers the payload field when present, keeping the wire-derived
+  effort as the fallback;
+- the fallback (next-request update) keeps working unchanged on hosts without
+  the field.
