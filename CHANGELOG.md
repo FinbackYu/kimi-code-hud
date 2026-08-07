@@ -6,6 +6,17 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Follow in-session effort and model switches from the per-request ground
+  truth: hosts stamp every `llm.request` wire row with the `thinkingEffort`
+  and `modelAlias` the request actually ran with, so a switch that emits no
+  new `config.update`/`profile.bind` row — the host's own footer (e.g. the
+  line-2 context figures) can lag behind here — now updates the HUD on the
+  next request. The one-time backfill scan version is bumped so sessions
+  tracked by earlier HUD builds re-project effort and model from their
+  request journal too.
+
 ## [0.6.5] - 2026-08-06
 
 ### Fixed

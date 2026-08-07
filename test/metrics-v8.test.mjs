@@ -163,7 +163,7 @@ test('v7 projection backfill persists its cursor, retries, then swaps atomically
     }
   }
   assert.equal(state.backfill, null);
-  assert.equal(state.backfillScanV, 8);
+  assert.equal(state.backfillScanV, 9);
   assert.equal(metrics.modelAlias, 'new-model');
   assert.equal(state.sessionDir, fx.sessionDir);
 });
@@ -198,7 +198,7 @@ test('projection backfill catches a main wire that keeps growing between frames'
     if (!state.backfill) break;
   }
   assert.equal(state.backfill, null);
-  assert.equal(state.backfillScanV, 8);
+  assert.equal(state.backfillScanV, 9);
   assert.equal(metrics.modelAlias, 'caught');
 });
 
@@ -236,7 +236,7 @@ test('an inode change abandons an unfinished projection and restarts at byte zer
   const state = readState(fx.statePath);
   assert.equal(metrics.modelAlias, 'replacement');
   assert.equal(state.backfill, null);
-  assert.equal(state.backfillScanV, 8);
+  assert.equal(state.backfillScanV, 9);
   assert.equal(state.agents.main.offset, Buffer.byteLength(replacement));
 });
 
@@ -325,7 +325,7 @@ test('cache migration cut short by a small frame budget resumes until complete',
     thinkingLevel: null,
     goal: null,
     swarmMode: false,
-    backfillScanV: 8,
+    backfillScanV: 9,
   }));
 
   // The budget reaches only the newest historical row: it counts, but the

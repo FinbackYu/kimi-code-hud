@@ -203,6 +203,55 @@ test('processWireChunk tracks model and thinkingEffort from profile.bind', () =>
   assert.equal(state.agents.main.samples.length, 1); // step.end still processed
 });
 
+test('processWireChunk tracks effort and model from llm.request rows', () => {
+  const state = makeState();
+  const lines = [
+    '{"type":"profile.bind","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"high","time":1}',
+    // In-session switch with no META row: the next request carries the new effort.
+    '{"type":"llm.request","modelAlias":"deepseek/deepseek-v4-flash","model":"deepseek-v4-flash","thinkingEffort":"max","time":2}',
+  ].join('\n') + '\n';
+  processWireChunk(state, lines);
+  assert.equal(state.thinkingLevel, 'max');
+  assert.equal(state.modelAlias, 'deepseek/deepseek-v4-flash');
+});
+
+test('processWireChunk llm.request model switch resets the fleet windows', () => {
+  const state = makeState();
+  const lines = [
+    '{"type":"profile.bind","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"max","time":1}',
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 100 }),
+    stepEnd({ output: 200, streamMs: 1000, ttftMs: 200 }),
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 300 }),
+    // No config.update on the switch — the request row carries the new alias.
+    '{"type":"llm.request","modelAlias":"kimi-code/k3-256k","model":"k3-256k","thinkingEffort":"max","time":2}',
+  ].join('\n') + '\n';
+  processWireChunk(state, lines);
+  assert.equal(state.modelAlias, 'kimi-code/k3-256k');
+  assert.equal(state.agents.main.samples.length, 0);
+});
+
+test('processWireChunk llm.request without effort never clobbers the bound level', () => {
+  const state = makeState();
+  const lines = [
+    '{"type":"profile.bind","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"max","time":1}',
+    '{"type":"llm.request","modelAlias":"deepseek/deepseek-v4-flash","time":2}',
+  ].join('\n') + '\n';
+  processWireChunk(state, lines);
+  assert.equal(state.thinkingLevel, 'max');
+  assert.equal(state.modelAlias, 'deepseek/deepseek-v4-flash');
+});
+
+test('processWireChunk ignores subagent llm.request model metadata', () => {
+  const state = makeState();
+  processWireChunk(
+    state,
+    '{"type":"llm.request","modelAlias":"__secondary__","thinkingEffort":"max","time":1}\n',
+    'agent-0',
+  );
+  assert.equal(state.thinkingLevel, null);
+  assert.equal(state.modelAlias, null);
+});
+
 test('processWireChunk ignores subagent config/goal/swarm/turn rows', () => {
   const state = makeState();
   const lines = [
@@ -754,7 +803,7 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   assert.equal(m.thinkingLevel, 'high');
   // Second run must not rescan (versioned scan marker persisted).
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 8);
+  assert.equal(state.backfillScanV, 9);
 });
 
 test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
@@ -775,8 +824,38 @@ test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', ()
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 8);
+  assert.equal(state.backfillScanV, 9);
   assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
+});
+
+test('getMetrics v9 backfill re-scans v8 states and picks up request-level effort', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    '{"type":"profile.bind","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"high","time":1}\n' +
+      '{"type":"llm.request","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"max","time":2}\n',
+  );
+  // v8 state: offset already past the rows, scan marked done at the previous
+  // version — the request-level effort was never captured.
+  const size = fs.statSync(wirePath).size;
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({
+      v: 8,
+      agents: { main: { offset: size, samples: [], lastMedian: null } },
+      modelAlias: null,
+      thinkingLevel: null,
+      goal: null,
+      swarmMode: false,
+      backfillScanV: 8,
+    }),
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(m.thinkingLevel, 'max'); // last llm.request wins
+  assert.equal(m.modelAlias, 'deepseek/deepseek-v4-flash');
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.equal(state.backfillScanV, 9);
 });
 
 test('getMetrics fresh sessions derive tracked rows without a separate backfill scan', () => {
@@ -796,7 +875,7 @@ test('getMetrics fresh sessions derive tracked rows without a separate backfill 
   assert.ok(m.goal);
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 8); // marker still set, no rescan later
+  assert.equal(state.backfillScanV, 9); // marker still set, no rescan later
 });
 
 test('getMetrics tracks swarm mode from the wire journal', () => {
@@ -840,7 +919,7 @@ test('getMetrics v6 backfill re-scans v5 states and anchors the turn timer', () 
   // end_turn means the timer is anchored right now.
   assert.equal(m.turnStartedAt, EVENT_TIME);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 8);
+  assert.equal(state.backfillScanV, 9);
 });
 
 test('getMetrics v7 backfill re-scans v6 states and recovers turn.ended', () => {
@@ -870,7 +949,7 @@ test('getMetrics v7 backfill re-scans v6 states and recovers turn.ended', () => 
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
   assert.equal(state.agents.main.lastTurnPromptAt, EVENT_TIME);
   assert.equal(state.agents.main.lastTurnEndAt, EVENT_TIME + 1000);
-  assert.equal(state.backfillScanV, 8);
+  assert.equal(state.backfillScanV, 9);
 });
 
 test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', () => {
@@ -890,7 +969,7 @@ test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', 
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 8);
+  assert.equal(state.backfillScanV, 9);
 });
 
 test('getMetrics aggregates an active fleet: total, average, count, TTFT median', () => {
@@ -1527,5 +1606,5 @@ test('getMetrics v8 backfill recovers an in-flight compaction', () => {
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME + 5000 });
   assert.equal(m.compactingSince, EVENT_TIME);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 8);
+  assert.equal(state.backfillScanV, 9);
 });
