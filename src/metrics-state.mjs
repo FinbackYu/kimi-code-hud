@@ -6,6 +6,10 @@ import { atomicWriteFile } from './fs-store.mjs';
 import { emptyAgent, normAgent } from './metrics-agent.mjs';
 import { emptyTasksState, normalizeTasks } from './metrics-tasks.mjs';
 import {
+  emptySessionUsageState,
+  normalizeSessionUsageState,
+} from './session-usage.mjs';
+import {
   BACKFILL_SCAN_V,
   CACHE_SCAN_V,
   MAX_SAMPLES,
@@ -36,6 +40,7 @@ export function emptyState() {
     hostVersion: null,
     cacheScanV: CACHE_SCAN_V,
     tasks: emptyTasksState(),
+    sessionUsage: emptySessionUsageState(),
   };
   resetCacheState(state);
   return state;
@@ -169,6 +174,7 @@ export function loadState(statePath) {
         }
         state.backfill = normalizeBackfill(state.backfill);
         state.tasks = normalizeTasks(state.tasks);
+        state.sessionUsage = normalizeSessionUsageState(state.sessionUsage);
         if (typeof state.hostVersion !== 'string') state.hostVersion = null;
         delete state.cacheTurn;
         delete state.cacheNeedsPrompt;

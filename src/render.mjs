@@ -357,6 +357,85 @@ function quotaSegment({ layout, quota, color, now, C }) {
   return parts.length ? parts.join(' · ') : null;
 }
 
+function providerBalanceText(balance) {
+  if (!balance || typeof balance.total !== 'number' || !Number.isFinite(balance.total)) return null;
+  const amount = balance.total.toFixed(2);
+  if (balance.currency === 'CNY') return `¥${amount}`;
+  if (balance.currency === 'USD') return `$${amount}`;
+  return `${balance.currency} ${amount}`;
+}
+
+function providerCostText(amount, currency) {
+  let digits = 2;
+  if (amount < 0.001) digits = 6;
+  else if (amount < 0.1) digits = 4;
+  else if (amount < 1) digits = 3;
+  let text = amount.toFixed(digits);
+  while (text.endsWith('0') && text.includes('.') && text.split('.')[1].length > 2) {
+    text = text.slice(0, -1);
+  }
+  if (currency === 'USD') return `$${text}`;
+  if (currency === 'CNY') return `¥${text}`;
+  return `${currency} ${text}`;
+}
+
+function providerUsageFact(usage) {
+  if (!usage || typeof usage.label !== 'string') return null;
+  if (usage.kind === 'cost') {
+    if (
+      usage.scope !== 'session'
+      || !['USD', 'CNY'].includes(usage.currency)
+      || typeof usage.amount !== 'number'
+      || !Number.isFinite(usage.amount)
+      || usage.amount <= 0
+      || usage.estimated !== true
+    ) {
+      return null;
+    }
+    return {
+      kind: 'cost', label: usage.label,
+      suffix: `Session Cost ≈${providerCostText(usage.amount, usage.currency)}`,
+      stale: false,
+    };
+  }
+  if (usage.kind !== 'balance' || !Array.isArray(usage.balances)) return null;
+  let suffix;
+  if (usage.available === false) {
+    suffix = 'Balance unavailable';
+  } else {
+    const balance = usage.balances.find((item) => item.currency === 'CNY')
+      || usage.balances.find((item) => item.currency === 'USD')
+      || usage.balances[0];
+    const amount = providerBalanceText(balance);
+    if (!amount) return null;
+    suffix = `Balance ${amount}`;
+  }
+  return {
+    kind: 'balance', label: usage.label, suffix,
+    available: usage.available,
+    stale: usage.stale === true,
+  };
+}
+
+function providerUsageSegment({ providerUsage, color, C }) {
+  const values = Array.isArray(providerUsage) ? providerUsage : [providerUsage];
+  let facts = values.map(providerUsageFact).filter(Boolean);
+  const costLabels = new Set(facts.filter((fact) => fact.kind === 'cost').map((fact) => fact.label));
+  facts = facts.filter((fact) => !(
+    fact.kind === 'balance'
+    && fact.available === false
+    && costLabels.has(fact.label)
+  ));
+  if (facts.length === 0) return null;
+
+  let previousLabel = null;
+  return facts.map((fact) => {
+    const text = fact.label === previousLabel ? fact.suffix : `${fact.label} ${fact.suffix}`;
+    previousLabel = fact.label;
+    return fact.stale ? colorize(color, C.muted, text) : text;
+  }).join(' · ');
+}
+
 // Each pure builder declares the minimum information tier at which it may
 // appear. Builders still receive the actual tier for compact representations.
 const SEGMENT_BUILDERS = [
@@ -365,6 +444,7 @@ const SEGMENT_BUILDERS = [
   { minLayout: 'compact', build: projectSegment },
   { minLayout: 'compact', build: speedSegment },
   { minLayout: 'compact', build: cacheSegment },
+  { minLayout: 'compact', build: providerUsageSegment },
   { minLayout: 'compact', build: quotaSegment },
 ];
 
@@ -382,6 +462,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
+ * @param {object|object[]|null} ctx.providerUsage normalized provider facts
  * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs, tasks}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] normal|compact

@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {
+  findProviderTable,
   findModelTable,
+  resolveModelConfig,
+  resolveProviderConfig,
   stringArrayValue,
   resolveModelProvider,
   MANAGED_KIMI_PROVIDER,
@@ -17,6 +20,11 @@ base_url = "https://api.kimi.com/coding/v1"
 
 [providers.anthropic]
 type = "anthropic"
+
+[providers.deepseek]
+type = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key = "redacted\\\\value"
 
 [models."kimi-code/k3"]
 provider = "managed:kimi-code"
@@ -48,6 +56,28 @@ test('findModelTable matches by alias, display_name, and model id', () => {
   assert.match(findModelTable(CONFIG, 'claude-opus-4-7'), /anthropic/);
   assert.equal(findModelTable(CONFIG, 'nope'), null);
   assert.equal(findModelTable(CONFIG, ''), null);
+});
+
+test('resolveModelConfig returns the billing identity without provider secrets', () => {
+  assert.deepEqual(resolveModelConfig({ name: 'claude-opus-4-7', configText: CONFIG }), {
+    alias: 'claude-opus-4-7',
+    provider: 'anthropic',
+    model: 'claude-opus-4-7',
+    displayName: null,
+  });
+  assert.equal(resolveModelConfig({ name: 'missing', configText: CONFIG }), null);
+});
+
+test('provider config resolves quoted and bare tables with decoded credentials', () => {
+  assert.match(findProviderTable(CONFIG, 'managed:kimi-code'), /api.kimi.com/);
+  assert.match(findProviderTable(CONFIG, 'deepseek'), /api_key/);
+  assert.deepEqual(resolveProviderConfig({ provider: 'deepseek', configText: CONFIG }), {
+    provider: 'deepseek',
+    type: 'openai',
+    baseUrl: 'https://api.deepseek.com/v1',
+    apiKey: 'redacted\\value',
+  });
+  assert.equal(resolveProviderConfig({ provider: 'missing', configText: CONFIG }), null);
 });
 
 test('stringArrayValue parses inline arrays and reports absent keys as null', () => {

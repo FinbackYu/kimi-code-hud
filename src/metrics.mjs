@@ -45,6 +45,10 @@ import {
   reconcileTaskSidecars,
   resetWireTasks,
 } from './metrics-tasks.mjs';
+import {
+  advanceSessionUsageAgent,
+  normalizeSessionUsageState,
+} from './session-usage.mjs';
 
 export { SESSIONS_ROOT, findSessionDir, findWirePath, CACHE_BACKFILL_MAX_BYTES, median };
 
@@ -415,7 +419,7 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * @param {number} [opts.deadline] absolute `performance.now()` deadline
  * @param {number} [opts.readBudgetBytes] total wire bytes allowed this frame
  * @param {string|null} [opts.hostVersion] Kimi Code version from the status-line payload
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null, tasks: {bash: number, agents: number}}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, modelUsage: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null, tasks: {bash: number, agents: number}}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
@@ -427,7 +431,7 @@ export function getMetrics(sessionId, {
 } = {}) {
   const empty = {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
-    modelAlias: null, swarmMode: false, hostVersion: null, cache: null,
+    modelAlias: null, swarmMode: false, hostVersion: null, cache: null, modelUsage: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
     turnStartedAt: null, compactingSince: null, compactionMs: null,
     tasks: { bash: 0, agents: 0 },
@@ -467,8 +471,9 @@ export function getMetrics(sessionId, {
       ? Math.max(0, Math.floor(readBudgetBytes))
       : WIRE_READ_BUDGET_BYTES;
     let remainingBytes = Math.min(WIRE_READ_BUDGET_BYTES, requestedBudget);
+    const wires = enumerateWires(sessionDir);
     const prepared = [];
-    for (const wire of enumerateWires(sessionDir)) {
+    for (const wire of wires) {
       if (!deadlineOpen(deadline)) break;
       const descriptor = prepareWire(state, wire);
       if (descriptor) prepared.push(descriptor);
@@ -588,6 +593,40 @@ export function getMetrics(sessionId, {
       } catch {
         // The task badge is best effort and must stay silent.
       }
+    }
+
+    // Cost estimation consumes usage.record through a dedicated all-agent
+    // reader. Keeping this cursor separate lets an upgraded HUD rebuild the
+    // complete session ledger without replaying or disturbing live metrics.
+    // It shares the same hard byte/deadline budget and remains hidden until
+    // every visible wire has caught up.
+    const sessionUsage = normalizeSessionUsageState(state.sessionUsage);
+    state.sessionUsage = sessionUsage;
+    let usageComplete = prepared.length === wires.length && prepared.length > 0;
+    if (deadlineOpen(deadline)) {
+      for (const wire of prepared) {
+        if (!deadlineOpen(deadline)) {
+          usageComplete = false;
+          break;
+        }
+        const result = advanceSessionUsageAgent({
+          state,
+          agent: wire.agent,
+          wirePath: wire.path,
+          fileId: wire.fileId,
+          fileSize: wire.stat.size,
+          maxBytes: Math.min(AGENT_WIRE_SLICE_BYTES, remainingBytes),
+        });
+        remainingBytes -= result.bytesRead;
+        stateChanged ||= result.changed;
+        usageComplete &&= result.complete;
+      }
+    } else {
+      usageComplete = false;
+    }
+    if (sessionUsage.complete !== usageComplete) {
+      sessionUsage.complete = usageComplete;
+      stateChanged = true;
     }
 
     return finishMetrics(state, statePath, stateChanged, now, visibleAgentNames);

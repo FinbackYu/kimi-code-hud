@@ -1,7 +1,6 @@
-// Shared readers for the host's config.toml model tables. Both the quota
-// gating (which provider serves the active model) and the thinking-level
-// fallback (capabilities/support_efforts of that model) parse the same
-// [models."<alias>"] tables, so the parsing lives here exactly once.
+// Shared readers for the host's config.toml model and provider tables. Quota
+// gating, provider-usage adapters, and thinking-level fallback all consume
+// this same host-owned config snapshot, so the parsing lives here once.
 
 import fs from 'node:fs';
 import { CONFIG_TOML_PATH } from './paths.mjs';
@@ -50,6 +49,27 @@ export function stringValue(section, key) {
 }
 
 /**
+ * Read a TOML basic string written by Kimi Code's JSON-based catalog writer.
+ * Unlike stringValue, this decodes escaped quotes and backslashes, which
+ * matters for provider credentials. Returns null for malformed values.
+ * @param {string} section raw table text
+ * @param {string} key
+ * @returns {string|null}
+ */
+export function decodedStringValue(section, key) {
+  if (typeof section !== 'string') return null;
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = section.match(new RegExp(`^\\s*${escapedKey}\\s*=\\s*("(?:\\\\.|[^"\\\\])*")`, 'm'));
+  if (!m) return null;
+  try {
+    const value = JSON.parse(m[1]);
+    return typeof value === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Parse an inline string-array value: `capabilities = [ "thinking", ... ]`.
  * Returns null when the key is absent (never declared).
  * @param {string} section raw table text
@@ -80,6 +100,72 @@ export function findModelTable(text, name) {
     if (stringValue(body, 'model') === name) return body;
   }
   return null;
+}
+
+/**
+ * Resolve one model alias into the provider and upstream model id used for
+ * billing. The complete config snapshot is required so no model or credential
+ * data is persisted by this helper.
+ * @param {object} opts
+ * @param {string} opts.name alias, display name, or upstream model id
+ * @param {string} opts.configText complete config.toml text
+ * @returns {{alias: string, provider: string|null, model: string|null, displayName: string|null}|null}
+ */
+export function resolveModelConfig({ name, configText } = {}) {
+  if (typeof name !== 'string' || !name || typeof configText !== 'string') return null;
+  const re = /\[models\."([^"]+)"\]\s*\n([\s\S]*?)(?=\n\[|$)/g;
+  let m;
+  while ((m = re.exec(configText)) !== null) {
+    const [, alias, body] = m;
+    const model = decodedStringValue(body, 'model');
+    const displayName = decodedStringValue(body, 'display_name');
+    if (alias !== name && model !== name && displayName !== name) continue;
+    return {
+      alias,
+      provider: decodedStringValue(body, 'provider'),
+      model,
+      displayName,
+    };
+  }
+  return null;
+}
+
+/**
+ * Find a flat [providers.<name>] or [providers."<name>"] table.
+ * Provider names are matched exactly; no model or transport-type inference is
+ * performed here because those names select credential-bearing adapters.
+ * @param {string} text
+ * @param {string} name
+ * @returns {string|null}
+ */
+export function findProviderTable(text, name) {
+  if (typeof text !== 'string' || typeof name !== 'string' || !name) return null;
+  const re = /\[providers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))\]\s*\n([\s\S]*?)(?=\n\[|$)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const providerName = m[1] || m[2];
+    if (providerName === name) return m[3];
+  }
+  return null;
+}
+
+/**
+ * Resolve the small provider-config subset needed by usage adapters. The
+ * returned object is deliberately never persisted or logged by this module.
+ * @param {object} opts
+ * @param {string} opts.provider exact provider table name
+ * @param {string} opts.configText complete config.toml text
+ * @returns {{provider: string, type: string|null, baseUrl: string|null, apiKey: string|null}|null}
+ */
+export function resolveProviderConfig({ provider, configText } = {}) {
+  const table = findProviderTable(configText, provider);
+  if (table === null) return null;
+  return {
+    provider,
+    type: decodedStringValue(table, 'type'),
+    baseUrl: decodedStringValue(table, 'base_url'),
+    apiKey: decodedStringValue(table, 'api_key'),
+  };
 }
 
 /**

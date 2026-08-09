@@ -82,6 +82,133 @@ test('normal layout shows zero quota usage with its reset countdown', () => {
   assert.ok(line.includes('7d ░░░░░░░░░░ 0% ~3d2h'));
 });
 
+test('provider balance uses currency-aware compact text instead of a quota bar', () => {
+  const [cny] = renderHud(baseCtx({
+    quota: null,
+    providerUsage: {
+      kind: 'balance', label: 'DeepSeek', available: true,
+      balances: [{ currency: 'USD', total: 20 }, { currency: 'CNY', total: 110 }],
+    },
+  }));
+  assert.ok(cny.endsWith(' │ DeepSeek Balance ¥110.00'));
+
+  const [usd] = renderHud(baseCtx({
+    quota: null,
+    providerUsage: {
+      kind: 'balance', label: 'DeepSeek', available: true,
+      balances: [{ currency: 'USD', total: 20.5 }],
+    },
+  }));
+  assert.ok(usd.endsWith(' │ DeepSeek Balance $20.50'));
+});
+
+test('provider balance reports unavailable and dims stale cache', () => {
+  const [unavailable] = renderHud(baseCtx({
+    quota: null,
+    providerUsage: {
+      kind: 'balance', label: 'DeepSeek', available: false,
+      balances: [{ currency: 'CNY', total: 0 }],
+    },
+  }));
+  assert.ok(unavailable.endsWith(' │ DeepSeek Balance unavailable'));
+
+  const [stale] = renderHud(baseCtx({
+    color: true,
+    quota: null,
+    providerUsage: {
+      kind: 'balance', label: 'DeepSeek', available: true, stale: true,
+      balances: [{ currency: 'CNY', total: 1 }],
+    },
+  }));
+  assert.match(stale, /\x1b\[90mDeepSeek Balance ¥1\.00\x1b\[0m/);
+});
+
+test('provider cost names the session scope and marks the local estimate', () => {
+  const openAI = renderHud({
+    payload: basePayload(), metrics: null, quota: null, gitDirty: false,
+    providerUsage: {
+      kind: 'cost', label: 'OpenAI', scope: 'session', currency: 'USD',
+      amount: 0.4219, estimated: true,
+    },
+    layout: 'normal', color: false,
+  })[0];
+  assert.ok(openAI.endsWith(' │ OpenAI Session Cost ≈$0.422'));
+
+  const anthropic = renderHud({
+    payload: basePayload(), metrics: null, quota: null, gitDirty: false,
+    providerUsage: {
+      kind: 'cost', label: 'Anthropic', scope: 'session', currency: 'USD',
+      amount: 0.0042, estimated: true,
+    },
+    layout: 'normal', color: false,
+  })[0];
+  assert.ok(anthropic.endsWith(' │ Anthropic Session Cost ≈$0.0042'));
+});
+
+test('provider balance and session cost combine under one official brand name', () => {
+  const combined = renderHud({
+    payload: basePayload(), metrics: null, quota: null, gitDirty: false,
+    providerUsage: [
+      {
+        kind: 'balance', label: 'DeepSeek', available: true,
+        balances: [{ currency: 'CNY', total: 110 }],
+      },
+      {
+        kind: 'cost', label: 'DeepSeek', scope: 'session', currency: 'CNY',
+        amount: 0.00422, estimated: true,
+      },
+    ],
+    layout: 'normal', color: false,
+  })[0];
+  assert.ok(combined.endsWith(' │ DeepSeek Balance ¥110.00 · Session Cost ≈¥0.0042'));
+
+  const staleCombined = renderHud({
+    payload: basePayload(), metrics: null, quota: null, gitDirty: false,
+    providerUsage: [
+      {
+        kind: 'balance', label: 'DeepSeek', available: true, stale: true,
+        balances: [{ currency: 'CNY', total: 110 }],
+      },
+      {
+        kind: 'cost', label: 'DeepSeek', scope: 'session', currency: 'CNY',
+        amount: 0.00422, estimated: true,
+      },
+    ],
+    layout: 'normal', color: true,
+  })[0];
+  assert.match(staleCombined, /\x1b\[90mDeepSeek Balance ¥110\.00\x1b\[0m · Session Cost ≈¥0\.0042/);
+
+  const costOnly = renderHud({
+    payload: basePayload(), metrics: null, quota: null, gitDirty: false,
+    providerUsage: [
+      {
+        kind: 'balance', label: 'DeepSeek', available: false,
+        balances: [{ currency: 'CNY', total: 0 }],
+      },
+      {
+        kind: 'cost', label: 'DeepSeek', scope: 'session', currency: 'CNY',
+        amount: 0.00422, estimated: true,
+      },
+    ],
+    layout: 'normal', color: false,
+  })[0];
+  assert.ok(costOnly.endsWith(' │ DeepSeek Session Cost ≈¥0.0042'));
+  assert.doesNotMatch(costOnly, /Balance unavailable/);
+});
+
+test('provider cost refuses ambiguous or provider-reported spend shapes', () => {
+  for (const providerUsage of [
+    { kind: 'cost', label: 'OpenAI', scope: 'month', currency: 'USD', amount: 1, estimated: true },
+    { kind: 'cost', label: 'OpenAI', scope: 'session', currency: 'USD', amount: 1, estimated: false },
+  ]) {
+    const line = renderHud({
+      payload: basePayload(), metrics: null, quota: null, gitDirty: false,
+      providerUsage, layout: 'normal', color: false,
+    })[0];
+    assert.doesNotMatch(line, /Cost|Spent|Balance/);
+  }
+});
+
 test('model thinking suffix from session thinkingLevel (normal and compact)', () => {
   const withLevel = (thinkingLevel, layout) =>
     renderHud(baseCtx({ layout, metrics: { tps: 47, ttftMs: 1300, thinkingLevel } }))[0];

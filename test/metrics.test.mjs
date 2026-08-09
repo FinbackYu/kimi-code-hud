@@ -129,6 +129,34 @@ test('processWireChunk computes TPS with timestamped per-agent samples', () => {
   assert.equal(bucket.lastMedian, 150); // median of the freshest [50,100,150,200,250]
 });
 
+test('getMetrics rebuilds complete model usage across main and subagent wires', () => {
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const usageRecord = (model, usage) => `${JSON.stringify({
+    type: 'usage.record', model, usage, usageScope: 'turn', time: EVENT_TIME,
+  })}\n`;
+  fs.writeFileSync(wires.main, usageRecord('openai/gpt-5.6', {
+    inputOther: 100, inputCacheRead: 200, inputCacheCreation: 0, output: 50,
+  }));
+  fs.writeFileSync(wires['agent-0'], usageRecord('openai/gpt-5.6', {
+    inputOther: 10, inputCacheRead: 20, inputCacheCreation: 0, output: 5,
+  }));
+
+  const metrics = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.deepEqual(metrics.modelUsage, {
+    scope: 'session',
+    agents: 'all',
+    byModel: {
+      'openai/gpt-5.6': {
+        inputOther: 110,
+        inputCacheRead: 220,
+        inputCacheCreation: 0,
+        output: 55,
+      },
+    },
+  });
+});
+
 test('processWireChunk bounds the stored per-agent sample array', () => {
   const state = makeState();
   const lines = [];
@@ -1455,7 +1483,7 @@ test('getMetrics returns nulls for unknown sessions', () => {
   });
   assert.deepEqual(m, {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
-    modelAlias: null, swarmMode: false, hostVersion: null, cache: null,
+    modelAlias: null, swarmMode: false, hostVersion: null, cache: null, modelUsage: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
     turnStartedAt: null, compactingSince: null, compactionMs: null,
     tasks: { bash: 0, agents: 0 },
