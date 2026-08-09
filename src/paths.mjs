@@ -11,6 +11,7 @@ export const CONFIG_TOML_PATH = path.join(KIMI_HOME, 'config.toml');
 export const CREDENTIALS_PATH = path.join(KIMI_HOME, 'credentials', 'kimi-code.json');
 export const QUOTA_CACHE_PATH = path.join(HUD_DIR, 'quota.json');
 export const REFRESH_LOCK_PATH = path.join(HUD_DIR, 'refresh.lock');
+export const PROVIDER_USAGE_DIR = path.join(HUD_DIR, 'provider-usage');
 
 /** Resolve command-level path overrides once, then pass the snapshot down. */
 export function resolveRuntimePaths({ env = process.env, home = DEFAULT_HOME } = {}) {
@@ -23,6 +24,7 @@ export function resolveRuntimePaths({ env = process.env, home = DEFAULT_HOME } =
     configPath: path.join(hudDir, 'config.json'),
     quotaCachePath: path.join(hudDir, 'quota.json'),
     quotaLockPath: path.join(hudDir, 'refresh.lock'),
+    providerUsageDir: path.join(hudDir, 'provider-usage'),
     tuiTomlPath: env.KIMI_HUD_TUI_TOML || path.join(kimiHome, 'tui.toml'),
     configTomlPath: env.KIMI_HUD_CONFIG_TOML || path.join(kimiHome, 'config.toml'),
     credentialsPath: path.join(kimiHome, 'credentials', 'kimi-code.json'),

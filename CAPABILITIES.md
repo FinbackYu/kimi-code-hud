@@ -1,7 +1,7 @@
 # HUD capabilities
 
-- Last verified: 2026-08-07
-- HUD behavior baseline: `v0.6.4-2` (`77b108c`)
+- Last verified: 2026-08-09
+- HUD behavior baseline: Unreleased after `v0.6.5` (`a59fbde` base)
 - Kimi Code baseline: `0.34.0` (`f0614c53e59f7e1e257412063b059b9eb82764cf`)
 
 This is the canonical inventory of footer coverage, readable data, and
@@ -95,11 +95,22 @@ commands are documented in [README.md](README.md#安装) and
 | Git and cwd | run Kimi Code inside a Git worktree; branch/dirty state changes as the worktree changes | shortened cwd, branch, and dirty `*` | partial — [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer) |
 | Context | no HUD action; Kimi Code owns footer line 2 | context percentage and exact current/max tokens remain on line 2 | available, host-owned; the value follows `[token_counting]` strategy |
 | Kimi subscription quota | use a managed Kimi model with a valid Kimi Code login; refresh is automatic | short and weekly usage percentage, bar, and reset countdown | available, automatic |
+| DeepSeek API balance and cost | use a supported model whose provider is exactly `deepseek`, configured against official `api.deepseek.com` with an API key | account-currency output such as `DeepSeek Balance ¥N.NN · Session Cost ≈¥N.NN`; `DeepSeek Session Cost ≈¥N.NN` when balance is unavailable but CNY is known; stale balance alone is dimmed | available, automatic; CNY / USD official tables selected from the balance response; cache hits are conservatively priced as misses until the host maps DeepSeek's cache field |
+| OpenAI / Anthropic API cost | use a supported model through the official direct API; no admin credential is required | `OpenAI Session Cost ≈$N.NN` / `Anthropic Session Cost ≈$N.NN`, including main and all subagents | available, automatic; local standard-price estimate, not balance or server bill |
 | layout | set `{"layout":"normal"}` or `{"layout":"compact"}` in `~/.kimi-code-hud/config.json`, or set `KIMI_HUD_LAYOUT` | normal or compact field set | available |
 | color and theme | set `NO_COLOR=1` or `KIMI_HUD_NO_COLOR=1`; optionally set `KIMI_HUD_THEME=dark\|light` | plain text or the selected ANSI palette | available |
 
-`--refresh-quota` is a troubleshooting/internal command; normal quota use does
-not require invoking it manually.
+`--refresh-quota` and `--refresh-provider-usage` are troubleshooting/internal
+commands; normal quota and provider-usage refreshes do not require invoking
+them manually.
+
+Provider-usage labels use the full official brand and an unabridged metric
+name. `Balance` means the provider-reported amount currently available. A
+cost field must name its scope: `Session Cost ≈` for a local estimate,
+or `Today Spent` / `Month Spent` / `Total Spent` when the provider reports that
+exact server-side window. Bare `Cost`, `Bal`, `Sub`, and a generic `API` tag are
+not display contracts. Subscription sources instead use the product name plus
+their real quota window, such as `Kimi Code 5h 31%`.
 
 ## Readable but not rendered
 
@@ -112,9 +123,9 @@ public contract.
 | Source | Available information | Current use | Unexposed capability / constraint |
 |---|---|---|---|
 | status-line payload | full cwd, context ratio, current/max context tokens, session ID, host version | model/mode/cwd/branch display; session ID locates wire data; Context stays on host line 2; host version persists into metrics state for compatibility gating | host version is available for diagnostics; full cwd is deliberately shortened; context values follow `[token_counting]` strategy; duplicating Context on line 1 adds little value |
-| `step.end.usage` | `inputOther`, `inputCacheRead`, `inputCacheCreation`, `output` per model step | output + stream duration derive TPS; the three input fields derive Cache | session/turn token totals need new persisted counters and an explicit main-only versus all-agent policy |
+| `step.end.usage` | `inputOther`, `inputCacheRead`, `inputCacheCreation`, `output` per model step | output + stream duration derive TPS; the three input fields derive Cache | not added to the cost ledger because `usage.record` duplicates the same request usage with a model identity |
 | Cache reducer state | exact session-cumulative `readTokens` and `inputTokens` plus their ratio | renders only rounded `Cache N%` | exact `Cache N% (read/input)` is available without new wire parsing; token counts were removed with the full layout in HUD 0.6.0 |
-| `usage.record` | the same four usage counters, model, and optional session/turn scope | deliberately ignored | may support a model-scoped ledger or fallback, but must never be added to the duplicate `step.end` usage |
+| `usage.record` | the same four usage counters, model, and optional session/turn scope | a dedicated all-agent cursor accumulates model-scoped session totals for supported DeepSeek / OpenAI / Anthropic local cost estimates | cursor and content-free counters persist; the estimate remains hidden until every visible wire is caught up, and must never also add duplicate `step.end` usage |
 | per-agent wires | per-agent TPS samples, TTFT, request/turn timestamps, and agent directory identity | aggregates fleet total, contributing-agent count, average, and median TTFT | an expanded/debug view could expose per-agent rows; the one-line footer should stay aggregated |
 | goal records | objective, criterion, status/reason, turns, tokens, elapsed time, and turn/token/time budgets | status, elapsed time, turns, and turn budget | numeric token/time budget progress is readable with a reducer extension; objective, criterion, and reasons are content and should not enter the footer by default |
 | task records | task ID, kind, status, timestamps, timeout, plus kind-specific process/agent details | the two running counts (`tasks.bash` / `tasks.agents`) | command, PID, description, subagent type, stop reason, and output tail stay out of the footer; they belong in task/debug views |
@@ -122,7 +133,8 @@ public contract.
 | compaction records | begin/end timing; compaction records also carry message counts and summaries | live and last compaction duration | compaction count/message count could support diagnostics; summaries are content and should remain hidden |
 | Git commands | diff stats, upstream divergence, PR number and URL | dirty boolean only | the data is available locally, but safe collection requires persistent TTL caches and async PR lookup |
 | quota cache | exact `used`, `limit`, `resetAt`, and `fetchedAt` for short and weekly windows | percentage, bar, and reset countdown | exact units and cache freshness are available for a detail/debug surface; do not relabel subscription quota as token billing or API balance |
-| model/profile config | model alias, provider, thinking effort; potentially profile/tool metadata | provider gates Kimi quota; thinking suffix | provider/profile are available for diagnostics; system prompts and tool policy details are sensitive/noisy |
+| provider-usage cache | provider, one-way SHA-256 credential fingerprint, `fetchedAt`, availability, and normalized currency balances | DeepSeek balance fact; it composes with the independent local Session Cost fact, and only stale balance text is dimmed | only the active credential's cache is read; API keys never enter cache, filenames, logs, or output |
+| model/profile config | model alias, provider, provider base URL/API key, thinking effort; potentially profile/tool metadata | provider gates Kimi quota; exact DeepSeek provider plus official base URL selects both its balance adapter and local pricing contract; official direct OpenAI/Anthropic base plus model ID selects a local pricing contract; thinking suffix | DeepSeek credentials are read only inside its balance adapter; local cost estimation sends no credential; provider/profile remain available for non-secret diagnostics |
 | upstream tip table | tip text, priority, solo/pair behavior | unused | it can be copied only with an explicit sync/drift strategy; it is not present in payload or wire data |
 
 ## Token meanings
@@ -133,9 +145,11 @@ public contract.
 |---|---|---|
 | context occupancy | tokens currently occupying the model context window | exact current/max values on host line 2; the reported value follows `[token_counting]` strategy (`measured+estimated` default / `measured` / `estimated`, overridable via `KIMI_TOKEN_COUNTING_STRATEGY`) |
 | cache ratio counts | cached input tokens divided by all input tokens counted for the session | ratio displayed; exact numerator/denominator retained but hidden |
-| model usage | cumulative input split and output tokens across model requests | available in wire rows; not accumulated as a public metric |
+| model usage | cumulative input split and output tokens across model requests | accumulated by model across main and all subagents; rendered only as supported DeepSeek / OpenAI / Anthropic `Session Cost ≈` |
 | goal usage | tokens charged while a goal is live, optionally against a goal token budget | persisted in goal updates; not reduced by the HUD |
 | subscription quota | provider-defined Kimi Code usage windows | percentage/reset displayed; not token billing and not API spend |
+| API balance | provider-reported prepaid monetary balance for the active API credential | DeepSeek balance displayed as currency, never as a quota percentage |
+| API cost estimate | local standard-price calculation over all-agent session model usage | DeepSeek / OpenAI / Anthropic `Session Cost ≈`; may compose with an independent balance fact, excludes provider-side adjustments, and never claims to be balance or final billing |
 
 Before exposing a token value, decide whether it is per step, turn, session,
 goal, model, main agent, or all agents. Do not combine those scopes under an

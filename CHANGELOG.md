@@ -6,6 +6,31 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Add a provider-usage cache and detached-refresh framework, with the first
+  adapter for DeepSeek's official API balance. The active model resolves to
+  its provider table, cache files are isolated by a one-way API-key
+  fingerprint, the render hot path never performs network I/O, and custom
+  DeepSeek-compatible proxies are refused so credentials only reach the
+  fixed official balance endpoint. The footer renders currency as compact
+  balance text (`DeepSeek Balance ¥N.NN`) instead of inventing a quota
+  percentage or relying on unexplained abbreviations. DeepSeek also uses the
+  local all-agent cost path, so ready facts compose as
+  `DeepSeek Balance ¥N.NN · Session Cost ≈¥N.NN` for CNY accounts (and the
+  matching USD form for USD accounts). Cost selects the official price table
+  from the balance response's currency and remains visible by itself when the
+  balance is unavailable but that account currency is known; an unknown
+  currency fails closed instead of guessing the symbol.
+- Add local all-agent session-cost estimates for supported models on the
+  official direct DeepSeek, OpenAI, and Anthropic APIs. A dedicated content-free
+  `usage.record` ledger reconstructs main and subagent history without
+  disturbing live metrics, waits for every wire to catch up, and fails closed
+  for unknown models or compatible proxies. The footer renders the full brand
+  and scope (`DeepSeek Session Cost ≈¥N.NN` / `OpenAI Session Cost ≈$N.NN` /
+  `Anthropic Session Cost ≈$N.NN`),
+  keeping estimates distinct from balances, admin billing, and subscriptions.
+
 ### Fixed
 
 - Follow in-session effort and model switches from the per-request ground

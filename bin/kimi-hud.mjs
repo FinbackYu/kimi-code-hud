@@ -12,6 +12,7 @@ import {
   uninstallHud,
 } from '../src/management-service.mjs';
 import { resolveRuntimePaths } from '../src/paths.mjs';
+import { refreshProviderUsage } from '../src/provider-usage.mjs';
 import { refreshQuota } from '../src/quota.mjs';
 import { renderStatusLine } from '../src/render-runtime.mjs';
 
@@ -39,6 +40,8 @@ Usage:
   kimi-code-hud --on             re-enable: write the command back (+ ensure the hook)
   kimi-code-hud --off            switch off (reversible): strip the command, hook stays dormant
   kimi-code-hud --refresh-quota  refresh the quota cache (internal, silent)
+  kimi-code-hud --refresh-provider-usage <provider> [fingerprint]
+                                refresh provider usage (internal, silent)
   kimi-code-hud --help           show this help
 
 Config: ~/.kimi-code-hud/config.json  {"layout":"compact|normal"}
@@ -81,6 +84,21 @@ async function main() {
         cachePath: RUNTIME_PATHS.quotaCachePath,
         lockPath: RUNTIME_PATHS.quotaLockPath,
         lockToken: process.env.KIMI_HUD_QUOTA_LOCK_TOKEN,
+      });
+    } catch {
+      // Detached refresh is silent by contract.
+    }
+    return 0;
+  }
+  const providerUsageIndex = args.indexOf('--refresh-provider-usage');
+  if (providerUsageIndex !== -1) {
+    try {
+      await refreshProviderUsage({
+        provider: args[providerUsageIndex + 1],
+        expectedFingerprint: args[providerUsageIndex + 2] || null,
+        configPath: RUNTIME_PATHS.configTomlPath,
+        providerUsageDir: RUNTIME_PATHS.providerUsageDir,
+        lockToken: process.env.KIMI_HUD_PROVIDER_USAGE_LOCK_TOKEN || null,
       });
     } catch {
       // Detached refresh is silent by contract.

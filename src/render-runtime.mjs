@@ -6,6 +6,16 @@ import { getMetrics } from './metrics.mjs';
 import { resolveModelProvider, MANAGED_KIMI_PROVIDER } from './model-config.mjs';
 import { readPayload } from './payload.mjs';
 import { managedPluginDisabled } from './plugin-state.mjs';
+import {
+  estimateProviderSessionCost,
+  resolveProviderCostTarget,
+} from './provider-cost.mjs';
+import {
+  ensureFreshProviderUsage,
+  isProviderUsageStale,
+  readProviderUsageCache,
+  resolveProviderUsageTarget,
+} from './provider-usage.mjs';
 import { ensureFreshQuota } from './quota.mjs';
 import { renderHud } from './render.mjs';
 import { resolveRuntimePaths } from './paths.mjs';
@@ -69,6 +79,7 @@ export async function renderStatusLine({
   });
 
   let quota = null;
+  let providerUsage = null;
   if (provider === null || provider === MANAGED_KIMI_PROVIDER) {
     quota = snapshot.quota;
     if (remainingMs(deadline, clock) >= REFRESH_MIN_REMAINING_MS) {
@@ -81,6 +92,54 @@ export async function renderStatusLine({
         now,
       });
     }
+  } else {
+    const providerUsageFacts = [];
+    let providerCurrency = null;
+    const resolveUsageTarget = dependencies.resolveProviderUsageTarget || resolveProviderUsageTarget;
+    const target = resolveUsageTarget({
+      provider,
+      configText: snapshot.configTomlText,
+      providerUsageDir: paths.providerUsageDir,
+    });
+    if (target) {
+      const readUsageCache = dependencies.readProviderUsageCache || readProviderUsageCache;
+      const cachedUsage = readUsageCache(target);
+      if (cachedUsage) {
+        const displayedBalance = cachedUsage.balances.find((item) => item.currency === 'CNY')
+          || cachedUsage.balances.find((item) => item.currency === 'USD')
+          || cachedUsage.balances[0];
+        providerCurrency = displayedBalance?.currency || null;
+        providerUsageFacts.push({
+          ...cachedUsage,
+          stale: isProviderUsageStale(cachedUsage, now),
+        });
+      }
+      if (remainingMs(deadline, clock) >= REFRESH_MIN_REMAINING_MS) {
+        const ensureUsage = dependencies.ensureFreshProviderUsage || ensureFreshProviderUsage;
+        ensureUsage({ scriptPath, target, cachedUsage, now });
+      }
+    }
+    const resolveCostTarget = dependencies.resolveProviderCostTarget || resolveProviderCostTarget;
+    const costTarget = resolveCostTarget({
+      provider,
+      configText: snapshot.configTomlText,
+      env,
+    });
+    if (costTarget) {
+      const estimateCost = dependencies.estimateProviderSessionCost
+        || estimateProviderSessionCost;
+      const cost = estimateCost({
+        target: costTarget,
+        modelUsage: metrics.modelUsage,
+        configText: snapshot.configTomlText,
+        env,
+        currency: providerCurrency,
+        now,
+      });
+      if (cost) providerUsageFacts.push(cost);
+    }
+    if (providerUsageFacts.length === 1) [providerUsage] = providerUsageFacts;
+    else if (providerUsageFacts.length > 1) providerUsage = providerUsageFacts;
   }
 
   metrics.thinkingLevel = resolveThinkingLevel({
@@ -103,6 +162,7 @@ export async function renderStatusLine({
   const lines = renderHud({
     payload,
     quota,
+    providerUsage,
     metrics,
     gitDirty,
     layout: layoutFromSnapshot(snapshot, env),

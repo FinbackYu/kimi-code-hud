@@ -1,5 +1,6 @@
 import { cacheMetricFromState } from './cache-hit.mjs';
 import { taskCountsFromState } from './metrics-tasks.mjs';
+import { sessionUsageMetricFromState } from './session-usage.mjs';
 import {
   ACTIVE_WINDOW_MS,
   MAX_SAMPLES,
@@ -146,6 +147,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       hostVersion: state.hostVersion ?? null,
       swarmMode: state.swarmMode === true,
       cache: cacheMetricFromState(state),
+      modelUsage: sessionUsageMetricFromState(state, agentNames),
       tpsTotal,
       tpsAgents,
       activeAgents,
