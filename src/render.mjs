@@ -367,9 +367,13 @@ function providerBalanceText(balance) {
 
 function providerCostText(amount, currency) {
   let digits = 2;
-  if (amount < 0.001) digits = 6;
-  else if (amount < 0.1) digits = 4;
-  else if (amount < 1) digits = 3;
+  // CNY amounts at or above one fen read like ordinary money. Keep extra
+  // precision only below that boundary so a real cost never collapses to ¥0.00.
+  if (currency !== 'CNY' || amount < 0.01) {
+    if (amount < 0.001) digits = 6;
+    else if (amount < 0.1) digits = 4;
+    else if (amount < 1) digits = 3;
+  }
   let text = amount.toFixed(digits);
   while (text.endsWith('0') && text.includes('.') && text.split('.')[1].length > 2) {
     text = text.slice(0, -1);

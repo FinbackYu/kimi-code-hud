@@ -145,6 +145,28 @@ test('provider cost names the session scope and marks the local estimate', () =>
   assert.ok(anthropic.endsWith(' │ Anthropic Session Cost ≈$0.0042'));
 });
 
+test('provider cost formats CNY as money above one fen without hiding smaller costs', () => {
+  const ordinary = renderHud({
+    payload: basePayload(), metrics: null, quota: null, gitDirty: false,
+    providerUsage: {
+      kind: 'cost', label: 'DeepSeek', scope: 'session', currency: 'CNY',
+      amount: 0.0321, estimated: true,
+    },
+    layout: 'normal', color: false,
+  })[0];
+  const subFen = renderHud({
+    payload: basePayload(), metrics: null, quota: null, gitDirty: false,
+    providerUsage: {
+      kind: 'cost', label: 'DeepSeek', scope: 'session', currency: 'CNY',
+      amount: 0.00422, estimated: true,
+    },
+    layout: 'normal', color: false,
+  })[0];
+
+  assert.ok(ordinary.endsWith(' │ DeepSeek Session Cost ≈¥0.03'));
+  assert.ok(subFen.endsWith(' │ DeepSeek Session Cost ≈¥0.0042'));
+});
+
 test('provider balance and session cost combine under one official brand name', () => {
   const combined = renderHud({
     payload: basePayload(), metrics: null, quota: null, gitDirty: false,
