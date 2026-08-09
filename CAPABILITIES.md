@@ -1,7 +1,7 @@
 # HUD capabilities
 
 - Last verified: 2026-08-09
-- HUD behavior baseline: Unreleased after `v0.6.5` (`a59fbde` base)
+- HUD behavior baseline: `v0.7.0` (`1271344`)
 - Kimi Code baseline: `0.34.0` (`f0614c53e59f7e1e257412063b059b9eb82764cf`)
 
 This is the canonical inventory of footer coverage, readable data, and
@@ -53,7 +53,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.34.0 | HUD v0.6.4-2 | Status |
+| Official line-1 slot or state | Upstream 0.34.0 | HUD v0.7.0 | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows `[manual]`, and makes `[auto]` red | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |

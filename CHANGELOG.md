@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-09
+
 ### Added
 
 - Add a provider-usage cache and detached-refresh framework, with the first
@@ -30,6 +32,12 @@ The project follows [Semantic Versioning](https://semver.org/).
   and scope (`DeepSeek Session Cost ≈¥N.NN` / `OpenAI Session Cost ≈$N.NN` /
   `Anthropic Session Cost ≈$N.NN`),
   keeping estimates distinct from balances, admin billing, and subscriptions.
+
+### Changed
+
+- Format CNY session costs with two decimal places once they reach one fen,
+  while retaining additional precision below that boundary so small nonzero
+  costs do not collapse to `¥0.00`.
 
 ### Fixed
 
@@ -308,7 +316,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.0
 [0.6.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.5
 [0.6.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.4
 [0.6.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.3

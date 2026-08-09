@@ -1,7 +1,7 @@
 # Known issues
 
-- Last verified: 2026-08-07
-- HUD behavior baseline: `v0.6.4-2` (`77b108c`)
+- Last verified: 2026-08-09
+- HUD behavior baseline: `v0.7.0` (`1271344`)
 - Kimi Code baseline: `0.34.0` (`f0614c53e59f7e1e257412063b059b9eb82764cf`)
 
 This file tracks open footer parity problems and information boundaries. Close
@@ -11,7 +11,7 @@ readable-but-unrendered data are documented separately in
 
 ## KI-1: Background task badges are absent
 
-Status: closed (fixed in the Unreleased series after HUD `v0.6.3`)
+Status: closed (fixed in HUD `v0.6.4`)
 
 Affected upstream slot: `tasks`
 
