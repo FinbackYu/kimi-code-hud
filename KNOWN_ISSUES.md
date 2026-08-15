@@ -1,7 +1,7 @@
 # Known issues
 
 - Last verified: 2026-08-15
-- HUD behavior baseline: `v0.7.0 + Unreleased`
+- HUD behavior baseline: `v0.7.1` (`4df8041`)
 - Kimi Code baseline: `0.36.1` (`13d86f8b7bb2443a3b8222e7d94deb0a66429f8e`)
 
 This file tracks open footer parity problems and information boundaries. Close
@@ -156,7 +156,7 @@ Acceptance criteria:
 
 ## KI-6: Mixed-provider sessions could show a partial cost
 
-Status: closed (fixed in `Unreleased`)
+Status: closed (fixed in HUD `v0.7.1`)
 
 Affected area: provider Session Cost
 
@@ -176,7 +176,7 @@ Resolution:
 
 ## KI-7: The Git dirty probe used a bare executable name before trust
 
-Status: closed (fixed in `Unreleased`)
+Status: closed (fixed in HUD `v0.7.1`)
 
 Affected area: Git probe / Windows command resolution
 
@@ -215,7 +215,7 @@ Acceptance criteria:
 
 ## KI-9: Unknown providers could be shown as managed Kimi quota
 
-Status: closed (fixed in `Unreleased`)
+Status: closed (fixed in HUD `v0.7.1`)
 
 Affected area: quota/provider attribution
 
@@ -234,7 +234,7 @@ Resolution:
 
 ## KI-10: Dynamic HUD text could inject terminal controls
 
-Status: closed (fixed in `Unreleased`)
+Status: closed (fixed in HUD `v0.7.1`)
 
 Affected area: terminal rendering
 
@@ -253,7 +253,7 @@ Resolution:
 
 ## KI-11: Git dirty detection ran on every footer frame
 
-Status: closed (fixed in `Unreleased`)
+Status: closed (fixed in HUD `v0.7.1`)
 
 Affected area: Git probe / render budget
 
