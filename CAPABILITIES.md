@@ -1,8 +1,8 @@
 # HUD capabilities
 
-- Last verified: 2026-08-09
-- HUD behavior baseline: `v0.7.0` (`1271344`)
-- Kimi Code baseline: `0.34.0` (`f0614c53e59f7e1e257412063b059b9eb82764cf`)
+- Last verified: 2026-08-14
+- HUD behavior baseline: `v0.7.0 + Unreleased`
+- Kimi Code baseline: `0.36.0` (`b6144f94ea6b22455a4e750d1750d220987e7bc2`)
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
@@ -12,11 +12,11 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/f0614c53e59f7e1e257412063b059b9eb82764cf/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/f0614c53e59f7e1e257412063b059b9eb82764cf/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/f0614c53e59f7e1e257412063b059b9eb82764cf/apps/kimi-code/src/utils/git/git-status.ts)
-- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/f0614c53e59f7e1e257412063b059b9eb82764cf/packages/agent-core-v2/docs/wire-manifest.d.ts)
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/f0614c53e59f7e1e257412063b059b9eb82764cf/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/b6144f94ea6b22455a4e750d1750d220987e7bc2/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/b6144f94ea6b22455a4e750d1750d220987e7bc2/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/b6144f94ea6b22455a4e750d1750d220987e7bc2/apps/kimi-code/src/utils/git/git-status.ts)
+- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/b6144f94ea6b22455a4e750d1750d220987e7bc2/packages/agent-core-v2/docs/wire-manifest.d.ts)
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/b6144f94ea6b22455a4e750d1750d220987e7bc2/apps/kimi-code/src/tui/commands/registry.ts)
 
 Baseline delta (0.32.0 → 0.33.0):
 
@@ -46,6 +46,29 @@ Baseline delta (0.33.0 → 0.34.0):
 - The v2 engine stays the default; `SessionStart` external hooks and
   main-agent `wire.jsonl` journal persistence are unchanged.
 
+Baseline delta (0.34.0 → 0.35.0):
+
+- The status-line payload, first-stdout-line contract, 300ms timeout, footer
+  line ownership, and HUD-reduced wire records are unchanged.
+- The host hardens its pre-trust Git and GitHub CLI probes by resolving bare
+  commands through PATH to absolute paths and refusing workspace-local hits.
+  HUD now applies the same boundary to its synchronous `git status` probe.
+
+Baseline delta (0.35.0 → 0.36.0):
+
+- The status-line payload and runner contract remain the same 10 fields, first
+  stdout line, and 300ms ceiling; footer line 2 remains host-owned.
+- The persisted manifest adds `plugin.session_start { content: string | null }`.
+  HUD treats it as an unknown row, does not retain `content`, and locks that
+  boundary with an adversarial-content regression test.
+- Experimental subagent model pools can put nonzero usage from different
+  providers in one all-agent ledger. A provider Session Cost now fails closed
+  for mixed or unresolved ledgers instead of silently pricing only the active
+  provider's subset.
+- The experimental fullscreen TUI does not alter the static status-line
+  contract. Interactive fullscreen rendering remains a manual verification
+  gap tracked as KI-8; it is not claimed as dynamically tested here.
+
 ## Footer coverage
 
 Legend: **covered** means the state is reconstructed end to end; **variant** is
@@ -53,7 +76,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.34.0 | HUD v0.7.0 | Status |
+| Official line-1 slot or state | Upstream 0.36.0 | HUD v0.7.0 + Unreleased | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows `[manual]`, and makes `[auto]` red | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
@@ -76,7 +99,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 0.34.0. HUD installation, configuration, and lifecycle
+built into Kimi Code 0.36.0. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 
@@ -96,7 +119,7 @@ commands are documented in [README.md](README.md#安装) and
 | Context | no HUD action; Kimi Code owns footer line 2 | context percentage and exact current/max tokens remain on line 2 | available, host-owned; the value follows `[token_counting]` strategy |
 | Kimi subscription quota | use a managed Kimi model with a valid Kimi Code login; refresh is automatic | short and weekly usage percentage, bar, and reset countdown | available, automatic |
 | DeepSeek API balance and cost | use a supported model whose provider is exactly `deepseek`, configured against official `api.deepseek.com` with an API key | account-currency output such as `DeepSeek Balance ¥N.NN · Session Cost ≈¥N.NN`; `DeepSeek Session Cost ≈¥N.NN` when balance is unavailable but CNY is known; stale balance alone is dimmed | available, automatic; CNY / USD official tables selected from the balance response; cache hits are conservatively priced as misses until the host maps DeepSeek's cache field |
-| OpenAI / Anthropic API cost | use a supported model through the official direct API; no admin credential is required | `OpenAI Session Cost ≈$N.NN` / `Anthropic Session Cost ≈$N.NN`, including main and all subagents | available, automatic; local standard-price estimate, not balance or server bill |
+| OpenAI / Anthropic API cost | use a supported model through the official direct API; no admin credential is required | `OpenAI Session Cost ≈$N.NN` / `Anthropic Session Cost ≈$N.NN`, including main and all subagents when every nonzero ledger row belongs to that provider | available, automatic; mixed-provider or unresolved ledgers hide the whole estimate rather than undercounting; local standard-price estimate, not balance or server bill |
 | layout | set `{"layout":"normal"}` or `{"layout":"compact"}` in `~/.kimi-code-hud/config.json`, or set `KIMI_HUD_LAYOUT` | normal or compact field set | available |
 | color and theme | set `NO_COLOR=1` or `KIMI_HUD_NO_COLOR=1`; optionally set `KIMI_HUD_THEME=dark\|light` | plain text or the selected ANSI palette | available |
 
@@ -125,7 +148,7 @@ public contract.
 | status-line payload | full cwd, context ratio, current/max context tokens, session ID, host version | model/mode/cwd/branch display; session ID locates wire data; Context stays on host line 2; host version persists into metrics state for compatibility gating | host version is available for diagnostics; full cwd is deliberately shortened; context values follow `[token_counting]` strategy; duplicating Context on line 1 adds little value |
 | `step.end.usage` | `inputOther`, `inputCacheRead`, `inputCacheCreation`, `output` per model step | output + stream duration derive TPS; the three input fields derive Cache | not added to the cost ledger because `usage.record` duplicates the same request usage with a model identity |
 | Cache reducer state | exact session-cumulative `readTokens` and `inputTokens` plus their ratio | renders only rounded `Cache N%` | exact `Cache N% (read/input)` is available without new wire parsing; token counts were removed with the full layout in HUD 0.6.0 |
-| `usage.record` | the same four usage counters, model, and optional session/turn scope | a dedicated all-agent cursor accumulates model-scoped session totals for supported DeepSeek / OpenAI / Anthropic local cost estimates | cursor and content-free counters persist; the estimate remains hidden until every visible wire is caught up, and must never also add duplicate `step.end` usage |
+| `usage.record` | the same four usage counters, model, and optional session/turn scope | a dedicated all-agent cursor accumulates model-scoped session totals for supported DeepSeek / OpenAI / Anthropic local cost estimates | cursor and content-free counters persist; the estimate remains hidden until every visible wire is caught up and every nonzero row belongs to the active provider, and must never also add duplicate `step.end` usage |
 | per-agent wires | per-agent TPS samples, TTFT, request/turn timestamps, and agent directory identity | aggregates fleet total, contributing-agent count, average, and median TTFT | an expanded/debug view could expose per-agent rows; the one-line footer should stay aggregated |
 | goal records | objective, criterion, status/reason, turns, tokens, elapsed time, and turn/token/time budgets | status, elapsed time, turns, and turn budget | numeric token/time budget progress is readable with a reducer extension; objective, criterion, and reasons are content and should not enter the footer by default |
 | task records | task ID, kind, status, timestamps, timeout, plus kind-specific process/agent details | the two running counts (`tasks.bash` / `tasks.agents`) | command, PID, description, subagent type, stop reason, and output tail stay out of the footer; they belong in task/debug views |
@@ -145,11 +168,11 @@ public contract.
 |---|---|---|
 | context occupancy | tokens currently occupying the model context window | exact current/max values on host line 2; the reported value follows `[token_counting]` strategy (`measured+estimated` default / `measured` / `estimated`, overridable via `KIMI_TOKEN_COUNTING_STRATEGY`) |
 | cache ratio counts | cached input tokens divided by all input tokens counted for the session | ratio displayed; exact numerator/denominator retained but hidden |
-| model usage | cumulative input split and output tokens across model requests | accumulated by model across main and all subagents; rendered only as supported DeepSeek / OpenAI / Anthropic `Session Cost ≈` |
+| model usage | cumulative input split and output tokens across model requests | accumulated by model across main and all subagents; rendered only as supported DeepSeek / OpenAI / Anthropic `Session Cost ≈` when the complete nonzero ledger belongs to one provider |
 | goal usage | tokens charged while a goal is live, optionally against a goal token budget | persisted in goal updates; not reduced by the HUD |
 | subscription quota | provider-defined Kimi Code usage windows | percentage/reset displayed; not token billing and not API spend |
 | API balance | provider-reported prepaid monetary balance for the active API credential | DeepSeek balance displayed as currency, never as a quota percentage |
-| API cost estimate | local standard-price calculation over all-agent session model usage | DeepSeek / OpenAI / Anthropic `Session Cost ≈`; may compose with an independent balance fact, excludes provider-side adjustments, and never claims to be balance or final billing |
+| API cost estimate | local standard-price calculation over all-agent session model usage | DeepSeek / OpenAI / Anthropic `Session Cost ≈`; mixed-provider or unresolved ledgers fail closed, may compose with an independent balance fact, excludes provider-side adjustments, and never claims to be balance or final billing |
 
 Before exposing a token value, decide whether it is per step, turn, session,
 goal, model, main agent, or all agents. Do not combine those scopes under an

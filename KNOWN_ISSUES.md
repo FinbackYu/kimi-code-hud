@@ -1,8 +1,8 @@
 # Known issues
 
-- Last verified: 2026-08-09
-- HUD behavior baseline: `v0.7.0` (`1271344`)
-- Kimi Code baseline: `0.34.0` (`f0614c53e59f7e1e257412063b059b9eb82764cf`)
+- Last verified: 2026-08-14
+- HUD behavior baseline: `v0.7.0 + Unreleased`
+- Kimi Code baseline: `0.36.0` (`b6144f94ea6b22455a4e750d1750d220987e7bc2`)
 
 This file tracks open footer parity problems and information boundaries. Close
 or move an entry when its acceptance criteria are met. Current coverage and
@@ -149,3 +149,62 @@ Acceptance criteria:
   effort as the fallback;
 - the fallback (next-request update) keeps working unchanged on hosts without
   the field.
+
+## KI-6: Mixed-provider sessions could show a partial cost
+
+Status: closed (fixed in `Unreleased`)
+
+Affected area: provider Session Cost
+
+Kimi Code 0.36.0 can assign subagents from an experimental model pool. If a
+session used OpenAI and Anthropic models together, the previous estimator
+silently skipped the non-active provider and still labeled the remainder as
+the whole `Session Cost`.
+
+Resolution:
+
+- every valid nonzero model-usage row must resolve to the active provider;
+- a cross-provider or unresolved row returns no cost fact, so the whole
+  Session Cost segment hides instead of understating spend;
+- zero-token rows remain ignorable because they cannot change the total;
+- regression coverage includes both a known second provider and an
+  unconfigured subagent model.
+
+## KI-7: The Git dirty probe used a bare executable name before trust
+
+Status: closed (fixed in `Unreleased`)
+
+Affected area: Git probe / Windows command resolution
+
+On Windows, `cmd.exe` / `CreateProcess` can search the current directory before
+PATH. Calling bare `git` while the HUD runs inside an untrusted workspace could
+therefore execute a planted `git.exe`.
+
+Resolution:
+
+- resolve `git` from PATH to an absolute executable before running it;
+- honor PATHEXT on Windows, canonicalize the candidate, and refuse any first
+  hit inside the workspace (including a symlink that resolves there);
+- preserve the existing silent `false` fallback when no trusted executable is
+  available or the bounded status command fails.
+
+## KI-8: Experimental fullscreen mode lacks a live HUD verification
+
+Status: open verification gap
+
+Affected area: Kimi Code 0.36.0 experimental fullscreen TUI
+
+Static release review confirms that fullscreen mode does not change the
+10-field status-line payload, the first-stdout-line contract, the 300ms host
+ceiling, or the host ownership of footer line 2. The HUD test suite covers that
+contract but has not driven a real interactive fullscreen terminal frame. An
+isolated launch against the installed 0.36.0 binary on 2026-08-14 exited before
+the first frame with the host error `EMFILE: too many open files, watch`, even
+with isolated `HOME` and `KIMI_CODE_HOME`; this is recorded as unavailable
+evidence, not a HUD pass or failure.
+
+Acceptance criteria:
+
+- launch Kimi Code 0.36.0 with the experimental fullscreen mode in a real PTY;
+- verify line 1 refresh, line 2 context ownership, resize, reload, and fallback;
+- record the terminal/OS matrix without weakening the 220ms HUD budget.

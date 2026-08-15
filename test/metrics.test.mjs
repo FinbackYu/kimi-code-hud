@@ -129,6 +129,21 @@ test('processWireChunk computes TPS with timestamped per-agent samples', () => {
   assert.equal(bucket.lastMedian, 150); // median of the freshest [50,100,150,200,250]
 });
 
+test('processWireChunk ignores the 0.36 plugin.session_start content snapshot', () => {
+  const state = makeState();
+  processWireChunk(state, '{"type":"other"}\n');
+  const before = structuredClone(state);
+  const sensitive = 'do-not-store-session-start-content';
+  processWireChunk(state, `${JSON.stringify({
+    type: 'plugin.session_start',
+    content: sensitive,
+    time: EVENT_TIME,
+  })}\n`);
+
+  assert.deepEqual(state, before);
+  assert.doesNotMatch(JSON.stringify(state), new RegExp(sensitive));
+});
+
 test('getMetrics rebuilds complete model usage across main and subagent wires', () => {
   const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));

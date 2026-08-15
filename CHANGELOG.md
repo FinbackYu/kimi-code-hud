@@ -6,6 +6,25 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Advance the audited Kimi Code compatibility baseline from 0.34.0 to 0.36.0,
+  including the content-bearing `plugin.session_start` wire row and the
+  experimental mixed-provider subagent model-pool boundary.
+
+### Fixed
+
+- Fail closed when an all-agent Session Cost ledger contains nonzero usage
+  from another provider or an unresolved model. The HUD now hides the entire
+  estimate instead of silently presenting a partial active-provider subtotal
+  as the session total.
+
+### Security
+
+- Resolve `git` through PATH to a canonical absolute executable before the
+  dirty-tree probe and refuse workspace-local hits, preventing Windows command
+  search from executing a planted `git.exe` before workspace trust.
+
 ## [0.7.0] - 2026-08-09
 
 ### Added
