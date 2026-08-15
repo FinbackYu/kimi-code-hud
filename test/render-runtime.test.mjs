@@ -25,6 +25,7 @@ function makePaths() {
     sessionsRoot: path.join(kimiHome, 'sessions'),
     configPath: path.join(hudDir, 'config.json'),
     quotaCachePath: path.join(hudDir, 'quota.json'),
+    gitStatusCachePath: path.join(hudDir, 'git-status-cache.json'),
     quotaLockPath: path.join(hudDir, 'refresh.lock'),
     providerUsageDir: path.join(hudDir, 'provider-usage'),
     tuiTomlPath: path.join(kimiHome, 'tui.toml'),
@@ -165,6 +166,7 @@ test('runtime passes the captured quota to refresh and uses remaining Git time',
   const cachedQuota = { fetchedAt: 1, weekly: null, windows: [] };
   let refreshOptions = null;
   let gitTimeout = null;
+  let gitCachePath = null;
   const result = await renderStatusLine({
     scriptPath: '/tmp/kimi-hud.mjs',
     paths,
@@ -173,17 +175,61 @@ test('runtime passes the captured quota to refresh and uses remaining Git time',
       managedPluginDisabled: () => false,
       readPayload: async () => payload(),
       captureRuntimeSnapshot: () => ({
-        hudConfig: {}, configTomlText: '', tuiTomlText: '', quota: cachedQuota,
+        hudConfig: {},
+        configTomlText: '[models."K3"]\nprovider = "managed:kimi-code"\n',
+        tuiTomlText: '',
+        quota: cachedQuota,
       }),
       getMetrics: () => metrics(),
       ensureFreshQuota: (options) => { refreshOptions = options; },
-      isGitDirty: (_cwd, options) => { gitTimeout = options.timeoutMs; return true; },
+      isGitDirty: (_cwd, options) => {
+        gitTimeout = options.timeoutMs;
+        gitCachePath = options.cachePath;
+        return true;
+      },
     },
   });
   assert.equal(refreshOptions.cachedQuota, cachedQuota);
   assert.equal(refreshOptions.cachePath, paths.quotaCachePath);
   assert.equal(gitTimeout, 218);
+  assert.equal(gitCachePath, paths.gitStatusCachePath);
   assert.ok(result.line.includes('git:(main*)'));
+});
+
+test('runtime fails closed for a null provider without quota or provider refresh', async () => {
+  const paths = makePaths();
+  const cachedQuota = {
+    fetchedAt: 1,
+    weekly: { used: 99, limit: 100 },
+    windows: [{ label: '5h', used: 99, limit: 100 }],
+  };
+  let quotaRefreshes = 0;
+  let usageTargetResolutions = 0;
+  let costTargetResolutions = 0;
+  let usageRefreshes = 0;
+  const result = await renderStatusLine({
+    scriptPath: '/tmp/kimi-hud.mjs',
+    paths,
+    clock: () => 0,
+    env: { NO_COLOR: '1' },
+    dependencies: {
+      managedPluginDisabled: () => false,
+      readPayload: async () => ({ ...payload(), gitBranch: null }),
+      captureRuntimeSnapshot: () => ({
+        hudConfig: {}, configTomlText: '', tuiTomlText: '', quota: cachedQuota,
+      }),
+      getMetrics: () => metrics(),
+      ensureFreshQuota: () => { quotaRefreshes += 1; },
+      resolveProviderUsageTarget: () => { usageTargetResolutions += 1; return {}; },
+      resolveProviderCostTarget: () => { costTargetResolutions += 1; return {}; },
+      ensureFreshProviderUsage: () => { usageRefreshes += 1; },
+    },
+  });
+  assert.equal(quotaRefreshes, 0);
+  assert.equal(usageTargetResolutions, 0);
+  assert.equal(costTargetResolutions, 0);
+  assert.equal(usageRefreshes, 0);
+  assert.doesNotMatch(result.line, /5h|7d|Balance|Session Cost/);
 });
 
 test('runtime combines cached DeepSeek balance with all-agent session cost', async () => {

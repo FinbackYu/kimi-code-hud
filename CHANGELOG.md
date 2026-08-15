@@ -8,9 +8,14 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- Advance the audited Kimi Code compatibility baseline from 0.34.0 to 0.36.0,
-  including the content-bearing `plugin.session_start` wire row and the
-  experimental mixed-provider subagent model-pool boundary.
+- Advance the audited Kimi Code compatibility baseline from 0.34.0 through
+  0.36.1, including the content-bearing `plugin.session_start` wire row, the
+  experimental mixed-provider subagent model-pool boundary, additive nested
+  task metadata, and the unchanged 10-field status-line contract.
+- Persist the bounded Git status probe across command processes per cwd for
+  15 seconds (at most 64 SHA-256-keyed worktrees), collect branch and dirty
+  state in one invocation, and disable optional Git locks while preserving the
+  existing 150ms ceiling.
 
 ### Fixed
 
@@ -18,12 +23,17 @@ The project follows [Semantic Versioning](https://semver.org/).
   from another provider or an unresolved model. The HUD now hides the entire
   estimate instead of silently presenting a partial active-provider subtotal
   as the session total.
+- Treat an unresolved model provider as unknown instead of managed Kimi: no
+  Kimi subscription quota or provider usage is rendered or refreshed until
+  the provider can be attributed explicitly.
 
 ### Security
 
 - Resolve `git` through PATH to a canonical absolute executable before the
   dirty-tree probe and refuse workspace-local hits, preventing Windows command
   search from executing a planted `git.exe` before workspace trust.
+- Strip OSC, CSI, other ESC string controls, and C0/DEL/C1 characters from
+  every dynamic HUD text field before applying HUD-owned ANSI styling.
 
 ## [0.7.0] - 2026-08-09
 
