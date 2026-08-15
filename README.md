@@ -19,7 +19,7 @@
 - **缓存命中率** 跨回合累计的 token 加权 Cache 命中率，回合之间常亮不闪。
 - **Kimi 托管订阅额度** 5h / 7d 柱条 + 百分比 + 重置倒计时，按用量绿 / 黄 / 红分级；第三方 provider 模型自动隐藏整段，不代表 API 余额或费用。
 - **DeepSeek API 余额与会话成本** 当前模型来自官方 DeepSeek provider 时，在数据齐全后按账户币种同时显示，例如人民币账户为 `DeepSeek Balance ¥110.00 · Session Cost ≈¥0.03`；余额不可用但已知账户币种时仍可单独显示 `DeepSeek Session Cost ≈¥0.03`。使用正式品牌名与完整指标名，无百分比或伪造重置周期，后台刷新不阻塞状态栏。
-- **OpenAI / Anthropic 会话成本** 官方直连 API 模型显示 `OpenAI Session Cost ≈$0.42` 或 `Anthropic Session Cost ≈$0.68`；累计 main 与全部 subagent，明确标注会话范围和估算性质，不冒充余额或服务端账单。
+- **OpenAI / Anthropic 会话成本** 官方直连 API 模型显示 `OpenAI Session Cost ≈$0.42` 或 `Anthropic Session Cost ≈$0.68`；累计 main 与全部 subagent，明确标注会话范围和估算性质，不冒充余额或服务端账单。若同一会话含其他 provider 或无法解析模型的非零用量，则整项静默隐藏，避免少算。
 - **模式徽章** `[yolo]` / `[auto]` / `[plan]` / `[goal …]` / `[swarm]`，槽位顺序与宿主默认 footer 一致。
 - **后台任务徽章** 后台 Shell 任务与后台子代理分别计数：`[N task(s) running]` / `[N agent(s) running]`，插在模型与目录之间，与宿主默认 footer 槽位顺序一致。
 - **深浅双主题** 跟随宿主 `theme` 设置；light 下徽标加粗，柱条换柔和真彩色。
@@ -116,7 +116,7 @@ normal:  [manual] K3 high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1
 - TPS 只接纳流式阶段至少 250ms、且不超过 1000 t/s 的 `step.end` 样本；积累 3 个有效样本后开始显示，取最近最多 5 个样本的中位数。窗口过期（最后一个样本超过 2 分钟）后不隐藏：最后一次中位数以暗灰继续显示，直到新窗口预热完成；模型切换时旧中位数一并清除、重新预热。首次预热（还没有中位数）期间仍显示最近一次 TTFT；
 - Cache 为本次会话的 token 加权缓存命中率：`Σ inputCacheRead / Σ (inputOther + inputCacheRead + inputCacheCreation)`，跨回合累计主 Agent 的全部模型请求（usage 字段不完整的 step 跳过不计）。数值本身即跨回合累计的最新值，回合之间常亮不闪烁；会话尚无数据时整段省略。各档只显示百分比；不使用红黄绿阈值；
 - 配额段：normal 档为柱+百分比+重置倒计时；compact 档去掉柱体，保留百分比和倒计时；周配额（7d）只在 normal 档显示。仅当当前模型由 Kimi Code 托管订阅（`managed:kimi-code`）提供时显示——经 `/provider` 接入、用 `/model` 切到的第三方 provider 模型整段隐藏（配额接口只描述托管订阅，与当前会话实际用量无关）；`/logout` 删除凭证后配额缓存一并清除；
-- Provider usage 段可组合余额与成本：名为 `deepseek`、且 `base_url` 为官方 `https://api.deepseek.com` 或 `/v1` 的 provider 显示 API 返回的可用余额（优先 CNY、其次 USD），同时从本会话所有 agent 的 `usage.record` 估算标准文本 Token 成本；成本使用余额响应确认的账户币种及其对应官方价格，两者齐全时人民币账户显示 `DeepSeek Balance ¥… · Session Cost ≈¥…`，余额不可用但币种已知时只显示 `DeepSeek Session Cost ≈¥…`。首次余额响应完成前不猜测币种，因此暂不显示 DeepSeek 成本。60 秒余额缓存过期后旧值以暗灰显示并由脱离热路径的子进程刷新，成本仍在本地实时累计。官方直连 `api.openai.com` / `api.anthropic.com` 只显示对应的 `OpenAI Session Cost ≈…` / `Anthropic Session Cost ≈…`。本地成本不是余额，也不是管理后台账单；日志尚未完整回扫、模型不在内置价格表或使用兼容代理时成本静默隐藏；
+- Provider usage 段可组合余额与成本：名为 `deepseek`、且 `base_url` 为官方 `https://api.deepseek.com` 或 `/v1` 的 provider 显示 API 返回的可用余额（优先 CNY、其次 USD），同时从本会话所有 agent 的 `usage.record` 估算标准文本 Token 成本；成本使用余额响应确认的账户币种及其对应官方价格，两者齐全时人民币账户显示 `DeepSeek Balance ¥… · Session Cost ≈¥…`，余额不可用但币种已知时只显示 `DeepSeek Session Cost ≈¥…`。首次余额响应完成前不猜测币种，因此暂不显示 DeepSeek 成本。60 秒余额缓存过期后旧值以暗灰显示并由脱离热路径的子进程刷新，成本仍在本地实时累计。官方直连 `api.openai.com` / `api.anthropic.com` 只显示对应的 `OpenAI Session Cost ≈…` / `Anthropic Session Cost ≈…`。本地成本不是余额，也不是管理后台账单；日志尚未完整回扫、模型不在内置价格表、使用兼容代理，或全 agent ledger 含其他 provider / 无法解析模型的非零用量时成本静默隐藏；
 - 行首徽章与权限模式对齐：`[yolo]`（琥珀黄，对齐宿主默认）/`[auto]`（亮红，便于区分）/`[manual]`（暗灰占位，保持行首对齐），plan 模式加 `[plan]`（蓝色）；`[swarm]`（青色）取自会话 wire 日志的 `swarm_mode.enter/exit` 事件（与 goal 徽章同一推导路径——status line payload 不含 swarm 状态），宿主以后若在 payload 携带 `swarmMode` 字段同样生效；
 - 后台任务徽章：格式与宿主默认 footer 一致（`[N task(s) running]` 对应 Shell 进程、`[N agent(s) running]` 对应后台子代理，蓝色，为 0 各自隐藏）。status line payload 不含任务字段，运行计数从主 agent wire 日志的 `task.started`/`task.terminated` op 重建，并每帧核对 `agents/main/tasks/<taskId>.json` 旁车文件（旧版宿主不记录 wire op，全靠旁车兜底），同一任务取时间更新的记录；只统计 `running` 状态（completed/failed/timed_out/killed/lost 不计）、只渲染计数（命令、描述、输出永不进 footer），与吞吐统计的 `activeAgents` 完全分离；
 - 用量分级着色：<60% 绿、<85% 黄、≥85% 红；normal 档作用于柱条，compact 档没有柱体、由百分比数字接替（绿档不醒目化处理、保持默认色，只有黄 / 红上色）；
@@ -134,10 +134,10 @@ Kimi Code 的 `~/.kimi-code/tui.toml` 支持 `[status_line]` 自定义命令：
 
 | 段 | 来源 |
 |---|---|
-| 模型 / 分支 | stdin 快照 + `git status --porcelain`（150ms 超时） |
+| 模型 / 分支 | stdin 快照 + 通过 PATH 解析到工作区外绝对路径的 `git status --porcelain`（150ms 超时；无可信 `git` 时静默跳过 dirty 标记） |
 | TPS / TTFT / Cache / thinking / goal / swarm / model usage | 增量解析会话目录下**所有** `~/.kimi-code/sessions/*/session_<id>/agents/*/wire.jsonl`（main + 全部 subagent；旧版 `ses_<id>` 前缀兼容）的 `turn.prompt`、`step.end`、`usage.record`、`llm.request`、`turn.cancel`、`config.update`、`goal.*`、`swarm_mode.*` 与 `full_compaction.*` 事件。速度样本带事件时间戳并按 agent 分桶，只取最近 10 分钟内的最多 5 个做中位数——resume 接续、长时间空闲、compact 之后不会混入陈旧样本。多个 agent 同时活跃（swarm/subagent，2 分钟内有样本或有请求在飞；子 agent 回合随收尾 `end_turn` 结束立即退出统计，不会拖到 2 分钟窗口过期）时显示**舰队总速度 + agent 数 + 平均速度**（`⚡ 305 t/s (12 agents @25)`：305 是各活跃 agent 中位速度的合计，`@25` 是其均值）；主 agent 计入时头数标注为 `main+N`（如 `⚡ 465 t/s (main+4 @93)`），避免 swarm 期间被误读为纯 subagent 数，main 空闲掉出 2 分钟窗口后自动回落为纯 subagent 计数，TTFT 取活跃 agent 的中位数（单个卡住的 agent 不会污染显示）。回合进行中（从 `turn.prompt` 到 `end_turn`/`turn.cancel`）速度段把 TTFT 换成每秒走字的 `gen Ns` 工作计时——跨工具调用与多个 step 累计，回答「这条命令一共跑了多久」（goal 徽章显示期间该计时、TTFT 与压缩状态一并隐藏，只留速度）。回合之外的上下文压缩（手动 `/compact`，从 `full_compaction.begin` 到 `complete`/`cancel`）同样占 TTFT 槽位：实时 `compacting Ns` 走字，完成后暗灰保留 `compacted Ns` 直到下一条 prompt 的 `gen` 计时接手；回合内触发的自动压缩不显示（该时段由 `gen` 计时覆盖）。Cache、thinking、goal、swarm 只取主 agent wire；model usage 由独立 cursor 读取所有 agent 的 `usage.record`，按模型累计四类 Token，所有 wire 追平后才进入成本计算。cursor 与无正文 Token 计数存于 `~/.kimi-code-hud/metrics-<sessionId>.json`，不保存提示词、回复或工具输出 |
 | 配额（5h/7d） | `GET https://api.kimi.com/coding/v1/usages`，60 秒 TTL 缓存于 `~/.kimi-code-hud/quota.json`，过期时热路径用过期缓存渲染并 spawn 后台刷新，绝不阻塞。仅当前模型属 `managed:kimi-code`（按会话日志的 `modelAlias` → `config.toml` 模型表的 `provider` 键判定，判不出来时保持显示）时渲染与刷新；凭证缺失（`/logout`）时缓存一并删除；access_token 过期但 refresh_token 仍在（CLI 懒刷新，空闲期常见）时 401 不再清缓存，保留旧值直至刷新成功 |
-| Provider usage | 当前模型的 `modelAlias` → `config.toml` 模型表 → provider 表。DeepSeek 通过官方 `GET https://api.deepseek.com/user/balance` 获取余额，按 provider + API Key 指纹隔离缓存于 `~/.kimi-code-hud/provider-usage/`；热路径只读缓存并在过期后后台刷新；其 Session Cost 与 OpenAI / Anthropic 一样，使用本地全 agent model-usage ledger 与内置官方标准定价计算，并按余额响应的 CNY / USD 选择对应价格。余额事实和成本事实独立收集、可同时渲染；币种未知、自建代理和未知模型失败关闭 |
+| Provider usage | 当前模型的 `modelAlias` → `config.toml` 模型表 → provider 表。DeepSeek 通过官方 `GET https://api.deepseek.com/user/balance` 获取余额，按 provider + API Key 指纹隔离缓存于 `~/.kimi-code-hud/provider-usage/`；热路径只读缓存并在过期后后台刷新；其 Session Cost 与 OpenAI / Anthropic 一样，使用本地全 agent model-usage ledger 与内置官方标准定价计算，并按余额响应的 CNY / USD 选择对应价格。余额事实和成本事实独立收集、可同时渲染；币种未知、自建代理、未知模型和混合 provider ledger 都失败关闭 |
 
 ## 隐私与安全
 
@@ -157,14 +157,14 @@ DeepSeek / OpenAI / Anthropic 价格表以 **2026-08-09** 核对到的 DeepSeek 
 
 **没有 DeepSeek 余额或 Session Cost？** 必须正在使用 provider 名为 `deepseek` 的支持模型，且其 `type = "openai"`、`base_url` 是官方 `https://api.deepseek.com`（可带 `/v1`）。余额还要求有效 `api_key`；首次后台刷新完成前不显示余额或成本占位，因为成本必须先从余额响应确认 CNY / USD，避免使用错误货币符号。完整用量 ledger 就绪后，即使余额不可用也可按已知币种单独显示 Session Cost。可静默运行 `node bin/kimi-hud.mjs --refresh-provider-usage deepseek`，再检查 `~/.kimi-code-hud/provider-usage/` 是否生成对应指纹缓存。兼容代理会按安全设计拒绝余额请求和成本估算。
 
-**没有 DeepSeek / OpenAI / Anthropic Session Cost？** 当前模型必须使用对应官方直连服务，且模型 ID 位于内置价格表。升级后独立 reader 会在渲染预算内逐步回扫 main 与全部 subagent 的 `usage.record`；所有日志追平前不显示不完整数字。兼容代理、未知模型、无有效 Token 用量都会静默隐藏。该值是本次 Kimi Code 会话的本地估算，不是 API 余额，也与 ChatGPT / Claude 订阅额度无关。
+**没有 DeepSeek / OpenAI / Anthropic Session Cost？** 当前模型必须使用对应官方直连服务，且模型 ID 位于内置价格表。升级后独立 reader 会在渲染预算内逐步回扫 main 与全部 subagent 的 `usage.record`；所有日志追平前不显示不完整数字。同一会话只要存在其他 provider 或无法解析模型的非零用量，整项也会隐藏，避免把部分 provider 小计误报为会话总额。兼容代理、未知模型、无有效 Token 用量都会静默隐藏。该值是本次 Kimi Code 会话的本地估算，不是 API 余额，也与 ChatGPT / Claude 订阅额度无关。
 
 **Context 段去哪了？** 插件不再自绘 Context 段（full 档已一并移除），直接看宿主第二行的 `context: N% (tokens/max)`（该行永远由宿主绘制，插件无法接管）。
 
 ## 能力与已知问题
 
-- [能力清单](CAPABILITIES.md)：Kimi Code 0.31.0 七个第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
-- [已知问题](KNOWN_ISSUES.md)：后台任务、Git、终端宽度与失败帧等待处理问题及验收条件。
+- [能力清单](CAPABILITIES.md)：Kimi Code 0.36.0 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
+- [已知问题](KNOWN_ISSUES.md)：Git、终端宽度、失败帧与全屏动态验证缺口及验收条件。
 
 ## 本地开发
 

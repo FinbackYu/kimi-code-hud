@@ -171,3 +171,43 @@ test('cost estimation fails closed on unknown models or partial ledgers', () => 
     modelUsage: { scope: 'session', agents: 'main', byModel: {} },
   }), null);
 });
+
+test('cost estimation fails closed instead of undercounting a mixed-provider session', () => {
+  const configText = config();
+  const target = resolveProviderCostTarget({ provider: 'openai', configText });
+  assert.equal(estimateProviderSessionCost({
+    target,
+    configText,
+    modelUsage: modelUsage({
+      'openai/gpt-5.6': TOKENS,
+      'anthropic/sonnet-5': TOKENS,
+    }),
+  }), null);
+  assert.equal(estimateProviderSessionCost({
+    target,
+    configText,
+    modelUsage: modelUsage({
+      'openai/gpt-5.6': TOKENS,
+      'unconfigured/subagent-model': TOKENS,
+    }),
+  }), null);
+});
+
+test('zero-token rows from another provider do not hide a complete active-provider cost', () => {
+  const configText = config();
+  const target = resolveProviderCostTarget({ provider: 'openai', configText });
+  const cost = estimateProviderSessionCost({
+    target,
+    configText,
+    modelUsage: modelUsage({
+      'openai/gpt-5.6': TOKENS,
+      'anthropic/sonnet-5': {
+        inputOther: 0,
+        inputCacheRead: 0,
+        inputCacheCreation: 0,
+        output: 0,
+      },
+    }),
+  });
+  assert.ok(Math.abs(cost.amount - 0.021625) < 1e-12);
+});

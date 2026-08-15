@@ -170,9 +170,10 @@ export function resolveProviderCostTarget({ provider, configText, env = {} } = {
 }
 
 /**
- * Price the complete all-agent usage ledger for the active provider. Unknown
- * models fail closed so the HUD never presents a partial total as the session
- * cost. Standard text-token pricing is used; provider-side tools, negotiated
+ * Price the complete all-agent usage ledger only when every nonzero record
+ * belongs to the active provider. Unknown and cross-provider models fail
+ * closed so the HUD never presents a partial total as the session cost.
+ * Standard text-token pricing is used; provider-side tools, negotiated
  * discounts, regional/fast/batch tiers, and taxes are intentionally excluded.
  */
 export function estimateProviderSessionCost({
@@ -204,8 +205,9 @@ export function estimateProviderSessionCost({
   let matched = 0;
   for (const [usageModel, usage] of Object.entries(modelUsage.byModel)) {
     if (!validTokens(usage)) return null;
+    if (Object.values(usage).every((tokens) => tokens === 0)) continue;
     const model = resolveModelConfig({ name: usageModel, configText });
-    if (!model || model.provider !== target.provider) continue;
+    if (!model || model.provider !== target.provider) return null;
     if (!model.model) return null;
     const pricing = adapter.pricing(model.model, now, costCurrency);
     if (!pricing) return null;
