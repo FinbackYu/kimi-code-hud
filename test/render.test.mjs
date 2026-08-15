@@ -245,6 +245,45 @@ test('model thinking suffix from session thinkingLevel (normal and compact)', ()
   assert.ok(withLevel('off', 'compact').startsWith('[manual] K3 │'));
 });
 
+test('dynamic terminal text drops OSC, CSI, ESC, BEL, C0, DEL, and C1 controls', () => {
+  const osc = '\x1b]0;model-title\x07';
+  const csi = '\x1b[31m';
+  const c1Csi = '\x9b32m';
+  const c1Osc = '\x9d0;branch-title\x9c';
+  const esc = '\x1b7';
+  const controls = '\x00\x01\x08\x7f\x85';
+  const ctx = baseCtx({
+    color: true,
+    payload: basePayload({
+      model: `K3${osc}${csi}red\x1b[0m${controls}`,
+      cwd: `/tmp/project${esc}${controls}`,
+      gitBranch: `main${c1Osc}${c1Csi}green\x9b0m`,
+    }),
+    metrics: { thinkingLevel: `h${controls}igh`, tps: null, ttftMs: null },
+    providerUsage: {
+      kind: 'balance', label: `Deep${osc}Seek`, available: true,
+      balances: [{ currency: `EU${c1Csi}R`, total: 1 }],
+    },
+    quota: {
+      weekly: null,
+      windows: [{ label: `5${osc}h`, used: 31, limit: 100 }],
+    },
+  });
+  const [line] = renderHud(ctx);
+  assert.ok(line.includes('\x1b[38;2;79;168;255mK3red\x1b[0m high'));
+  assert.ok(line.includes('project git:(maingreen*)'));
+  assert.ok(line.includes('DeepSeek Balance EUR 1.00'));
+  assert.ok(line.includes('5h '));
+  assert.doesNotMatch(line, /model-title|branch-title/);
+
+  // HUD-owned SGR remains; removing only those sequences leaves no terminal
+  // controls from dynamic inputs behind.
+  // eslint-disable-next-line no-control-regex
+  const withoutHudSgr = line.replace(/\x1b\[[0-9;]*m/g, '');
+  // eslint-disable-next-line no-control-regex
+  assert.doesNotMatch(withoutHudSgr, /[\x00-\x1f\x7f-\x9f]/);
+});
+
 test('badges for yolo/auto permission modes', () => {
   const [yolo] = renderHud(baseCtx({ payload: basePayload({ permissionMode: 'yolo' }) }));
   assert.ok(yolo.startsWith('[yolo] '));

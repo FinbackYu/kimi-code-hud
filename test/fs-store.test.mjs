@@ -25,8 +25,16 @@ test('atomicWriteFile overwrites an existing file', () => {
 test('atomicWriteFile retains existing permission bits', () => {
   const file = path.join(tmpDir(), 'state.json');
   fs.writeFileSync(file, 'old');
-  fs.chmodSync(file, 0o600);
-  atomicWriteFile(file, 'new');
+  fs.chmodSync(file, 0o644);
+  atomicWriteFile(file, 'new', { mode: 0o600 });
+  assert.equal(fs.statSync(file).mode & 0o777, 0o644);
+});
+
+test('atomicWriteFile can force mode without inheriting the target', () => {
+  const file = path.join(tmpDir(), 'state.json');
+  fs.writeFileSync(file, 'old');
+  fs.chmodSync(file, 0o644);
+  atomicWriteFile(file, 'new', { mode: 0o600, preserveMode: false });
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
 });
 

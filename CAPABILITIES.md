@@ -1,8 +1,8 @@
 # HUD capabilities
 
-- Last verified: 2026-08-14
+- Last verified: 2026-08-15
 - HUD behavior baseline: `v0.7.0 + Unreleased`
-- Kimi Code baseline: `0.36.0` (`b6144f94ea6b22455a4e750d1750d220987e7bc2`)
+- Kimi Code baseline: `0.36.1` (`13d86f8b7bb2443a3b8222e7d94deb0a66429f8e`)
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
@@ -12,11 +12,11 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/b6144f94ea6b22455a4e750d1750d220987e7bc2/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/b6144f94ea6b22455a4e750d1750d220987e7bc2/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/b6144f94ea6b22455a4e750d1750d220987e7bc2/apps/kimi-code/src/utils/git/git-status.ts)
-- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/b6144f94ea6b22455a4e750d1750d220987e7bc2/packages/agent-core-v2/docs/wire-manifest.d.ts)
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/b6144f94ea6b22455a4e750d1750d220987e7bc2/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/13d86f8b7bb2443a3b8222e7d94deb0a66429f8e/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/13d86f8b7bb2443a3b8222e7d94deb0a66429f8e/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/13d86f8b7bb2443a3b8222e7d94deb0a66429f8e/apps/kimi-code/src/utils/git/git-status.ts)
+- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/13d86f8b7bb2443a3b8222e7d94deb0a66429f8e/packages/agent-core-v2/docs/wire-manifest.d.ts)
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/13d86f8b7bb2443a3b8222e7d94deb0a66429f8e/apps/kimi-code/src/tui/commands/registry.ts)
 
 Baseline delta (0.32.0 → 0.33.0):
 
@@ -69,6 +69,21 @@ Baseline delta (0.35.0 → 0.36.0):
   contract. Interactive fullscreen rendering remains a manual verification
   gap tracked as KI-8; it is not claimed as dynamically tested here.
 
+Baseline delta (0.36.0 → 0.36.1):
+
+- The status-line payload, first-line stdout contract, 300ms host ceiling,
+  footer ownership, persisted wire manifest, provider/usage/goal structures,
+  and plugin manifest remain unchanged.
+- Nested subagent task metadata is additive: task information gains optional
+  `agentId`, `subagentType`, and `parentToolCallId`, while KAP `/tasks` exposes
+  `agent_id`, `subagent_type`, and `parent_tool_call_id`. HUD task badges still
+  consume only `taskId`, `kind`, and `status`, so the counts remain compatible.
+- New `event.plugin.changed` / `event.capability.changed` event variants and
+  independent approval/question IDs are ignored by the HUD's known-event
+  reducers. Background task previews are sanitized upstream before display.
+- Experimental automatic session titles are default-off and outside the HUD
+  contract; the HUD does not consume or persist session titles.
+
 ## Footer coverage
 
 Legend: **covered** means the state is reconstructed end to end; **variant** is
@@ -76,7 +91,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.36.0 | HUD v0.7.0 + Unreleased | Status |
+| Official line-1 slot or state | Upstream 0.36.1 | HUD v0.7.0 + Unreleased | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows `[manual]`, and makes `[auto]` red | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
@@ -99,7 +114,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 0.36.0. HUD installation, configuration, and lifecycle
+built into Kimi Code 0.36.1. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 
@@ -154,10 +169,10 @@ public contract.
 | task records | task ID, kind, status, timestamps, timeout, plus kind-specific process/agent details | the two running counts (`tasks.bash` / `tasks.agents`) | command, PID, description, subagent type, stop reason, and output tail stay out of the footer; they belong in task/debug views |
 | `subagent.spawned` model fields | display-normalized model alias and effective thinking effort per subagent (optional, added upstream 0.34.0) | not rendered | deliberately not shown: the footer stays aggregated, consistent with the fleet-speed presentation; a task/debug view could expose per-subagent model and effort |
 | compaction records | begin/end timing; compaction records also carry message counts and summaries | live and last compaction duration | compaction count/message count could support diagnostics; summaries are content and should remain hidden |
-| Git commands | diff stats, upstream divergence, PR number and URL | dirty boolean only | the data is available locally, but safe collection requires persistent TTL caches and async PR lookup |
+| Git commands | diff stats, upstream divergence, PR number and URL | dirty boolean only, collected with a bounded cross-process 15-second per-cwd cache and `GIT_OPTIONAL_LOCKS=0` | full diff/upstream/PR parity still requires richer persistent facts and async PR lookup |
 | quota cache | exact `used`, `limit`, `resetAt`, and `fetchedAt` for short and weekly windows | percentage, bar, and reset countdown | exact units and cache freshness are available for a detail/debug surface; do not relabel subscription quota as token billing or API balance |
 | provider-usage cache | provider, one-way SHA-256 credential fingerprint, `fetchedAt`, availability, and normalized currency balances | DeepSeek balance fact; it composes with the independent local Session Cost fact, and only stale balance text is dimmed | only the active credential's cache is read; API keys never enter cache, filenames, logs, or output |
-| model/profile config | model alias, provider, provider base URL/API key, thinking effort; potentially profile/tool metadata | provider gates Kimi quota; exact DeepSeek provider plus official base URL selects both its balance adapter and local pricing contract; official direct OpenAI/Anthropic base plus model ID selects a local pricing contract; thinking suffix | DeepSeek credentials are read only inside its balance adapter; local cost estimation sends no credential; provider/profile remain available for non-secret diagnostics |
+| model/profile config | model alias, provider, provider base URL/API key, thinking effort; potentially profile/tool metadata | an exact `managed:kimi-code` provider gates Kimi quota; unknown attribution hides all quota/provider usage; exact DeepSeek provider plus official base URL selects both its balance adapter and local pricing contract; official direct OpenAI/Anthropic base plus model ID selects a local pricing contract; thinking suffix | DeepSeek credentials are read only inside its balance adapter; local cost estimation sends no credential; provider/profile remain available for non-secret diagnostics |
 | upstream tip table | tip text, priority, solo/pair behavior | unused | it can be copied only with an explicit sync/drift strategy; it is not present in payload or wire data |
 
 ## Token meanings

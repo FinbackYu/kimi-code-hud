@@ -51,6 +51,70 @@ const BAR_WIDTH = 10;
 const MAX_WIDTH = 200;
 const LAYOUT_ORDER = ['normal', 'compact'];
 
+function skipCsi(input, start) {
+  for (let i = start; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    if (code >= 0x40 && code <= 0x7e) return i + 1;
+  }
+  return input.length;
+}
+
+function skipStringControl(input, start, bellTerminates) {
+  for (let i = start; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    if (bellTerminates && code === 0x07) return i + 1;
+    if (code === 0x9c) return i + 1;
+    if (code === 0x1b && input.charCodeAt(i + 1) === 0x5c) return i + 2;
+  }
+  return input.length;
+}
+
+/**
+ * Remove terminal controls from untrusted display text before HUD styling is
+ * applied. OSC/DCS-style strings are removed with their payload; CSI/ESC
+ * commands and every C0, DEL, and C1 control byte are removed as controls.
+ */
+function sanitizeTerminalText(value) {
+  const input = String(value ?? '');
+  let output = '';
+  for (let i = 0; i < input.length;) {
+    const code = input.charCodeAt(i);
+    if (code === 0x1b) {
+      const next = input.charCodeAt(i + 1);
+      if (next === 0x5b) {
+        i = skipCsi(input, i + 2);
+      } else if (next === 0x5d) {
+        i = skipStringControl(input, i + 2, true);
+      } else if (next === 0x50 || next === 0x58 || next === 0x5e || next === 0x5f) {
+        i = skipStringControl(input, i + 2, false);
+      } else {
+        // A two-byte ESC command, or an incomplete trailing ESC.
+        i += next >= 0x20 && next <= 0x7e ? 2 : 1;
+      }
+      continue;
+    }
+    if (code === 0x9b) {
+      i = skipCsi(input, i + 1);
+      continue;
+    }
+    if (code === 0x9d) {
+      i = skipStringControl(input, i + 1, true);
+      continue;
+    }
+    if (code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) {
+      i = skipStringControl(input, i + 1, false);
+      continue;
+    }
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+      i += 1;
+      continue;
+    }
+    output += input[i];
+    i += 1;
+  }
+  return output;
+}
+
 function colorize(enabled, color, str) {
   return enabled ? `${color}${str}${RESET}` : str;
 }
@@ -166,13 +230,14 @@ function badges(payload, color, swarmOn, C) {
 function goalBadge(goal, color, now, C) {
   const badge = formatGoalBadge(goal, now);
   if (!badge) return null;
+  const text = sanitizeTerminalText(badge.text);
   const dotColor =
     badge.status === 'active' ? C.primary : badge.status === 'blocked' ? C.warning : C.muted;
-  if (!color) return badge.text;
+  if (!color) return text;
   // Repaint the dot (always the 7th char: "[goal ●") and mute the rest.
-  const dotIdx = badge.text.indexOf('●');
-  const before = badge.text.slice(0, dotIdx);
-  const after = badge.text.slice(dotIdx + 1);
+  const dotIdx = text.indexOf('●');
+  const before = text.slice(0, dotIdx);
+  const after = text.slice(dotIdx + 1);
   return `${C.muted}${before}${RESET}${dotColor}●${RESET}${C.muted}${after}${RESET}`;
 }
 
@@ -180,9 +245,9 @@ const LAYOUT_LEVEL = { compact: 0, normal: 1 };
 
 function modelSegment({ layout, payload, metrics, color, C }) {
   const level = metrics && typeof metrics.thinkingLevel === 'string'
-    ? metrics.thinkingLevel
+    ? sanitizeTerminalText(metrics.thinkingLevel)
     : null;
-  let segment = colorize(color, C.primary, String(payload.model));
+  let segment = colorize(color, C.primary, sanitizeTerminalText(payload.model));
   if (level && level !== 'off') {
     // Effort-capable models show the bare level ("K3 max"); only boolean
     // thinking keeps the " thinking" label (compact: " on").
@@ -194,11 +259,13 @@ function modelSegment({ layout, payload, metrics, color, C }) {
 }
 
 function projectSegment({ layout, payload, gitDirty }) {
-  const project = layout !== 'compact' && payload.cwd
-    ? path.basename(payload.cwd) || payload.cwd
+  const cwd = typeof payload.cwd === 'string' ? sanitizeTerminalText(payload.cwd) : '';
+  const project = layout !== 'compact' && cwd
+    ? path.basename(cwd) || cwd
     : null;
-  if (payload.gitBranch) {
-    const git = `git:(${payload.gitBranch}${gitDirty ? '*' : ''})`;
+  const gitBranch = sanitizeTerminalText(payload.gitBranch);
+  if (gitBranch) {
+    const git = `git:(${gitBranch}${gitDirty ? '*' : ''})`;
     return project ? `${project} ${git}` : git;
   }
   return project;
@@ -334,14 +401,15 @@ function quotaSegment({ layout, quota, color, now, C }) {
   for (const window of quota.windows || []) {
     const fraction = window.used / window.limit;
     const pct = `${pctOf(window.used, window.limit)}%`;
+    const label = sanitizeTerminalText(window.label);
     // Compact drops the bar, so the percentage itself takes over the
     // usage-level signal the bar color carries in the normal layout.
     let text;
     if (layout === 'compact') {
       const level = numberLevelColor(fraction, C);
-      text = `${window.label} ${level ? colorize(color, level, pct) : pct}`;
+      text = `${label} ${level ? colorize(color, level, pct) : pct}`;
     } else {
-      text = `${window.label} ${bar(fraction, color, C)} ${pct}`;
+      text = `${label} ${bar(fraction, color, C)} ${pct}`;
     }
     const countdown = formatCountdown(window.resetAt, now);
     if (countdown) text += ` ${countdown}`;
@@ -362,7 +430,7 @@ function providerBalanceText(balance) {
   const amount = balance.total.toFixed(2);
   if (balance.currency === 'CNY') return `¥${amount}`;
   if (balance.currency === 'USD') return `$${amount}`;
-  return `${balance.currency} ${amount}`;
+  return `${sanitizeTerminalText(balance.currency)} ${amount}`;
 }
 
 function providerCostText(amount, currency) {
@@ -385,6 +453,7 @@ function providerCostText(amount, currency) {
 
 function providerUsageFact(usage) {
   if (!usage || typeof usage.label !== 'string') return null;
+  const label = sanitizeTerminalText(usage.label);
   if (usage.kind === 'cost') {
     if (
       usage.scope !== 'session'
@@ -397,7 +466,7 @@ function providerUsageFact(usage) {
       return null;
     }
     return {
-      kind: 'cost', label: usage.label,
+      kind: 'cost', label,
       suffix: `Session Cost ≈${providerCostText(usage.amount, usage.currency)}`,
       stale: false,
     };
@@ -415,7 +484,7 @@ function providerUsageFact(usage) {
     suffix = `Balance ${amount}`;
   }
   return {
-    kind: 'balance', label: usage.label, suffix,
+    kind: 'balance', label, suffix,
     available: usage.available,
     stale: usage.stale === true,
   };
@@ -490,5 +559,5 @@ export function renderHud(ctx) {
     const line = [...prefix, segs.join(' │ ')].filter(Boolean).join(' ');
     if (stripAnsi(line).length <= MAX_WIDTH || layout === 'compact') return [line];
   }
-  return [String(payload.model || 'kimi')];
+  return [sanitizeTerminalText(payload.model || 'kimi')];
 }

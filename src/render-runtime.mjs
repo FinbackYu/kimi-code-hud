@@ -80,7 +80,7 @@ export async function renderStatusLine({
 
   let quota = null;
   let providerUsage = null;
-  if (provider === null || provider === MANAGED_KIMI_PROVIDER) {
+  if (provider === MANAGED_KIMI_PROVIDER) {
     quota = snapshot.quota;
     if (remainingMs(deadline, clock) >= REFRESH_MIN_REMAINING_MS) {
       const ensureQuota = dependencies.ensureFreshQuota || ensureFreshQuota;
@@ -92,7 +92,7 @@ export async function renderStatusLine({
         now,
       });
     }
-  } else {
+  } else if (typeof provider === 'string' && provider.length > 0) {
     const providerUsageFacts = [];
     let providerCurrency = null;
     const resolveUsageTarget = dependencies.resolveProviderUsageTarget || resolveProviderUsageTarget;
@@ -157,7 +157,10 @@ export async function renderStatusLine({
   const gitBudget = remainingMs(deadline, clock);
   if (payload.gitBranch && gitBudget >= GIT_MIN_REMAINING_MS) {
     const gitDirtyImpl = dependencies.isGitDirty || isGitDirty;
-    gitDirty = gitDirtyImpl(payload.cwd, { timeoutMs: gitBudget - 2 });
+    gitDirty = gitDirtyImpl(payload.cwd, {
+      timeoutMs: gitBudget - 2,
+      cachePath: paths.gitStatusCachePath,
+    });
   }
   const lines = renderHud({
     payload,
