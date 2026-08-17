@@ -26,6 +26,10 @@ Use `node:test` with `node:assert/strict`. Name files `test/<module>.test.mjs` a
 
 Write short, imperative commit subjects. History uses both direct subjects (`Add SessionStart self-heal hook`) and Conventional Commit prefixes (`fix: harden state and config handling`). Keep each commit scoped to one behavior. Pull requests should explain the user-visible change, list verification commands, link relevant issues, and include terminal output or screenshots for HUD layout changes.
 
+## Issue Workflow
+
+All issue-driven work follows `.agents/skills/upstream-issue-flow/SKILL.md`. Key rules: triage each issue by upstream release status (prep for unreleased changes vs. immediate fix); prep work for unreleased upstream contracts lives on a shared `upstream/<version>-prep` branch and merges to `main` only after the upstream release ships and the issue's verification checklist passes locally; monitor-filed issues (`upstream-watch` label, body owned by the Repo-Overwatch monitor) must never have their title or body edited — progress goes in comments only. Merge to `main` requires the user's explicit go-ahead.
+
 ## Security & Runtime Constraints
 
 The HUD runs on a hot path with a 300ms host deadline. Avoid blocking network calls, unbounded scans, and new dependencies. Preserve silent fallback behavior: do not print diagnostics during rendering. Never log or cache access tokens. Keep cache writes atomic, sanitize path components, and preserve unrelated TOML settings during install, uninstall, and hook repair.
