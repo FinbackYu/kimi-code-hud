@@ -83,7 +83,7 @@ git diff --check         # 无空白错误
 
 ## 第八步：worklog
 
-每个有意义的工作段结束，按 `creating-worklogs` skill 记项目 worklog 到 `worklog/YYYY-MM/`，一个工作段一篇、不追加旧篇。issue 编号写进 worklog 正文便于回溯。
+每个有意义的工作段结束，按 `creating-worklogs` skill 记项目 worklog 到 `worklog/YYYY-MM/`，一个工作段一篇、不追加旧篇。issue 编号写进 worklog 正文便于回溯。本仓库为公开仓库，`worklog/` 已入 .gitignore——只本地留存，不提交不推送。
 
 ## 反模式（不要做）
 
