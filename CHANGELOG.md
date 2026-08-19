@@ -6,6 +6,21 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-19
+
+### Changed
+
+- Advance the audited Kimi Code compatibility baseline from 0.36.1 to 0.37.2:
+  the 10-field status-line payload, first-stdout-line contract, and 300ms host
+  ceiling are unchanged; footer line 2 gains a longer-lived `warningHint` and
+  remains host-owned; the persisted wire manifest drops five transient record
+  types and adds durable `prompt.accepted`, `runtime.set_binding`, and
+  `tower_mode.enter` / `tower_mode.exit` records that HUD reducers safely
+  ignore. agent-core-v2 rewired its journal internals to Event2/defineState and
+  now always stamps `time` on durable records; the on-disk wire format,
+  session layout, quota endpoint, plugin manifest, and hook payloads are
+  unchanged.
+
 ## [0.7.1] - 2026-08-15
 
 ### Changed
@@ -347,7 +362,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.2
 [0.7.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.1
 [0.7.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.0
 [0.6.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.6.5
