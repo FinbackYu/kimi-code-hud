@@ -302,15 +302,19 @@ function acquireGitStatusLock(lockPath, {
   } catch {
     return null;
   }
-  // One monotonic deadline accounts for both filesystem attempts and polling;
-  // maxAttempts is only a backstop for a broken or non-advancing test clock.
+  // One monotonic deadline accounts for polling; maxAttempts is only a
+  // backstop for a broken or non-advancing test clock. The first attempt
+  // always runs: tryAcquireGitStatusLock never blocks, and skipping it just
+  // because scheduling jitter already pushed us past the deadline would
+  // silently drop cache writes even when the lock is free.
   const maxAttempts = Math.max(1, Math.ceil(waitMs / GIT_STATUS_LOCK_POLL_MS) + 1);
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    try {
-      const currentTime = monotonicClock();
-      if (attempt === 0 ? currentTime > deadline : currentTime >= deadline) return null;
-    } catch {
-      return null;
+    if (attempt > 0) {
+      try {
+        if (monotonicClock() >= deadline) return null;
+      } catch {
+        return null;
+      }
     }
     let acquired = null;
     try {
@@ -320,16 +324,15 @@ function acquireGitStatusLock(lockPath, {
     } catch {
       return null;
     }
+    // Once the lock is held, keep it: the deadline bounds how long we wait
+    // for a busy lock, not the acquisition itself. Releasing a freshly
+    // acquired lock just because the wait budget lapsed would silently drop
+    // the cache write after the caller already paid for the acquisition.
+    if (acquired) return acquired;
     let remaining;
     try {
       remaining = deadline - monotonicClock();
     } catch {
-      if (acquired) releaseGitStatusLock(lockPath, acquired);
-      return null;
-    }
-    if (acquired) {
-      if (remaining >= 0) return acquired;
-      releaseGitStatusLock(lockPath, acquired);
       return null;
     }
     if (remaining <= 0) return null;
