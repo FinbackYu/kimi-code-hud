@@ -219,10 +219,28 @@ const reader = createGitStatusReader({
     return Buffer.from('## ' + branch + '\\n');
   },
 });
-process.stdout.write(JSON.stringify(reader(cwd, {
+const result = reader(cwd, {
   cachePath,
   env: { PATH: trusted },
-})));
+});
+// The loser of the post-barrier lock race may skip its cache write by
+// design: lockWaitMs is capped at 20ms so the hot path never blocks, and a
+// timeout fails open. On a slow runner that designed skip flakes the merge
+// assertion below, so retry until this worker's branch lands in the cache
+// (a successful first write makes the loop a no-op).
+const pause = new Int32Array(new SharedArrayBuffer(4));
+for (let attempt = 0; attempt < 10; attempt += 1) {
+  let entries = {};
+  try {
+    entries = JSON.parse(fs.readFileSync(cachePath, 'utf8')).entries || {};
+  } catch {
+    // Cache file briefly absent or half-written by the peer: retry.
+  }
+  if (Object.values(entries).some((entry) => entry && entry.branch === branch)) break;
+  Atomics.wait(pause, 0, 0, 50);
+  reader(cwd, { cachePath, env: { PATH: trusted } });
+}
+process.stdout.write(JSON.stringify(result));
 `;
   const spawnWorker = (cwd, readyPath, branch) => spawn(process.execPath, [
     '--input-type=module',
