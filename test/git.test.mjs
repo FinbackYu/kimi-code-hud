@@ -205,7 +205,7 @@ test('two real processes merge barrier-synchronized cold misses', async (t) => {
   const worker = `
 import fs from 'node:fs';
 import { createGitStatusReader } from ${JSON.stringify(moduleUrl)};
-const [cwd, cachePath, trusted, readyPath, releasePath, branch] = process.argv.slice(1);
+const [cwd, cachePath, trusted, readyPath, releasePath, branch, logPath] = process.argv.slice(1);
 const reader = createGitStatusReader({
   now: () => 1_000,
   execFileSyncImpl: () => {
@@ -227,22 +227,31 @@ const result = reader(cwd, {
 // design: lockWaitMs is capped at 20ms so the hot path never blocks, and a
 // timeout fails open. On a slow runner that designed skip flakes the merge
 // assertion below, so retry until this worker's branch lands in the cache
-// (a successful first write makes the loop a no-op).
+// (a successful first write makes the loop a no-op). The log file keeps
+// enough evidence to diagnose any residual CI flake.
 const pause = new Int32Array(new SharedArrayBuffer(4));
-for (let attempt = 0; attempt < 10; attempt += 1) {
-  let entries = {};
+const hasOwnBranch = () => {
   try {
-    entries = JSON.parse(fs.readFileSync(cachePath, 'utf8')).entries || {};
+    const parsed = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+    return Object.values(parsed.entries || {}).some(
+      (entry) => entry && entry.branch === branch,
+    );
   } catch {
-    // Cache file briefly absent or half-written by the peer: retry.
+    return false; // Cache file briefly absent or renamed mid-write by the peer.
   }
-  if (Object.values(entries).some((entry) => entry && entry.branch === branch)) break;
+};
+let retries = 0;
+while (!hasOwnBranch() && retries < 10) {
   Atomics.wait(pause, 0, 0, 50);
   reader(cwd, { cachePath, env: { PATH: trusted } });
+  retries += 1;
 }
+try {
+  fs.writeFileSync(logPath, JSON.stringify({ retries, landed: hasOwnBranch() }));
+} catch { /* diagnostics are best effort */ }
 process.stdout.write(JSON.stringify(result));
 `;
-  const spawnWorker = (cwd, readyPath, branch) => spawn(process.execPath, [
+  const spawnWorker = (cwd, readyPath, branch, logPath) => spawn(process.execPath, [
     '--input-type=module',
     '--eval',
     worker,
@@ -252,9 +261,13 @@ process.stdout.write(JSON.stringify(result));
     readyPath,
     release,
     branch,
+    logPath,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
-  const firstChild = spawnWorker(fixture.cwd, readyFirst, 'first');
-  const secondChild = spawnWorker(secondCwd, readySecond, 'second');
+  const cacheDir = path.dirname(fixture.cachePath);
+  const logFirst = path.join(cacheDir, 'merge-first.log');
+  const logSecond = path.join(cacheDir, 'merge-second.log');
+  const firstChild = spawnWorker(fixture.cwd, readyFirst, 'first', logFirst);
+  const secondChild = spawnWorker(secondCwd, readySecond, 'second', logSecond);
   t.after(() => {
     if (!firstChild.killed) firstChild.kill();
     if (!secondChild.killed) secondChild.kill();
@@ -269,7 +282,18 @@ process.stdout.write(JSON.stringify(result));
 
   const rawCache = fs.readFileSync(fixture.cachePath, 'utf8');
   const cache = JSON.parse(rawCache);
-  assert.equal(Object.keys(cache.entries).length, 2);
+  const readLog = (logPath) => {
+    try {
+      return fs.readFileSync(logPath, 'utf8');
+    } catch {
+      return '<missing>';
+    }
+  };
+  assert.equal(
+    Object.keys(cache.entries).length,
+    2,
+    `cache=${rawCache} first=${readLog(logFirst)} second=${readLog(logSecond)}`,
+  );
   assert.doesNotMatch(rawCache, new RegExp(fixture.cwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(rawCache, new RegExp(secondCwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
