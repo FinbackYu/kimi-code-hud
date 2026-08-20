@@ -1,8 +1,9 @@
 # HUD capabilities
 
-- Last verified: 2026-08-19
-- HUD behavior baseline: `v0.7.1` (`4df8041`)
-- Kimi Code baseline: `0.37.2` (`c41fadf0f78b35ecaf3d613ca26580a9a093de80`)
+- Last verified: 2026-08-20
+- HUD behavior baseline: `v0.7.2` (`ef48b22`), plus the dual-region quota fix
+  in the working tree (pending release)
+- Kimi Code baseline: `0.38.0` (`0999454bdcb5ddd98f39bffee434dcf0a810f394`)
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
@@ -12,11 +13,11 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/c41fadf0f78b35ecaf3d613ca26580a9a093de80/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/c41fadf0f78b35ecaf3d613ca26580a9a093de80/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/c41fadf0f78b35ecaf3d613ca26580a9a093de80/apps/kimi-code/src/utils/git/git-status.ts)
-- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/c41fadf0f78b35ecaf3d613ca26580a9a093de80/packages/agent-core-v2/docs/wire-manifest.d.ts)
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/c41fadf0f78b35ecaf3d613ca26580a9a093de80/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/apps/kimi-code/src/utils/git/git-status.ts)
+- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/packages/agent-core-v2/docs/wire-manifest.d.ts)
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/apps/kimi-code/src/tui/commands/registry.ts)
 
 Baseline delta (0.32.0 → 0.33.0):
 
@@ -101,6 +102,43 @@ Baseline delta (0.36.1 → 0.37.2):
   Event2/defineState. The on-disk wire format, session layout, quota endpoint,
   plugin manifest, and hook payloads are unchanged.
 
+Baseline delta (0.37.2 → 0.38.0):
+
+- The `status_line.command` payload/runner contract, the first-stdout-line
+  contract, the 300ms host ceiling, footer line ownership, and the Git status
+  model are unchanged; `footer.ts`, `status-line-command.ts`, and
+  `git-status.ts` are byte-identical across the release range.
+- The persisted wire manifest grows from 48 to 55 record types: `cron.add`,
+  `cron.cursor`, `cron.delete`, `staleGuard.recorded`, `staleGuard.cleared`,
+  `task.waitDelivered`, and `token_counting.turn_recorded` are new, and every
+  durable record now carries a required `agentId` (the host backfills it when
+  replaying older journals; `WIRE_PROTOCOL_VERSION` stays 1.5). HUD reducers
+  read known fields and ignore the additions, so wire parsing stays
+  compatible.
+- Failed or interrupted steps now also persist a `step.end` record, but
+  without `usage`, `llmFirstTokenLatencyMs`, or `llmStreamDurationMs`. The
+  HUD gates — TPS requires nonzero `output` and a valid stream duration,
+  cache-hit requires all four usage fields, turn requires `finishReason ===
+  'end_turn'` — filter these rows, so no statistic is polluted; only
+  `lastStepEndAt` updates early for a failed step, which makes the last-step
+  presentation more accurate and is recorded as a variant.
+- Quota: the managed usages endpoint for mainland-cn is unchanged
+  (`https://api.kimi.com/coding/v1/usages`), and 0.38.0 adds a global region
+  (`https://api.kimi.ai/coding/v1/usages`, with credentials persisted in a
+  scoped slot `credentials/kimi-code-env-<16 hex>.json` via
+  `packages/oauth/src/region.ts` / `managed-kimi-code.ts`). The HUD-side
+  change sits in the working tree: the detached `--refresh-quota` path now
+  resolves the region (env `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST`, then
+  the `[providers."managed:kimi-code"]` `oauth` sub-table and `base_url` in
+  config.toml, then the mainland default), derives the credential file from
+  the persisted `oauth.key`, and sends the token only to the two official
+  hosts, failing closed on any custom or mismatched configuration. The
+  render hot path is unchanged; after a region switch the previous cache may
+  render for at most one TTL (60s).
+- The `SessionStart` hook, plugin manifest, `KIMI_CODE_HOME` resolution, and
+  credentials directory layout are unchanged; upstream only moved internal
+  modules between packages.
+
 ## Footer coverage
 
 Legend: **covered** means the state is reconstructed end to end; **variant** is
@@ -108,7 +146,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.37.2 | HUD v0.7.1 | Status |
+| Official line-1 slot or state | Upstream 0.38.0 | HUD v0.7.2 | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows `[manual]`, and makes `[auto]` red | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
@@ -131,7 +169,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 0.37.2. HUD installation, configuration, and lifecycle
+built into Kimi Code 0.38.0. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 

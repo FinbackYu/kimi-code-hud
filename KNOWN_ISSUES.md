@@ -1,8 +1,9 @@
 # Known issues
 
-- Last verified: 2026-08-19
-- HUD behavior baseline: `v0.7.1` (`4df8041`)
-- Kimi Code baseline: `0.37.2` (`c41fadf0f78b35ecaf3d613ca26580a9a093de80`)
+- Last verified: 2026-08-20
+- HUD behavior baseline: `v0.7.2` (`ef48b22`), plus the dual-region quota fix
+  in the working tree (pending release)
+- Kimi Code baseline: `0.38.0` (`0999454bdcb5ddd98f39bffee434dcf0a810f394`)
 
 This file tracks open footer parity problems and information boundaries. Close
 or move an entry when its acceptance criteria are met. Current coverage and
@@ -270,3 +271,51 @@ Resolution:
 - set `GIT_OPTIONAL_LOCKS=0` without mutating the caller environment;
 - preserve trusted absolute executable resolution, the 150ms probe ceiling,
   and the silent clean fallback, including cached failures.
+
+## KI-12: Global-region quota is unavailable
+
+Status: closed (fix implemented in the working tree, pending release)
+
+Affected area: quota region resolution
+
+Through Kimi Code 0.37.2 there is a single managed region, so the HUD
+hardcoded the mainland usages URL (`https://api.kimi.com/coding/v1/usages`)
+and read credentials from the default `credentials/kimi-code.json` slot.
+Kimi Code 0.38.0 adds a global region: a login against `https://auth.kimi.ai`
+persists its own base URL and an `oauth` ref whose `key` is
+`oauth/kimi-code-env-<16 hex>` (see `packages/oauth/src/region.ts` and
+`managed-kimi-code.ts`). Before the fix, a global-region user saw no quota at
+all: the refresh called the mainland URL with the default-slot credential
+file instead of the scoped one.
+
+Resolution:
+
+- `resolveQuotaEndpoints` (`src/quota.mjs`) resolves the region on the
+  detached `--refresh-quota` path only, in upstream order: env
+  `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST`, then the
+  `[providers."managed:kimi-code"]` `oauth` sub-table (`oauth_host`,
+  `base_url`, `key`) from config.toml, then the mainland default;
+- the credential file is derived from the persisted `oauth.key` via
+  `credentialsPathForKey`, honoring only the two upstream key shapes
+  (`oauth/kimi-code` and `oauth/kimi-code-env-<16 hex>`) and falling back to
+  the default slot otherwise;
+- the token leaves the process only toward the two official hosts
+  (`api.kimi.com` / `api.kimi.ai`, https, no port, exact `/coding/v1/usages`
+  path): any custom or mismatched host/base pair fails closed to the
+  mainland default, and `requestQuota` re-checks the same whitelist before
+  sending;
+- the render hot path never parses config.toml and the cache carries no
+  endpoint tag, so after a region switch the previous region's figures may
+  render for at most one TTL (60s) until the next refresh rewrites them.
+
+Acceptance criteria:
+
+- a global-region config resolves to `https://api.kimi.ai/coding/v1/usages`
+  and the scoped credential file `credentials/kimi-code-env-<16 hex>.json`;
+- a non-official URL, or a host/base pair pinned to different regions, never
+  receives the token (fail closed to the mainland default);
+- a mainland config with no env override and no `oauth_host` keeps the
+  unchanged `api.kimi.com` URL and the default `credentials/kimi-code.json`
+  slot;
+- after a region switch, stale figures render for at most one TTL (60s);
+- regression tests cover all of the above (`test/quota.test.mjs`).
