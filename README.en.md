@@ -4,7 +4,7 @@
 
 [中文](README.md) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/FinbackYu/kimi-code-hud/issues)
 
-![kimi-code-hud in action](docs/media/hud-demo.png)
+![HUD state gallery (stacked for showcase; only the first line renders in real use)](docs/media/hud-states.png)
 
 ## What is kimi-code-hud
 
@@ -24,8 +24,6 @@ A zero-dependency custom status line (HUD) for [Kimi Code CLI](https://www.kimi.
 - **Background-task badges.** Running shell tasks and background subagents counted separately — `[N task(s) running]` / `[N agent(s) running]`, inserted between the model and the directory, matching the built-in footer's slot order.
 - **Dark & light themes.** Follows the host `theme` setting; light mode bolds badges and softens the bar colors.
 - **Hot-path safe.** Every render finishes within 300ms and all errors degrade silently — no logs, never blocking the TUI.
-
-![HUD state gallery (stacked for showcase; only the first line renders in real use)](docs/media/hud-states.png)
 
 ## Install
 

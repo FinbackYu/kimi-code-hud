@@ -4,7 +4,7 @@
 
 [English](README.en.md) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/FinbackYu/kimi-code-hud/issues)
 
-![kimi-code-hud 实际效果](docs/media/hud-demo.png)
+![HUD 状态示例（堆叠展示，实际使用只渲染第一行）](docs/media/hud-states.png)
 
 ## 什么是 kimi-code-hud
 
@@ -24,8 +24,6 @@
 - **后台任务徽章** 后台 Shell 任务与后台子代理分别计数：`[N task(s) running]` / `[N agent(s) running]`，插在模型与目录之间，与宿主默认 footer 槽位顺序一致。
 - **深浅双主题** 跟随宿主 `theme` 设置；light 下徽标加粗，柱条换柔和真彩色。
 - **热路径安全** 每次渲染都在 300ms 内完成，所有错误静默降级——不打印日志，绝不阻塞 TUI。
-
-![HUD 状态示例（堆叠展示，实际使用只渲染第一行）](docs/media/hud-states.png)
 
 ## 安装
 
