@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-08-21
+
 ### Fixed
 
 - Fleet speed no longer counts a parked main agent in swarm mode: while main
@@ -413,7 +415,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.5...HEAD
+[0.7.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.5
 [0.7.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.4
 [0.7.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.3
 [0.7.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.2
