@@ -6,6 +6,33 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-08-20
+
+### Added
+
+- Support Kimi Code 0.38.0 dual-region logins for the quota segment: the
+  detached refresh resolves the region from `KIMI_CODE_OAUTH_HOST` /
+  `KIMI_OAUTH_HOST`, then config.toml's `[providers."managed:kimi-code"]`
+  oauth ref and `base_url`, and defaults to mainland China; a global login
+  switches the request to `https://api.kimi.ai/coding/v1/usages` and reads
+  the scoped credential file derived from the oauth ref key. Any custom or
+  contradictory host/base URL fails closed to the default, and tokens are
+  only ever sent to the two official usages endpoints. After a region switch
+  the previous region's cached figures may render for up to one 60s TTL.
+
+### Changed
+
+- Advance the audited Kimi Code compatibility baseline from 0.37.2 to 0.38.0:
+  the status-line payload/runner contract, footer line ownership, and the Git
+  status model are byte-identical; the persisted wire manifest grows from 48
+  to 55 durable record types (new `cron.*`, `staleGuard.*`,
+  `task.waitDelivered`, and `token_counting.turn_recorded` records) and every
+  durable record gains a required `agentId`, both of which HUD reducers
+  safely ignore; failed or interrupted steps now persist `step.end` without
+  usage or timing fields, which the TPS, cache-hit, and turn gates already
+  reject; the quota endpoint shape, plugin manifest, SessionStart hook
+  payloads, and credential layout are unchanged.
+
 ## [0.7.2] - 2026-08-19
 
 ### Changed
@@ -362,7 +389,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.3
 [0.7.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.2
 [0.7.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.1
 [0.7.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.0
