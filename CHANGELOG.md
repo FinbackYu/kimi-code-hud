@@ -6,6 +6,13 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Cold-start catch-up: a cold reader's first frame may spend the whole 1 MiB
+  frame budget on the main wire (previously capped at one 256 KiB slice), so
+  a typical session catches up — and shows TPS — in a single frame instead of
+  over several seconds. Warm frames stay slice-capped.
+
 ## [0.7.3] - 2026-08-20
 
 ### Added
