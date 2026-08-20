@@ -13,7 +13,7 @@ import {
 } from '../src/management-service.mjs';
 import { resolveRuntimePaths } from '../src/paths.mjs';
 import { refreshProviderUsage } from '../src/provider-usage.mjs';
-import { refreshQuota } from '../src/quota.mjs';
+import { refreshQuota, resolveQuotaEndpoints } from '../src/quota.mjs';
 import { renderStatusLine } from '../src/render-runtime.mjs';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -79,8 +79,16 @@ async function main() {
   }
   if (args.includes('--refresh-quota')) {
     try {
+      // Region resolution reads config.toml here only — the detached refresh
+      // is off the render hot path, so this is the one place it may happen.
+      const endpoints = resolveQuotaEndpoints({
+        env: process.env,
+        configPath: RUNTIME_PATHS.configTomlPath,
+        kimiHome: RUNTIME_PATHS.kimiHome,
+      });
       await refreshQuota({
-        credentialsPath: RUNTIME_PATHS.credentialsPath,
+        credentialsPath: endpoints.credentialsPath,
+        url: endpoints.url,
         cachePath: RUNTIME_PATHS.quotaCachePath,
         lockPath: RUNTIME_PATHS.quotaLockPath,
         lockToken: process.env.KIMI_HUD_QUOTA_LOCK_TOKEN,
