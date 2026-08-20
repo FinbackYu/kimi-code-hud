@@ -46,13 +46,19 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
     // A subagent whose turn has ended (closing end_turn step.end, turn.ended
     // or an active turn.cancel) leaves the fleet immediately; the recency
     // window only keeps genuinely mid-turn agents counted. Main is exempt so
-    // its just-finished speed survives until the stale TTL as before.
+    // its just-finished speed survives until the stale TTL as before — except
+    // in swarm mode, where a parked main (blocked inside the AgentSwarm tool,
+    // no request in flight) must drop out too: otherwise its pre-swarm
+    // samples keep it counted — and summed into the fleet total — for the
+    // whole recency window while it is not generating at all.
     const settled =
       name !== 'main' &&
       agent.lastTurnEndAt !== null &&
       (fresh.length === 0 || agent.lastTurnEndAt >= fresh[fresh.length - 1].t) &&
       (agent.lastRequestAt === null || agent.lastTurnEndAt >= agent.lastRequestAt);
-    if (!generating && (!recent || settled)) continue;
+    const parkedMain =
+      name === 'main' && state.swarmMode === true && !generating;
+    if (parkedMain || (!generating && (!recent || settled))) continue;
     activeAgents += 1;
     soleActive = { bucket: agent, fresh };
     if (name === 'main') mainActive = true;

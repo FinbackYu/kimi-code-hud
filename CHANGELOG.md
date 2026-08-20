@@ -6,6 +6,17 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Fleet speed no longer counts a parked main agent in swarm mode: while main
+  is blocked inside the AgentSwarm tool (no request in flight), its pre-swarm
+  samples previously kept it in the head count and summed into the fleet
+  total for the whole 2-minute recency window (e.g. `333 t/s (main+2 agents
+  @111)` while only the two subagents were generating). A parked main now
+  drops out immediately, like a settled subagent; a main with a request in
+  flight still feeds the fleet, and outside swarm mode the just-finished
+  speed keeps surviving until the stale TTL as before.
+
 ## [0.7.4] - 2026-08-20
 
 ### Changed

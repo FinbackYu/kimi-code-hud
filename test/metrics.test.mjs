@@ -782,9 +782,11 @@ test('getMetrics migrates flat states into buckets, preserving window and badges
   );
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   // The migrated samples were stamped with lastSampleAt, so the window is
-  // still fresh and keeps describing the same session.
+  // still fresh and keeps describing the same session — but the migrated
+  // swarmMode flag marks main as parked (no request in flight), so the
+  // reading now surfaces through the dimmed stale-median fallback.
   assert.equal(m.tps, 200);
-  assert.equal(m.tpsStale, false);
+  assert.equal(m.tpsStale, true);
   assert.equal(m.modelAlias, 'kimi-code/k3');
   assert.equal(m.thinkingLevel, 'high');
   assert.deepEqual(m.goal, { status: 'active', turnsUsed: 1 });
@@ -1249,6 +1251,124 @@ test('getMetrics re-activates a settled subagent when a later request arrives', 
   assert.equal(m.tpsAgents, 2);
   assert.equal(m.tpsTotal, 600);
   assert.equal(m.tps, 300);
+});
+
+test('getMetrics swarm mode drops a parked main from the fleet', () => {
+  // User report: with swarm mode on, main is blocked inside the AgentSwarm
+  // tool — no request in flight, no new samples — yet its pre-swarm samples
+  // kept it counted (and summed into the total) for the whole recency
+  // window, rendering e.g. "333 t/s (main+2 agents @111)" while only the two
+  // subagents were actually generating. A parked main must leave the fleet
+  // immediately, like a settled subagent.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0', 'agent-1'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    `{"type":"swarm_mode.enter","trigger":"prompt","time":${EVENT_TIME - 1000}}\n` +
+      [0, 1, 2].map((n) => stepEnd({
+        output: 111, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n, finishReason: 'tool_use',
+      })).join('\n') + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-1'],
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  const m = getMetrics(id, opts);
+  assert.equal(m.swarmMode, true);
+  assert.equal(m.activeAgents, 2);
+  assert.equal(m.tpsAgents, 2);
+  assert.equal(m.tpsTotal, 800);
+  assert.equal(m.tps, 400);
+  assert.equal(m.mainActive, false);
+  assert.equal(m.mainSpeed, false);
+});
+
+test('getMetrics swarm mode keeps a generating main in the fleet', () => {
+  // Main talking between swarm waves has a request in flight (newer than its
+  // latest step.end): it still feeds the fleet and the "main+" label.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0', 'agent-1'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    `{"type":"swarm_mode.enter","trigger":"prompt","time":${EVENT_TIME - 1000}}\n` +
+      stepEnd({ output: 111, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n' +
+      llmRequest({ time: EVENT_TIME + 10 }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-1'],
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  const m = getMetrics(id, opts);
+  assert.equal(m.swarmMode, true);
+  assert.equal(m.activeAgents, 3);
+  assert.equal(m.tpsAgents, 3);
+  assert.equal(m.tpsTotal, 911);
+  assert.equal(m.tps, 911 / 3);
+  assert.equal(m.mainActive, true);
+  assert.equal(m.mainSpeed, true);
+});
+
+test('getMetrics swarm mode with every subagent settled falls back to the stale main median', () => {
+  // The swarm has wound down but not exited yet: all subagents settled, main
+  // still parked. The display falls back to main's dimmed last median
+  // instead of a live one-agent fleet figure.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    `{"type":"swarm_mode.enter","trigger":"prompt","time":${EVENT_TIME - 1000}}\n` +
+      [0, 1, 2].map((n) => stepEnd({
+        output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n, finishReason: 'tool_use',
+      })).join('\n') + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    [0, 1, 2].map((n) => stepEnd({
+      output: 500, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n, finishReason: 'tool_use',
+    })).join('\n') + '\n' +
+      stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000 }) + '\n',
+  );
+  const m = getMetrics(id, opts);
+  assert.equal(m.activeAgents, 0);
+  assert.equal(m.tpsAgents, 0);
+  assert.equal(m.tpsTotal, null);
+  assert.equal(m.tps, 100);
+  assert.equal(m.tpsStale, true);
+  assert.equal(m.mainActive, false);
+});
+
+test('getMetrics after swarm_mode.exit the just-finished main speed stays live as before', () => {
+  // The parked-main drop only applies while swarm mode is on. Once the swarm
+  // exits, a solo main keeps the old exemption: its just-finished reading
+  // survives live until the stale TTL.
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wirePath,
+    `{"type":"swarm_mode.enter","trigger":"prompt","time":${EVENT_TIME - 2000}}\n` +
+      `{"type":"swarm_mode.exit","time":${EVENT_TIME - 1000}}\n` +
+      [0, 1, 2].map((n) => stepEnd({
+        output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n, finishReason: 'tool_use',
+      })).join('\n') + '\n',
+  );
+  const m = getMetrics(id, opts);
+  assert.equal(m.swarmMode, false);
+  assert.equal(m.activeAgents, 1);
+  assert.equal(m.tps, 100);
+  assert.equal(m.tpsStale, false);
+  assert.equal(m.mainActive, true);
 });
 
 test('getMetrics solo display shows a provisional reading below MIN_SAMPLES', () => {
