@@ -87,8 +87,15 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
     const newest = soleActive.fresh.length
       ? soleActive.fresh[soleActive.fresh.length - 1].t
       : null;
-    if (windowMedian !== null && newest !== null && now - newest <= TPS_TTL_MS) {
+    const freshEnough = newest !== null && now - newest <= TPS_TTL_MS;
+    if (windowMedian !== null && freshEnough) {
       tps = windowMedian;
+    } else if (freshEnough) {
+      // Provisional reading: fewer than MIN_SAMPLES fresh samples — typical
+      // right after a model switch or the TTL reset at a new turn. Shown
+      // dimmed (tpsStale) until the full median takes over.
+      tps = median(values);
+      tpsStale = true;
     } else if (soleActive.bucket.lastMedian !== null) {
       tps = soleActive.bucket.lastMedian;
       tpsStale = true;

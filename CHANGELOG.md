@@ -12,6 +12,10 @@ The project follows [Semantic Versioning](https://semver.org/).
   frame budget on the main wire (previously capped at one 256 KiB slice), so
   a typical session catches up — and shows TPS — in a single frame instead of
   over several seconds. Warm frames stay slice-capped.
+- Provisional TPS: with fewer than 3 fresh samples (new turn after the
+  2-minute TTL, a model switch, or the first steps of a session) the segment
+  now shows the median of the available samples in muted gray instead of
+  waiting out the warmup or falling back to the expired median.
 
 ## [0.7.3] - 2026-08-20
 
