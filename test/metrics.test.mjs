@@ -468,19 +468,22 @@ test('getMetrics reads incrementally and survives truncation', () => {
 
   fs.writeFileSync(wirePath, stepEnd({ output: 100, streamMs: 1000, ttftMs: 1200 }) + '\n');
   let m = getMetrics(id, opts);
-  assert.equal(m.tps, null);
+  assert.equal(m.tps, 100); // provisional: a single fresh sample
+  assert.equal(m.tpsStale, true);
   assert.equal(m.ttftMs, 1200);
   assert.equal(m.activeAgents, 1);
 
   // append: only new bytes are parsed
   fs.appendFileSync(wirePath, stepEnd({ output: 300, streamMs: 1000, ttftMs: 800 }) + '\n');
   m = getMetrics(id, opts);
-  assert.equal(m.tps, null);
+  assert.equal(m.tps, 200); // provisional: median(100, 300)
+  assert.equal(m.tpsStale, true);
   assert.equal(m.ttftMs, 800);
 
   fs.appendFileSync(wirePath, stepEnd({ output: 200, streamMs: 1000, ttftMs: 700 }) + '\n');
   m = getMetrics(id, opts);
-  assert.equal(m.tps, 200); // first display: median(100, 300, 200)
+  assert.equal(m.tps, 200); // first full reading: median(100, 300, 200)
+  assert.equal(m.tpsStale, false);
   assert.equal(m.tpsTotal, 200); // a lone live agent still feeds the fleet figure
   assert.equal(m.tpsAgents, 1);
 
@@ -615,8 +618,8 @@ test('getMetrics resets TPS and TTFT when modelAlias changes', () => {
       stepEnd({ output: 400, streamMs: 1000, ttftMs: 400 }) + '\n',
   );
   let m = getMetrics(id, opts);
-  assert.equal(m.tps, null);
-  assert.equal(m.tpsStale, false); // last median discarded with the old model
+  assert.equal(m.tps, 400); // provisional: the new model's first sample
+  assert.equal(m.tpsStale, true); // old median discarded with the old model
   assert.equal(m.ttftMs, 400);
   assert.equal(m.modelAlias, 'anthropic/claude-opus-5');
 
@@ -720,10 +723,10 @@ test('getMetrics starts a new warmup instead of reviving an expired window', () 
     wirePath,
     stepEnd({ output: 400, streamMs: 1000, ttftMs: 400, time: EVENT_TIME + 180_001 }) + '\n',
   );
-  // The gap cleared the live window, but the last median survives (stale)
-  // while the new window warms up.
+  // The gap cleared the live window; the first fresh sample shows right away
+  // as a provisional (dimmed) reading instead of the expired median.
   let m = getMetrics(id, { ...opts, now: EVENT_TIME + 180_002 });
-  assert.equal(m.tps, 50);
+  assert.equal(m.tps, 400);
   assert.equal(m.tpsStale, true);
 
   fs.appendFileSync(
@@ -1229,13 +1232,14 @@ test('getMetrics re-activates a settled subagent when a later request arrives', 
     stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n' +
       stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000 }) + '\n',
   );
-  // end_turn settles agent-0: only main stays active, and with a single
-  // sample below MIN_SAMPLES it has no speed reading, so the fleet figures
-  // stay empty.
+  // end_turn settles agent-0: only main stays active, and its single sample
+  // below MIN_SAMPLES shows as a provisional (dimmed) one-agent reading.
   let m = getMetrics(id, opts);
   assert.equal(m.activeAgents, 1);
-  assert.equal(m.tpsAgents, 0);
-  assert.equal(m.tpsTotal, null);
+  assert.equal(m.tps, 100);
+  assert.equal(m.tpsStale, true);
+  assert.equal(m.tpsAgents, 1);
+  assert.equal(m.tpsTotal, 100);
 
   // A resumed run (resume_agent_ids) starts a fresh request, so the subagent
   // re-joins the fleet even before its next sample lands.
@@ -1247,7 +1251,7 @@ test('getMetrics re-activates a settled subagent when a later request arrives', 
   assert.equal(m.tps, 300);
 });
 
-test('getMetrics solo display keeps the 3-sample warmup gate', () => {
+test('getMetrics solo display shows a provisional reading below MIN_SAMPLES', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
@@ -1258,8 +1262,8 @@ test('getMetrics solo display keeps the 3-sample warmup gate', () => {
   );
   const m = getMetrics(id, opts);
   assert.equal(m.activeAgents, 1);
-  assert.equal(m.tps, null); // below MIN_SAMPLES: nothing shown yet
-  assert.equal(m.tpsStale, false);
+  assert.equal(m.tps, 150); // provisional: median(100, 200) below MIN_SAMPLES
+  assert.equal(m.tpsStale, true); // dimmed until the full median takes over
   assert.equal(m.ttftMs, 200);
 });
 
