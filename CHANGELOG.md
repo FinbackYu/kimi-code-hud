@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-08-20
+
 ### Changed
 
 - Cold-start catch-up: a cold reader's first frame may spend the whole 1 MiB
@@ -400,7 +402,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.4
 [0.7.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.3
 [0.7.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.2
 [0.7.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.1
