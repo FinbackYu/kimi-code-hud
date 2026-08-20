@@ -4,7 +4,14 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { atomicWriteFile } from './fs-store.mjs';
 import {
+  MANAGED_KIMI_PROVIDER,
+  decodedStringValue,
+  findProviderTable,
+} from './model-config.mjs';
+import {
   HUD_DIR,
+  KIMI_HOME,
+  CONFIG_TOML_PATH,
   CREDENTIALS_PATH,
   QUOTA_CACHE_PATH,
   REFRESH_LOCK_PATH,
@@ -12,6 +19,7 @@ import {
 
 export { HUD_DIR, CREDENTIALS_PATH, QUOTA_CACHE_PATH, REFRESH_LOCK_PATH };
 export const USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
+export const GLOBAL_USAGES_URL = 'https://api.kimi.ai/coding/v1/usages';
 export const QUOTA_TTL_MS = 60_000;
 export const LOCK_STALE_MS = 30_000;
 
@@ -256,11 +264,146 @@ export function ensureFreshQuota({
   }
 }
 
+// The token only ever leaves the process toward these two hosts.
+const OFFICIAL_USAGES_HOSTS = new Set(['api.kimi.com', 'api.kimi.ai']);
+
+// Dual-region model (Kimi Code 0.38.0; upstream packages/oauth/src/region.ts
+// and managed-kimi-code.ts @ 0999454b): 'mainland-cn' (default) and 'global'.
+// A global login persists base_url = https://api.kimi.ai/coding/v1 and an
+// oauth ref { storage, key: 'oauth/kimi-code-env-<sha256(JSON({oauthHost,
+// baseUrl})) first 16 hex>', oauth_host: 'https://auth.kimi.ai' } under
+// [providers."managed:kimi-code"] in config.toml; a mainland login persists
+// no oauth_host and keeps the default 'oauth/kimi-code' slot. The
+// install-channel <home>/region marker is deliberately not consulted:
+// upstream only honors it before the first login, and a read-only HUD cannot
+// observe that state.
+const REGION_PROFILES = [
+  { oauthHost: 'https://auth.kimi.com', baseUrl: 'https://api.kimi.com/coding/v1' },
+  { oauthHost: 'https://auth.kimi.ai', baseUrl: 'https://api.kimi.ai/coding/v1' },
+];
+
+function normalizeEndpoint(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().replace(/\/+$/, '');
+  return normalized || null;
+}
+
+/**
+ * Raw text of the [providers."managed:kimi-code".oauth] sub-table, or null.
+ * Same canonical-format assumption as findProviderTable: the host's TOML
+ * writer quotes the provider name and writes one key per line.
+ * @param {string} text config.toml content
+ * @returns {string|null}
+ */
+function managedOAuthTable(text) {
+  const re = /\[providers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))\.oauth\]\s*\n([\s\S]*?)(?=\n\[|$)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if ((m[1] || m[2]) === MANAGED_KIMI_PROVIDER) return m[3];
+  }
+  return null;
+}
+
+/**
+ * Map an oauth ref key to its credential file: strip the 'oauth/' prefix and
+ * append '.json' inside the credentials directory. Only the two upstream key
+ * shapes are honored ('oauth/kimi-code' and 'oauth/kimi-code-env-<16 hex>');
+ * a missing or abnormal key falls back to the default slot. The whitelist
+ * regex doubles as path sanitization — no separator or dot can reach the
+ * filename.
+ * @param {string|null} key
+ * @param {string} credentialsDir
+ * @returns {string}
+ */
+function credentialsPathForKey(key, credentialsDir) {
+  const m = typeof key === 'string'
+    ? key.match(/^oauth\/(kimi-code(?:-env-[0-9a-f]{16})?)$/)
+    : null;
+  return path.join(credentialsDir, `${m ? m[1] : 'kimi-code'}.json`);
+}
+
+/**
+ * Resolve the quota refresh endpoints — which credential file to read and
+ * which official /usages URL to call — from env and config.toml. Only the
+ * detached --refresh-quota path may call this; the render hot path reads the
+ * cache only and must not parse config.toml.
+ *
+ * Fail closed by contract: the URL only ever leaves here as one of the two
+ * official region endpoints. Any custom/unknown oauth host or base_url
+ * (internal proxies, mirrors, typos) and any host/base pair pinned to
+ * different regions falls back to the mainland default; requestQuota
+ * re-checks the same whitelist before any token is sent. Never throws,
+ * never prints.
+ *
+ * @param {object} [opts]
+ * @param {object} [opts.env] overrides: KIMI_CODE_OAUTH_HOST / KIMI_OAUTH_HOST
+ *   pin the region, KIMI_CODE_BASE_URL the base URL (all before config.toml)
+ * @param {string} [opts.configPath] config.toml read when configText is absent
+ * @param {string} [opts.configText] pre-read config.toml text
+ * @param {string} [opts.kimiHome] Kimi home dir holding credentials/
+ * @returns {{credentialsPath: string, url: string}}
+ */
+export function resolveQuotaEndpoints({
+  env = {},
+  configPath = CONFIG_TOML_PATH,
+  configText = undefined,
+  kimiHome = KIMI_HOME,
+} = {}) {
+  const credentialsDir = path.join(kimiHome, 'credentials');
+  const fallback = {
+    credentialsPath: path.join(credentialsDir, 'kimi-code.json'),
+    url: USAGES_URL,
+  };
+  try {
+    let text = typeof configText === 'string' ? configText : null;
+    if (text === null) {
+      try {
+        text = fs.readFileSync(configPath, 'utf8');
+      } catch {
+        text = null;
+      }
+    }
+    const providerTable = text === null ? null : findProviderTable(text, MANAGED_KIMI_PROVIDER);
+    const oauthTable = text === null ? null : managedOAuthTable(text);
+    const configuredBaseUrl = providerTable === null
+      ? null
+      : normalizeEndpoint(decodedStringValue(providerTable, 'base_url'));
+    const configuredOAuthHost = oauthTable === null
+      ? null
+      : normalizeEndpoint(decodedStringValue(oauthTable, 'oauth_host'));
+    const configuredKey = oauthTable === null ? null : decodedStringValue(oauthTable, 'key');
+
+    // Region resolution follows upstream's observable order: env host first,
+    // then the persisted login's oauth_host. An explicit host must match a
+    // region profile exactly; a custom one fails closed to the default.
+    const host = normalizeEndpoint(env.KIMI_CODE_OAUTH_HOST)
+      || normalizeEndpoint(env.KIMI_OAUTH_HOST)
+      || configuredOAuthHost;
+    const profile = host === null
+      ? null
+      : REGION_PROFILES.find((p) => p.oauthHost === host) || null;
+    if (host !== null && profile === null) return fallback;
+    const baseUrl = normalizeEndpoint(env.KIMI_CODE_BASE_URL)
+      || configuredBaseUrl
+      || (profile || REGION_PROFILES[0]).baseUrl;
+    const endpointProfile = REGION_PROFILES.find((p) => p.baseUrl === baseUrl) || null;
+    if (endpointProfile === null) return fallback;
+    if (profile !== null && profile !== endpointProfile) return fallback;
+    return {
+      credentialsPath: credentialsPathForKey(configuredKey, credentialsDir),
+      url: `${baseUrl}/usages`,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 function officialUsagesUrl(url) {
   try {
     const parsed = new URL(url);
     return parsed.protocol === 'https:'
-      && parsed.hostname === 'api.kimi.com'
+      && OFFICIAL_USAGES_HOSTS.has(parsed.hostname)
+      && parsed.port === ''
       && parsed.pathname === '/coding/v1/usages'
       && parsed.username === ''
       && parsed.password === '';
@@ -329,6 +472,12 @@ export async function requestQuota({
  * for a logged-out account. A 401/403 with a refresh_token still present is
  * only an expired access_token — the cache survives until the CLI's lazy
  * refresh lets the next attempt succeed.
+ *
+ * The cache deliberately carries no endpoint tag: after a region switch the
+ * previous region's figures may render for up to one TTL (60s) until this
+ * refresh — which always re-resolves the region — rewrites it. A tag would
+ * not help: the render hot path must not re-parse config.toml to learn the
+ * expected endpoint, so it could not act on a mismatch anyway.
  * @param {object} [opts]
  * @returns {Promise<boolean>} true when the cache was updated
  */

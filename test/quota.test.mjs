@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import {
   parseQuotaPayload,
   deriveWindowLabel,
@@ -14,9 +15,12 @@ import {
   releaseQuotaLock,
   requestQuota,
   refreshQuota,
+  resolveQuotaEndpoints,
   QUOTA_RESULT,
   QUOTA_TTL_MS,
   LOCK_STALE_MS,
+  USAGES_URL,
+  GLOBAL_USAGES_URL,
 } from '../src/quota.mjs';
 
 // Real response captured from GET https://api.kimi.com/coding/v1/usages
@@ -337,4 +341,316 @@ test('acquireQuotaLock fails closed when the stale-lock rename loses the race', 
   fs.rmSync(blocker, { recursive: true });
   assert.equal(acquireQuotaLock({ lockPath, now, token: 'winner' }), 'winner');
   assert.equal(JSON.parse(fs.readFileSync(lockPath, 'utf8')).token, 'winner');
+});
+
+// --- Dual-region (0.38.0) endpoint resolution -------------------------------
+
+// Upstream scoped-slot derivation (packages/oauth/src/managed-kimi-code.ts):
+// sha256(JSON.stringify({ oauthHost, baseUrl })) first 16 hex chars.
+function scopedOAuthKey(oauthHost, baseUrl) {
+  const digest = createHash('sha256')
+    .update(JSON.stringify({ oauthHost, baseUrl }))
+    .digest('hex')
+    .slice(0, 16);
+  return `oauth/kimi-code-env-${digest}`;
+}
+
+const GLOBAL_OAUTH_HOST = 'https://auth.kimi.ai';
+const GLOBAL_BASE_URL = 'https://api.kimi.ai/coding/v1';
+
+function globalConfigText(key) {
+  return `[providers."managed:kimi-code"]\n`
+    + `type = "kimi"\n`
+    + `base_url = "${GLOBAL_BASE_URL}"\n`
+    + `api_key = ""\n`
+    + `\n[providers."managed:kimi-code".oauth]\n`
+    + `storage = "file"\n`
+    + `key = "${key}"\n`
+    + `oauth_host = "${GLOBAL_OAUTH_HOST}"\n`;
+}
+
+function makeKimiHome(dir) {
+  const kimiHome = path.join(dir, 'kimi-home');
+  fs.mkdirSync(path.join(kimiHome, 'credentials'), { recursive: true });
+  return kimiHome;
+}
+
+test('global-region login resolves to api.kimi.ai with its scoped credentials', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-global-'));
+  const kimiHome = makeKimiHome(dir);
+  const key = scopedOAuthKey(GLOBAL_OAUTH_HOST, GLOBAL_BASE_URL);
+  const scopedPath = path.join(kimiHome, 'credentials', `${key.slice('oauth/'.length)}.json`);
+  fs.writeFileSync(scopedPath, JSON.stringify({
+    access_token: 'fake-global-access-token',
+    refresh_token: 'fake-global-refresh-token',
+  }));
+
+  const endpoints = resolveQuotaEndpoints({ env: {}, configText: globalConfigText(key), kimiHome });
+  assert.equal(endpoints.url, GLOBAL_USAGES_URL);
+  assert.equal(endpoints.credentialsPath, scopedPath);
+
+  const calls = [];
+  const cachePath = path.join(dir, 'quota.json');
+  const ok = await refreshQuota({
+    ...endpoints,
+    cachePath,
+    lockPath: path.join(dir, 'refresh.lock'),
+    fetchImpl: async (url, init) => {
+      calls.push({ url, auth: init.headers.Authorization });
+      return response(200, REAL_RESPONSE);
+    },
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(calls, [{ url: GLOBAL_USAGES_URL, auth: 'Bearer fake-global-access-token' }]);
+  assert.equal(readQuotaCache(cachePath).weekly.used, 29);
+});
+
+test('a managed provider without an oauth table keeps the mainland default', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-default-'));
+  const kimiHome = makeKimiHome(dir);
+  const defaultPath = path.join(kimiHome, 'credentials', 'kimi-code.json');
+  fs.writeFileSync(defaultPath, JSON.stringify({ access_token: 'fake-access-token' }));
+  const configText = `[providers."managed:kimi-code"]\n`
+    + `type = "kimi"\n`
+    + `base_url = "https://api.kimi.com/coding/v1"\n`;
+
+  const endpoints = resolveQuotaEndpoints({ env: {}, configText, kimiHome });
+  assert.equal(endpoints.url, USAGES_URL);
+  assert.equal(endpoints.credentialsPath, defaultPath);
+
+  const calls = [];
+  const ok = await refreshQuota({
+    ...endpoints,
+    cachePath: path.join(dir, 'quota.json'),
+    lockPath: path.join(dir, 'refresh.lock'),
+    fetchImpl: async (url) => { calls.push(url); return response(200, REAL_RESPONSE); },
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(calls, [USAGES_URL]);
+});
+
+test('a persisted mainland login (default key, no oauth_host) stays on the default slot', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-mainland-'));
+  const kimiHome = makeKimiHome(dir);
+  const configText = `[providers."managed:kimi-code"]\n`
+    + `base_url = "https://api.kimi.com/coding/v1"\n`
+    + `\n[providers."managed:kimi-code".oauth]\n`
+    + `storage = "file"\n`
+    + `key = "oauth/kimi-code"\n`;
+  const endpoints = resolveQuotaEndpoints({ env: {}, configText, kimiHome });
+  assert.equal(endpoints.url, USAGES_URL);
+  assert.equal(endpoints.credentialsPath, path.join(kimiHome, 'credentials', 'kimi-code.json'));
+});
+
+test('resolveQuotaEndpoints defaults to mainland when config.toml is missing', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-noconfig-'));
+  const kimiHome = makeKimiHome(dir);
+  const endpoints = resolveQuotaEndpoints({
+    env: {},
+    configPath: path.join(dir, 'missing-config.toml'),
+    kimiHome,
+  });
+  assert.equal(endpoints.url, USAGES_URL);
+  assert.equal(endpoints.credentialsPath, path.join(kimiHome, 'credentials', 'kimi-code.json'));
+});
+
+test('custom or unknown hosts and base URLs fail closed to the mainland default', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-failclosed-'));
+  const kimiHome = makeKimiHome(dir);
+  const fallback = {
+    credentialsPath: path.join(kimiHome, 'credentials', 'kimi-code.json'),
+    url: USAGES_URL,
+  };
+  const evilConfigs = [
+    `[providers."managed:kimi-code"]\nbase_url = "https://evil.example.com/coding/v1"\n`,
+    `[providers."managed:kimi-code"]\nbase_url = "https://api.kimi.com.evil.com/coding/v1"\n`,
+    `[providers."managed:kimi-code"]\nbase_url = "http://api.kimi.ai/coding/v1"\n`,
+    globalConfigText('oauth/kimi-code-env-0123456789abcdef')
+      .replace(GLOBAL_OAUTH_HOST, 'https://auth.evil.example.com'),
+    // Contradictory hand config: global oauth_host with a mainland base_url.
+    `[providers."managed:kimi-code"]\nbase_url = "https://api.kimi.com/coding/v1"\n`
+      + `\n[providers."managed:kimi-code".oauth]\n`
+      + `key = "oauth/kimi-code"\n`
+      + `oauth_host = "${GLOBAL_OAUTH_HOST}"\n`,
+  ];
+  for (const configText of evilConfigs) {
+    assert.deepEqual(resolveQuotaEndpoints({ env: {}, configText, kimiHome }), fallback);
+  }
+  assert.deepEqual(
+    resolveQuotaEndpoints({
+      env: { KIMI_CODE_OAUTH_HOST: 'https://auth.evil.example.com' },
+      configText: '',
+      kimiHome,
+    }),
+    fallback,
+  );
+});
+
+test('an evil base_url never receives a token; the fallback only calls the official URL', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-evil-'));
+  const kimiHome = makeKimiHome(dir);
+  fs.writeFileSync(
+    path.join(kimiHome, 'credentials', 'kimi-code.json'),
+    JSON.stringify({ access_token: 'fake-access-token' }),
+  );
+  const endpoints = resolveQuotaEndpoints({
+    env: {},
+    configText: `[providers."managed:kimi-code"]\nbase_url = "https://evil.example.com/coding/v1"\n`,
+    kimiHome,
+  });
+  const calls = [];
+  const ok = await refreshQuota({
+    ...endpoints,
+    cachePath: path.join(dir, 'quota.json'),
+    lockPath: path.join(dir, 'refresh.lock'),
+    fetchImpl: async (url) => { calls.push(url); return response(200, REAL_RESPONSE); },
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(calls, [USAGES_URL]); // never https://evil.example.com/...
+});
+
+test('an evil config without fallback credentials performs no request and writes no cache', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-evil-nocreds-'));
+  const kimiHome = makeKimiHome(dir);
+  const endpoints = resolveQuotaEndpoints({
+    env: {},
+    configText: `[providers."managed:kimi-code"]\nbase_url = "https://evil.example.com/coding/v1"\n`,
+    kimiHome,
+  });
+  let called = false;
+  const cachePath = path.join(dir, 'quota.json');
+  const ok = await refreshQuota({
+    ...endpoints,
+    cachePath,
+    lockPath: path.join(dir, 'refresh.lock'),
+    fetchImpl: async () => { called = true; return response(200, REAL_RESPONSE); },
+  });
+  assert.equal(ok, false);
+  assert.equal(called, false);
+  assert.equal(fs.existsSync(cachePath), false);
+});
+
+test('a scoped oauth key whose credential file is missing is treated as logged out', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-scoped-missing-'));
+  const kimiHome = makeKimiHome(dir);
+  const key = scopedOAuthKey(GLOBAL_OAUTH_HOST, GLOBAL_BASE_URL);
+  const endpoints = resolveQuotaEndpoints({ env: {}, configText: globalConfigText(key), kimiHome });
+  assert.equal(endpoints.url, GLOBAL_USAGES_URL);
+
+  let called = false;
+  const cachePath = path.join(dir, 'quota.json');
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+  const ok = await refreshQuota({
+    ...endpoints,
+    cachePath,
+    lockPath: path.join(dir, 'refresh.lock'),
+    fetchImpl: async () => { called = true; return response(200, REAL_RESPONSE); },
+  });
+  assert.equal(ok, false);
+  assert.equal(called, false);
+  assert.equal(fs.existsSync(cachePath), false); // stale cache dropped
+});
+
+test('a malformed config.toml falls back to the default endpoints', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-malformed-'));
+  const kimiHome = makeKimiHome(dir);
+  const fallback = {
+    credentialsPath: path.join(kimiHome, 'credentials', 'kimi-code.json'),
+    url: USAGES_URL,
+  };
+  const malformed = [
+    '[providers."managed:kimi-code"\nbase_url = ',
+    'not toml at all {{{',
+    `[providers."managed:kimi-code"]\nbase_url = "unterminated`,
+  ];
+  for (const configText of malformed) {
+    assert.deepEqual(resolveQuotaEndpoints({ env: {}, configText, kimiHome }), fallback);
+  }
+});
+
+test('missing or abnormal oauth keys fall back to the default credential slot', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-keys-'));
+  const kimiHome = makeKimiHome(dir);
+  const defaultCreds = path.join(kimiHome, 'credentials', 'kimi-code.json');
+  const abnormal = [
+    'oauth/../../etc/passwd',
+    'oauth/kimi-code-env-xyz',
+    'oauth/kimi-code-env-0123456789ABCDEF', // upstream digests are lowercase
+    'oauth/kimi-code.json',
+    'kimi-code',
+    'oauth/',
+  ];
+  for (const key of abnormal) {
+    const configText = `[providers."managed:kimi-code".oauth]\nstorage = "file"\nkey = "${key}"\n`;
+    assert.equal(
+      resolveQuotaEndpoints({ env: {}, configText, kimiHome }).credentialsPath,
+      defaultCreds,
+      key,
+    );
+  }
+});
+
+test('requestQuota only sends tokens to the two official usages URLs', async () => {
+  const rejected = [
+    'https://api.kimi.com.evil.com/coding/v1/usages',
+    'https://sub.api.kimi.com/coding/v1/usages',
+    'https://evil.example.com/coding/v1/usages',
+    'http://api.kimi.ai/coding/v1/usages',
+    'https://user:pass@api.kimi.ai/coding/v1/usages',
+    'https://api.kimi.ai@evil.example.com/coding/v1/usages',
+    'https://api.kimi.com:8443/coding/v1/usages',
+    'https://api.kimi.com/coding/v1/usages/extra',
+  ];
+  for (const url of rejected) {
+    let called = false;
+    const result = await requestQuota({
+      token: 'fake-access-token',
+      url,
+      fetchImpl: async () => { called = true; return response(200, REAL_RESPONSE); },
+    });
+    assert.equal(result.status, QUOTA_RESULT.INVALID, url);
+    assert.equal(called, false, url);
+  }
+  for (const url of [USAGES_URL, GLOBAL_USAGES_URL]) {
+    let seen = null;
+    const result = await requestQuota({
+      token: 'fake-access-token',
+      url,
+      fetchImpl: async (u) => { seen = u; return response(200, REAL_RESPONSE); },
+    });
+    assert.equal(result.status, QUOTA_RESULT.SUCCESS, url);
+    assert.equal(seen, url);
+  }
+});
+
+test('env KIMI_CODE_OAUTH_HOST / KIMI_OAUTH_HOST pin the global region without config', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-env-'));
+  const kimiHome = makeKimiHome(dir);
+  const defaultCreds = path.join(kimiHome, 'credentials', 'kimi-code.json');
+  for (const env of [
+    { KIMI_CODE_OAUTH_HOST: GLOBAL_OAUTH_HOST },
+    { KIMI_OAUTH_HOST: GLOBAL_OAUTH_HOST },
+    { KIMI_CODE_OAUTH_HOST: `${GLOBAL_OAUTH_HOST}/` }, // trailing slash tolerated
+  ]) {
+    const endpoints = resolveQuotaEndpoints({ env, configText: '', kimiHome });
+    assert.equal(endpoints.url, GLOBAL_USAGES_URL);
+    assert.equal(endpoints.credentialsPath, defaultCreds);
+  }
+  // An env base-URL override is honored only when it is an official one.
+  assert.equal(
+    resolveQuotaEndpoints({
+      env: { KIMI_CODE_BASE_URL: GLOBAL_BASE_URL },
+      configText: '',
+      kimiHome,
+    }).url,
+    GLOBAL_USAGES_URL,
+  );
+  assert.equal(
+    resolveQuotaEndpoints({
+      env: { KIMI_CODE_BASE_URL: 'https://evil.example.com/coding/v1' },
+      configText: '',
+      kimiHome,
+    }).url,
+    USAGES_URL,
+  );
 });
