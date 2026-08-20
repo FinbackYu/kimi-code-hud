@@ -1,0 +1,11 @@
+{"type":"config.update","modelAlias":"kimi-code/k3","thinkingEffort":"high","time":1785456000000}
+{"type":"turn.prompt","origin":{"kind":"user"},"time":1785456001000}
+{"type":"llm.request","kind":"loop","time":1785456002000}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"redacted","usage":{"inputOther":0,"output":0,"inputCacheRead":0,"inputCacheCreation":0},"finishReason":"error","llmFirstTokenLatencyMs":900,"llmStreamDurationMs":1000},"time":1785456002500}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"redacted","usage":{"inputOther":100,"output":20,"inputCacheRead":300,"inputCacheCreation":100},"finishReason":"tool_use","llmFirstTokenLatencyMs":900,"llmStreamDurationMs":1000},"time":1785456003000}
+{"type":"llm.request","kind":"loop","time":1785456004000}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"redacted","usage":{"inputOther":0,"output":0,"inputCacheRead":0,"inputCacheCreation":0},"finishReason":"interrupted","llmFirstTokenLatencyMs":800,"llmStreamDurationMs":1000},"time":1785456004500}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"redacted","usage":{"inputOther":100,"output":30,"inputCacheRead":300,"inputCacheCreation":100},"finishReason":"tool_use","llmFirstTokenLatencyMs":800,"llmStreamDurationMs":1000},"time":1785456005000}
+{"type":"llm.request","kind":"loop","time":1785456006000}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"redacted","usage":{"inputOther":100,"output":40,"inputCacheRead":300,"inputCacheCreation":100},"finishReason":"tool_use","llmFirstTokenLatencyMs":700,"llmStreamDurationMs":1000},"time":1785456007000}
+{"type":"llm.request","kind":"loop","time":1785456008000}
