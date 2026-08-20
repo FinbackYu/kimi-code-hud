@@ -511,7 +511,12 @@ export function getMetrics(sessionId, {
             main.path,
             main.bucket,
             main.stat.size,
-            Math.min(MAIN_WIRE_SLICE_BYTES, remainingBytes),
+            // A cold reader's first slice may spend the whole frame budget so
+            // a typical session catches up — and reaches the TPS sample
+            // minimum — in one frame. Warm frames stay slice-capped.
+            startedAtZero
+              ? remainingBytes
+              : Math.min(MAIN_WIRE_SLICE_BYTES, remainingBytes),
           );
           remainingBytes -= result.bytesRead;
           if (result.text) processWireChunk(state, result.text, 'main');

@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { getMetrics } from '../src/metrics.mjs';
 import {
+  MAIN_WIRE_SLICE_BYTES,
   MAX_PARTIAL_LINE_BYTES,
   WIRE_READ_BUDGET_BYTES,
 } from '../src/wire-reader.mjs';
@@ -310,6 +311,33 @@ test('50 MiB damaged history catches up across frames without duplicate cache or
   assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500 });
   assert.equal(metrics.tps, 20);
   assert.ok(MAX_PARTIAL_LINE_BYTES < damaged.length);
+});
+
+test('cold start spends the frame budget to catch up in the first frame', () => {
+  const fx = makeSession();
+  // Pad past one warm slice so a 256 KiB first frame could not reach the tail.
+  const padRow = `${JSON.stringify({ type: 'other', pad: 'x'.repeat(1024) })}\n`;
+  const padRows = Math.ceil((MAIN_WIRE_SLICE_BYTES + 64 * 1024) / Buffer.byteLength(padRow));
+  const tail = [
+    JSON.stringify({ type: 'config.update', modelAlias: 'cold-start', time: 1 }),
+    stepEnd(10),
+    stepEnd(20, EVENT_TIME + 1),
+    stepEnd(30, EVENT_TIME + 2),
+  ].join('\n') + '\n';
+  fs.writeFileSync(fx.wires.main, padRow.repeat(padRows) + tail);
+  const size = fs.statSync(fx.wires.main).size;
+  assert.ok(size > MAIN_WIRE_SLICE_BYTES);
+  assert.ok(size <= WIRE_READ_BUDGET_BYTES);
+
+  const metrics = getMetrics(fx.id, {
+    sessionsRoot: fx.sessionsRoot,
+    stateDir: fx.stateDir,
+    now: EVENT_TIME + 1000,
+  });
+  assert.equal(metrics.modelAlias, 'cold-start');
+  assert.equal(metrics.tps, 20);
+  const state = readState(fx.statePath);
+  assert.equal(state.agents.main.offset, size);
 });
 
 test('cache migration cut short by a small frame budget resumes until complete', () => {
