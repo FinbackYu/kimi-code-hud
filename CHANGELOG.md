@@ -6,6 +6,18 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The model effort suffix now renders in muted gray while the level is only
+  inferred from config.toml — kimi-code lazy-starts, so the wire journal
+  carries no effort before the first turn — and returns to the default
+  foreground once a wire `profile.bind` / `config.update` / `llm.request`
+  row confirms the actual effort (the boolean ` thinking` / ` on` suffix
+  follows the same rule; `off` still renders no suffix). Per-session
+  snapshots now record whether the pinned level was wire-confirmed;
+  snapshots written before this change carry no flag and keep rendering as
+  confirmed.
+
 ## [0.7.5] - 2026-08-21
 
 ### Fixed

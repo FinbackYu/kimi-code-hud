@@ -142,7 +142,7 @@ export async function renderStatusLine({
     else if (providerUsageFacts.length > 1) providerUsage = providerUsageFacts;
   }
 
-  metrics.thinkingLevel = resolveThinkingLevel({
+  const thinking = resolveThinkingLevel({
     sessionLevel: metrics.thinkingLevel,
     model: payload.model,
     sessionId: payload.sessionId,
@@ -152,6 +152,10 @@ export async function renderStatusLine({
     deadline,
     clock,
   });
+  metrics.thinkingLevel = thinking.level;
+  // kimi-code lazy-starts: until the first turn's wire rows confirm the
+  // effort, the level is only inferred from config.toml and renders muted.
+  metrics.thinkingProvisional = thinking.confirmed === false;
 
   let gitDirty = false;
   const gitBudget = remainingMs(deadline, clock);

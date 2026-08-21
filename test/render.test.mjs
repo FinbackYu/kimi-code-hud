@@ -245,6 +245,41 @@ test('model thinking suffix from session thinkingLevel (normal and compact)', ()
   assert.ok(withLevel('off', 'compact').startsWith('[manual] K3 │'));
 });
 
+test('provisional thinking suffix renders muted until wire-confirmed', () => {
+  const withLevel = (metrics, layout = 'normal') =>
+    renderHud(baseCtx({ layout, color: true, metrics }))[0];
+  const MUTED = '\x1b[90m';
+  const RESET = '\x1b[0m';
+
+  // Config-inferred effort (lazy start, no wire row yet): muted suffix.
+  const provisional = withLevel({ tps: 47, ttftMs: 1300, thinkingLevel: 'high', thinkingProvisional: true });
+  assert.ok(provisional.includes(`${MUTED} high${RESET}`));
+  // Wire-confirmed effort keeps the default foreground.
+  const confirmed = withLevel({ tps: 47, ttftMs: 1300, thinkingLevel: 'high', thinkingProvisional: false });
+  assert.ok(confirmed.includes(`${RESET} high`));
+  assert.ok(!confirmed.includes(`${MUTED} high`));
+  // The boolean "on" label follows the same rule, in both layouts.
+  assert.ok(
+    withLevel({ tps: 47, ttftMs: 1300, thinkingLevel: 'on', thinkingProvisional: true })
+      .includes(`${MUTED} thinking${RESET}`),
+  );
+  assert.ok(
+    withLevel({ tps: 47, ttftMs: 1300, thinkingLevel: 'on', thinkingProvisional: true }, 'compact')
+      .includes(`${MUTED} on${RESET}`),
+  );
+  // 'off' renders no suffix in either state; the model name stays primary
+  // and is immediately followed by the segment separator.
+  const offProvisional = withLevel({ tps: 47, ttftMs: 1300, thinkingLevel: 'off', thinkingProvisional: true });
+  assert.ok(offProvisional.includes('\x1b[38;2;79;168;255mK3\x1b[0m │'));
+  assert.ok(!offProvisional.includes(' off'));
+  // color=false emits no color codes, so both states render identically.
+  const plain = renderHud(baseCtx({
+    metrics: { tps: 47, ttftMs: 1300, thinkingLevel: 'high', thinkingProvisional: true },
+  }))[0];
+  assert.ok(plain.startsWith('[manual] K3 high │'));
+  assert.doesNotMatch(plain, /\x1b\[/);
+});
+
 test('dynamic terminal text drops OSC, CSI, ESC, BEL, C0, DEL, and C1 controls', () => {
   const osc = '\x1b]0;model-title\x07';
   const csi = '\x1b[31m';

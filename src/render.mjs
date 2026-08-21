@@ -250,10 +250,12 @@ function modelSegment({ layout, payload, metrics, color, C }) {
   let segment = colorize(color, C.primary, sanitizeTerminalText(payload.model));
   if (level && level !== 'off') {
     // Effort-capable models show the bare level ("K3 max"); only boolean
-    // thinking keeps the " thinking" label (compact: " on").
-    segment += level === 'on' && layout !== 'compact'
-      ? ' thinking'
-      : ` ${level}`;
+    // thinking keeps the " thinking" label (compact: " on"). A level still
+    // waiting for wire confirmation renders muted, like provisional TPS.
+    const suffix = level === 'on' && layout !== 'compact' ? ' thinking' : ` ${level}`;
+    segment += metrics && metrics.thinkingProvisional === true
+      ? colorize(color, C.muted, suffix)
+      : suffix;
   }
   return segment;
 }
@@ -536,7 +538,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
  * @param {object|object[]|null} ctx.providerUsage normalized provider facts
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, goal, swarmMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs, tasks}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs, tasks}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] normal|compact
  * @param {boolean} [ctx.color]
