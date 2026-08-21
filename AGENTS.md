@@ -24,7 +24,7 @@ Use `node:test` with `node:assert/strict`. Name files `test/<module>.test.mjs` a
 
 ## Commit & Pull Request Guidelines
 
-Write short, imperative commit subjects. History uses both direct subjects (`Add SessionStart self-heal hook`) and Conventional Commit prefixes (`fix: harden state and config handling`). Keep each commit scoped to one behavior. Pull requests should explain the user-visible change, list verification commands, link relevant issues, and include terminal output or screenshots for HUD layout changes.
+Write short, imperative commit subjects. History uses both direct subjects (`Add SessionStart self-heal hook`) and Conventional Commit prefixes (`fix: harden state and config handling`). Keep each commit scoped to one behavior. Pull requests should explain the user-visible change, list verification commands, link relevant issues, and include terminal output or screenshots for HUD layout changes. A release commit must first regenerate the showcase images (`node docs/showcase/render-states.mjs && python3 docs/showcase/export-assets.py`) and confirm the header title bar shows the new HUD version while the welcome-box Version matches the `CAPABILITIES.md` Kimi Code baseline.
 
 ## Issue Workflow
 
