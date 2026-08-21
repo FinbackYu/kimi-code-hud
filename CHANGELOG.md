@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-08-21
+
 ### Changed
 
 - The model effort suffix now renders in muted gray while the level is only
@@ -427,7 +429,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.6...HEAD
+[0.7.6]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.6
 [0.7.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.5
 [0.7.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.4
 [0.7.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.3
