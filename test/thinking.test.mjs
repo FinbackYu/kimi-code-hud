@@ -5,6 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { resolveThinkingLevel } from '../src/thinking.mjs';
 
+const levelOf = (opts) => resolveThinkingLevel(opts).level;
+
 const CONFIG = `
 [thinking]
 enabled = true
@@ -29,11 +31,11 @@ function withConfig(text, fn) {
 test('session level wins over everything', () => {
   withConfig(CONFIG, (configPath) => {
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: 'max', model: 'K3', configPath }),
+      levelOf({ sessionLevel: 'max', model: 'K3', configPath }),
       'max',
     );
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: 'off', model: 'K3', configPath }),
+      levelOf({ sessionLevel: 'off', model: 'K3', configPath }),
       'off',
     );
   });
@@ -41,21 +43,21 @@ test('session level wins over everything', () => {
 
 test('missing config file defaults to boolean on', () => {
   assert.equal(
-    resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath: '/nonexistent/config.toml' }),
+    levelOf({ sessionLevel: null, model: 'K3', configPath: '/nonexistent/config.toml' }),
     'on',
   );
 });
 
 test('[thinking] enabled = false yields off', () => {
   withConfig('[thinking]\nenabled = false\n', (configPath) => {
-    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }), 'off');
+    assert.equal(levelOf({ sessionLevel: null, model: 'K3', configPath }), 'off');
   });
 });
 
 test('boolean model without support_efforts yields on', () => {
   withConfig(CONFIG, (configPath) => {
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: null, model: 'kimi-for-coding', configPath }),
+      levelOf({ sessionLevel: null, model: 'kimi-for-coding', configPath }),
       'on',
     );
   });
@@ -63,18 +65,18 @@ test('boolean model without support_efforts yields on', () => {
 
 test('effort model uses global effort, matched via display_name', () => {
   withConfig(CONFIG, (configPath) => {
-    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }), 'high');
+    assert.equal(levelOf({ sessionLevel: null, model: 'K3', configPath }), 'high');
   });
 });
 
 test('effort model falls back to model default_effort', () => {
   const noGlobal = CONFIG.replace('effort = "high"\n', '');
   withConfig(noGlobal, (configPath) => {
-    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }), 'high');
+    assert.equal(levelOf({ sessionLevel: null, model: 'K3', configPath }), 'high');
   });
   const noDefault = noGlobal.replace('default_effort = "high"\n', '');
   withConfig(noDefault, (configPath) => {
-    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }), 'on');
+    assert.equal(levelOf({ sessionLevel: null, model: 'K3', configPath }), 'on');
   });
 });
 
@@ -101,32 +103,32 @@ default_effort = "max"
 
 test('model declaring capabilities without thinking resolves to off', () => {
   withConfig(THIRD_PARTY, (configPath) => {
-    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'vision-only', configPath }), 'off');
+    assert.equal(levelOf({ sessionLevel: null, model: 'vision-only', configPath }), 'off');
   });
 });
 
 test('global effort keeps a non-thinking third-party model on (passthrough)', () => {
   withConfig(`[thinking]\nenabled = true\neffort = "high"\n${THIRD_PARTY}`, (configPath) => {
-    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'vision-only', configPath }), 'on');
+    assert.equal(levelOf({ sessionLevel: null, model: 'vision-only', configPath }), 'on');
   });
 });
 
 test('adaptive_thinking counts as thinking support', () => {
   withConfig(THIRD_PARTY, (configPath) => {
-    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'adaptive', configPath }), 'on');
+    assert.equal(levelOf({ sessionLevel: null, model: 'adaptive', configPath }), 'on');
   });
 });
 
 test('always_thinking models never resolve to off', () => {
   const disabled = `[thinking]\nenabled = false\n${THIRD_PARTY}`;
   withConfig(disabled, (configPath) => {
-    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'always-bool', configPath }), 'on');
+    assert.equal(levelOf({ sessionLevel: null, model: 'always-bool', configPath }), 'on');
     // Effort-capable: falls back to the model default, skipping off.
-    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'always-effort', configPath }), 'max');
+    assert.equal(levelOf({ sessionLevel: null, model: 'always-effort', configPath }), 'max');
   });
   const offEffort = `[thinking]\nenabled = true\neffort = "off"\n${THIRD_PARTY}`;
   withConfig(offEffort, (configPath) => {
-    assert.equal(resolveThinkingLevel({ sessionLevel: null, model: 'always-effort', configPath }), 'max');
+    assert.equal(levelOf({ sessionLevel: null, model: 'always-effort', configPath }), 'max');
   });
 });
 
@@ -138,18 +140,18 @@ test('snapshot pins the level per session across config changes', () => {
   const snapshotDir = tmpDir();
   withConfig(CONFIG, (configPath) => {
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      levelOf({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
       'high',
     );
     // Another session runs /effort low -> global config rewritten.
     fs.writeFileSync(configPath, CONFIG.replace('effort = "high"', 'effort = "low"'));
     // s1 keeps its start-of-session level; a new session sees the new config.
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      levelOf({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
       'high',
     );
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's2', snapshotDir }),
+      levelOf({ sessionLevel: null, model: 'K3', configPath, sessionId: 's2', snapshotDir }),
       'low',
     );
   });
@@ -159,12 +161,12 @@ test('in-session change updates the snapshot', () => {
   const snapshotDir = tmpDir();
   withConfig(CONFIG, (configPath) => {
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: 'max', model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      levelOf({ sessionLevel: 'max', model: 'K3', configPath, sessionId: 's1', snapshotDir }),
       'max',
     );
     // Later renders without a wire level keep the in-session choice.
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      levelOf({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
       'max',
     );
   });
@@ -174,15 +176,15 @@ test('model change re-resolves and rewrites the snapshot', () => {
   const snapshotDir = tmpDir();
   withConfig(CONFIG, (configPath) => {
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      levelOf({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
       'high',
     );
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: null, model: 'kimi-for-coding', configPath, sessionId: 's1', snapshotDir }),
+      levelOf({ sessionLevel: null, model: 'kimi-for-coding', configPath, sessionId: 's1', snapshotDir }),
       'on',
     );
     assert.equal(
-      resolveThinkingLevel({ sessionLevel: null, model: 'kimi-for-coding', configPath: '/nonexistent/x', sessionId: 's1', snapshotDir }),
+      levelOf({ sessionLevel: null, model: 'kimi-for-coding', configPath: '/nonexistent/x', sessionId: 's1', snapshotDir }),
       'on',
     );
   });
@@ -195,7 +197,7 @@ test('snapshot session id cannot escape the snapshot directory', () => {
   const escapedPath = path.join(parent, 'escape.json');
 
   assert.equal(
-    resolveThinkingLevel({
+    levelOf({
       sessionLevel: 'max',
       model: 'K3',
       sessionId,
@@ -207,7 +209,7 @@ test('snapshot session id cannot escape the snapshot directory', () => {
   assert.equal(fs.existsSync(escapedPath), false);
   assert.equal(fs.readdirSync(snapshotDir).length, 1);
   assert.equal(
-    resolveThinkingLevel({
+    levelOf({
       sessionLevel: null,
       model: 'K3',
       sessionId,
@@ -216,4 +218,55 @@ test('snapshot session id cannot escape the snapshot directory', () => {
     }),
     'max',
   );
+});
+
+test('wire levels are confirmed; config inference is provisional', () => {
+  withConfig(CONFIG, (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: 'max', model: 'K3', configPath }),
+      { level: 'max', confirmed: true },
+    );
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }),
+      { level: 'high', confirmed: false },
+    );
+  });
+});
+
+test('config-pinned snapshot stays provisional until the wire confirms', () => {
+  const snapshotDir = tmpDir();
+  withConfig(CONFIG, (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'high', confirmed: false },
+    );
+    // Re-reads of the config-pinned snapshot stay provisional.
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'high', confirmed: false },
+    );
+    // The first wire row confirms the level and rewrites the snapshot.
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: 'max', model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'max', confirmed: true },
+    );
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'max', confirmed: true },
+    );
+  });
+});
+
+test('legacy snapshots without a confirmed flag read as confirmed', () => {
+  const snapshotDir = tmpDir();
+  fs.writeFileSync(
+    path.join(snapshotDir, 'thinking-s1.json'),
+    JSON.stringify({ level: 'max', model: 'K3' }),
+  );
+  withConfig(CONFIG, (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'max', confirmed: true },
+    );
+  });
 });

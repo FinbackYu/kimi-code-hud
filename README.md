@@ -12,7 +12,7 @@
 
 ## 核心特性
 
-- **模型与思考强度** 模型名渲染为宿主主题蓝，后缀跟随 thinking 状态 / effort 强度（如 `K3 max`）；按会话固定取值，其他会话执行 `/effort` 不影响本会话显示。
+- **模型与思考强度** 模型名渲染为宿主主题蓝，后缀跟随 thinking 状态 / effort 强度（如 `K3 max`）；按会话固定取值，其他会话执行 `/effort` 不影响本会话显示。后缀若仍是从 config 推断的未确认值（懒启动会话首轮 wire 事件之前）以暗灰显示，拿到 wire 实际 effort 后恢复默认前景色。
 - **Git 状态** 目录名 + `git:(branch*)` 脏标记，150ms 超时兜底，永不阻塞渲染。
 - **生成速度** 流式 TPS 中位数 + TTFT；回合进行中换成每秒走字的 `gen Ns` 计时；多 agent 并行时聚合为舰队总速（`⚡ 156 t/s (3 agents @52)`）。
 - **压缩计时** `/compact` 期间实时 `compacting Ns` 走字，完成后暗灰保留 `compacted Ns`，直到下一条 prompt 的 gen 计时接手。
@@ -109,7 +109,7 @@ normal:  [manual] K3 high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1
 [manual] K3 high │ [1 task running] [2 agents running] │ kimi-code-hud git:(main*) │ …
 ```
 
-- 模型名以宿主主蓝色（dark 主题 `#4FA8FF` / light 主题 `#1565C0`，即对话中链接/行内代码的蓝，随主题切换）显示；模型后缀显示 thinking 状态：布尔模型为 ` thinking`，支持 effort 的模型直接显示强度（如 `K3 high`，compact 档同样只保留 ` <effort>`）（status line payload 不含此字段；优先取会话日志事件——新版宿主会话启动时以 `profile.bind`（旧版为 `config.update`）记录 `modelAlias` + `thinkingEffort`（更旧键为 `thinkingLevel`），且每次请求的 `llm.request` 行都带有本次实际运行的 effort 与模型别名：会话内切换 effort/模型即使不再产生 profile/config 事件，下一次请求也会让 HUD 跟随更新。都没有时按会话快照固定取值，快照存 `~/.kimi-code-hud/thinking-<sessionId>.json`；快照不存在时才回退解析 `~/.kimi-code/config.toml` 的 `[thinking]` 与模型表并写入快照——这样其他会话执行 `/effort` 改写全局配置后，本会话显示不会跟着变）；
+- 模型名以宿主主蓝色（dark 主题 `#4FA8FF` / light 主题 `#1565C0`，即对话中链接/行内代码的蓝，随主题切换）显示；模型后缀显示 thinking 状态：布尔模型为 ` thinking`，支持 effort 的模型直接显示强度（如 `K3 high`，compact 档同样只保留 ` <effort>`）（status line payload 不含此字段；优先取会话日志事件——新版宿主会话启动时以 `profile.bind`（旧版为 `config.update`）记录 `modelAlias` + `thinkingEffort`（更旧键为 `thinkingLevel`），且每次请求的 `llm.request` 行都带有本次实际运行的 effort 与模型别名：会话内切换 effort/模型即使不再产生 profile/config 事件，下一次请求也会让 HUD 跟随更新。都没有时按会话快照固定取值，快照存 `~/.kimi-code-hud/thinking-<sessionId>.json`；快照不存在时才回退解析 `~/.kimi-code/config.toml` 的 `[thinking]` 与模型表并写入快照——这样其他会话执行 `/effort` 改写全局配置后，本会话显示不会跟着变。快照记录取值来源：wire 确认的级别保持默认前景色，仅由 config 推断的未确认级别（懒启动会话首轮 wire 事件之前）以暗灰显示，首轮拿到 wire 实际 effort 后恢复）；
 - goal 徽章：格式与宿主默认 footer 一致（`[goal ● <status> · <计时> · <轮数>]`；设了 turn 预算显示 `3/10 turns`；圆点 active 蓝 / blocked 琥珀 / paused 暗灰）。status line payload 不含 goal 字段，状态从会话日志 `wire.jsonl` 的 `goal.create`/`goal.update`/`goal.clear`/`forked` op 重建（与 TPS 同一次增量扫描）；active 时按 `wallClockResumedAt` 每秒走动计时，goal 完成或清除后徽章消失。徽章显示期间速度段只留吞吐——`gen` 计时、TTFT 与压缩状态一并隐藏（徽章已自带会话计时，与回合内自动压缩不展示同一逻辑：该时段已被任务计时覆盖）；
 - TPS 只接纳流式阶段至少 250ms、且不超过 1000 t/s 的 `step.end` 样本；不足 3 个有效样本时先以暗灰显示临时读数（现有样本的中位数），攒够 3 个后转为正常亮度，取最近最多 5 个样本的中位数。窗口过期（最后一个样本超过 2 分钟）后不隐藏：最后一次中位数以暗灰继续显示，新窗口的第一个样本会立即以暗灰临时读数接手；模型切换时旧中位数一并清除、重新预热。只有连一个有效样本都还没有时（如全新会话尚未完成任何 `step.end`）才单独显示最近一次 TTFT；
 - Cache 为本次会话的 token 加权缓存命中率：`Σ inputCacheRead / Σ (inputOther + inputCacheRead + inputCacheCreation)`，跨回合累计主 Agent 的全部模型请求（usage 字段不完整的 step 跳过不计）。数值本身即跨回合累计的最新值，回合之间常亮不闪烁；会话尚无数据时整段省略。各档只显示百分比；不使用红黄绿阈值；

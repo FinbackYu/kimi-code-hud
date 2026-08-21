@@ -18,7 +18,11 @@ export { CONFIG_TOML_PATH };
  * session's runtime effort is frozen at session start — without a snapshot,
  * a session that never switched effort in-session would follow whatever
  * other sessions later wrote into config.toml. So the first resolved level
- * is pinned per sessionId under ~/.kimi-code-hud/thinking-<sessionId>.json.
+ * is pinned per sessionId under ~/.kimi-code-hud/thinking-<sessionId>.json,
+ * with `confirmed` recording the provenance: true when the level came from
+ * the wire journal, false while it is only inferred from config.toml.
+ * Snapshots written before the flag existed carry no `confirmed` key and
+ * are treated as confirmed, preserving their pre-existing rendering.
  */
 function snapshotPath(snapshotDir, sessionId) {
   const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, '_');
@@ -33,11 +37,11 @@ function readSnapshot(snapshotDir, sessionId) {
   return null;
 }
 
-function writeSnapshot(snapshotDir, sessionId, level, model) {
+function writeSnapshot(snapshotDir, sessionId, level, model, confirmed) {
   try {
     atomicWriteFile(
       snapshotPath(snapshotDir, sessionId),
-      JSON.stringify({ level, model }),
+      JSON.stringify({ level, model, confirmed }),
     );
   } catch { /* best effort */ }
 }
@@ -99,10 +103,14 @@ function resolveFromConfig(model, configPath, configText = undefined) {
  * chain: in-session change (wire config.update) > per-session snapshot >
  * [thinking] config > model default_effort > boolean "on".
  *
- * Returns:
- *  - 'off'        thinking disabled (render no suffix)
- *  - 'on'         boolean thinking enabled (render " thinking")
- *  - '<effort>'   concrete effort like "high" (render " <effort>")
+ * Returns `{ level, confirmed }`:
+ *  - level 'off'        thinking disabled (render no suffix)
+ *  - level 'on'         boolean thinking enabled (render " thinking")
+ *  - level '<effort>'   concrete effort like "high" (render " <effort>")
+ *  - confirmed          true when the level came from the wire journal (or
+ *    a snapshot pinned from it); false while it is only inferred from
+ *    config.toml — kimi-code lazy-starts, so before the first turn's wire
+ *    rows arrive the suffix is provisional and renders muted.
  *
  * @param {object} opts
  * @param {string|null} opts.sessionLevel thinkingLevel from the session log
@@ -110,7 +118,7 @@ function resolveFromConfig(model, configPath, configText = undefined) {
  * @param {string} [opts.configPath]
  * @param {string|null} [opts.sessionId] enables the per-session snapshot
  * @param {string} [opts.snapshotDir]
- * @returns {string}
+ * @returns {{ level: string, confirmed: boolean }}
  */
 export function resolveThinkingLevel({
   sessionLevel,
@@ -125,15 +133,19 @@ export function resolveThinkingLevel({
   const canUseSnapshot = () => !Number.isFinite(deadline) || clock() < deadline;
   if (typeof sessionLevel === 'string' && sessionLevel.length > 0) {
     if (sessionId && canUseSnapshot()) {
-      writeSnapshot(snapshotDir, sessionId, sessionLevel, model);
+      writeSnapshot(snapshotDir, sessionId, sessionLevel, model, true);
     }
-    return sessionLevel;
+    return { level: sessionLevel, confirmed: true };
   }
   if (sessionId && canUseSnapshot()) {
     const snap = readSnapshot(snapshotDir, sessionId);
-    if (snap && snap.model === model) return snap.level;
+    // Snapshots predate the confirmed flag: treat a missing flag as
+    // confirmed so long-running sessions keep their previous rendering.
+    if (snap && snap.model === model) {
+      return { level: snap.level, confirmed: snap.confirmed !== false };
+    }
   }
   const level = resolveFromConfig(model, configPath, configText);
-  if (sessionId && canUseSnapshot()) writeSnapshot(snapshotDir, sessionId, level, model);
-  return level;
+  if (sessionId && canUseSnapshot()) writeSnapshot(snapshotDir, sessionId, level, model, false);
+  return { level, confirmed: false };
 }
