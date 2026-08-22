@@ -1,7 +1,7 @@
 # Known issues
 
-- Last verified: 2026-08-22
-- HUD behavior baseline: `v0.7.6` (`f90ff15`)
+- Last verified: 2026-08-23
+- HUD behavior baseline: `v0.7.7` (`3a5ea76`)
 - Kimi Code baseline: `0.38.0` (`0999454bdcb5ddd98f39bffee434dcf0a810f394`)
 
 This file tracks open footer parity problems, information boundaries, and
@@ -324,23 +324,25 @@ Acceptance criteria:
   previous value may remain and is marked stale after the 60s TTL;
 - regression tests cover all of the above (`test/quota.test.mjs`).
 
-## KI-13: Tracked showcase PNGs drift from current rendering behavior
+## KI-13: Tracked showcase PNGs had drifted from current rendering behavior
 
-Status: open release-asset drift
+Status: closed (fixed in HUD `v0.7.7`)
 
 Affected area: documentation showcase assets
 
-The tracked `docs/media/hud-states.png` and `docs/media/hud-demo.png` do not
-match the current startup rendering behavior. An unconfirmed thinking effort is
-dim, and provisional throughput dims the whole speed segment including TTFT;
-the images still show the older brighter startup state. Runtime behavior and
-tests are unaffected, but the README images remain visually stale.
+The tracked `docs/media/hud-states.png` and `docs/media/hud-demo.png` had
+drifted from the current startup rendering behavior. An unconfirmed thinking
+effort is dim, and provisional throughput dims the whole speed segment
+including TTFT; the images still showed the older brighter startup state.
+Runtime behavior and tests were unaffected, but the README images were
+visually stale.
 
-Acceptance criteria:
+Resolution:
 
-- regenerate both images from the tracked showcase sources with
+- regenerated both images from the tracked showcase sources with
   `node docs/showcase/render-states.mjs && python3 docs/showcase/export-assets.py`;
-- read both PNGs back and verify dim effort plus dim TPS/TTFT in the startup row;
-- verify both PNGs carry the expected `Author` metadata;
-- run strict release metadata and the full HUD test suite before staging the
+- read both PNGs back and verified dim effort plus dim TPS/TTFT in the startup
+  row;
+- verified both PNGs carry the expected `Author=FinbackYu` metadata;
+- ran strict release metadata and the full HUD test suite before staging the
   two generated assets.

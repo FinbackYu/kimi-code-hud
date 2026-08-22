@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-08-23
+
 ### Changed
 
 - Goal badge rework: shortened to `[goal 7 turns]` (`3/10 turns` when the
@@ -440,7 +442,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.6...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.7...HEAD
+[0.7.7]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.7
 [0.7.6]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.6
 [0.7.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.5
 [0.7.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.4
