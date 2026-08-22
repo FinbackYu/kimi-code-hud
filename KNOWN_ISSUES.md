@@ -4,19 +4,19 @@
 - HUD behavior baseline: `v0.7.6` (`f90ff15`)
 - Kimi Code baseline: `0.38.0` (`0999454bdcb5ddd98f39bffee434dcf0a810f394`)
 
-This file tracks open footer parity problems and information boundaries. Close
-or move an entry when its acceptance criteria are met. Current coverage and
-readable-but-unrendered data are documented separately in
+This file tracks open footer parity problems, information boundaries, and
+resolved compatibility or security constraints worth keeping as regression
+records. Current coverage and readable-but-unrendered data are documented separately in
 [CAPABILITIES.md](CAPABILITIES.md).
 
-## KI-1: Background task badges are absent
+## KI-1: Background task badges were absent
 
 Status: closed (fixed in HUD `v0.6.4`)
 
 Affected upstream slot: `tasks`
 
 The built-in footer separately renders running Shell processes and background
-agents, but the HUD currently renders neither count. The main wire has durable
+agents, but the HUD previously rendered neither count. The main wire has durable
 `task.started` and `task.terminated` records; older session layouts may also
 require reconciliation with `tasks/<taskId>.json`.
 
@@ -196,9 +196,9 @@ Resolution:
 
 Status: open verification gap
 
-Affected area: Kimi Code 0.36.0–0.36.1 experimental fullscreen TUI
+Affected area: Kimi Code 0.36.0–0.38.0 experimental fullscreen TUI
 
-Static release review through 0.36.1 confirms that fullscreen mode does not
+Static release review through 0.38.0 confirms that fullscreen mode does not
 change the 10-field status-line payload, the first-stdout-line contract, the 300ms host
 ceiling, or the host ownership of footer line 2. The HUD test suite covers that
 contract but has not driven a real interactive fullscreen terminal frame. An
@@ -209,7 +209,7 @@ evidence, not a HUD pass or failure.
 
 Acceptance criteria:
 
-- launch Kimi Code 0.36.1 with the experimental fullscreen mode in a real PTY;
+- launch Kimi Code 0.38.0 with the experimental fullscreen mode in a real PTY;
 - verify line 1 refresh, line 2 context ownership, resize, reload, and fallback;
 - record the terminal/OS matrix without weakening the 220ms HUD budget.
 
@@ -318,3 +318,28 @@ Acceptance criteria:
   slot;
 - after a region switch, stale figures render for at most one TTL (60s);
 - regression tests cover all of the above (`test/quota.test.mjs`).
+
+## KI-13: Tracked showcase PNGs lag the provisional startup renderer
+
+Status: open release-asset drift / pending explicit asset-generation authorization
+
+Affected area: documentation showcase assets
+
+The ignored showcase sources now match runtime semantics: an unconfirmed
+thinking effort is dim, and provisional throughput dims the whole speed segment
+including TTFT. The tracked `docs/media/hud-states.png` and
+`docs/media/hud-demo.png` were generated before that correction and still show
+the older brighter startup state. Runtime behavior and tests are unaffected,
+but the README images remain visually stale.
+
+The required browser export would overwrite both tracked PNGs. The 2026-08-22
+cleanup attempt was not authorized to perform that external asset write, so the
+images were deliberately left unchanged rather than being reported as current.
+
+Acceptance criteria:
+
+- with explicit asset-generation authorization, run
+  `node docs/showcase/render-states.mjs && python3 docs/showcase/export-assets.py`;
+- read both PNGs back and verify dim effort plus dim TPS/TTFT in the startup row;
+- run strict release metadata and the full HUD test suite before staging the
+  two generated assets.

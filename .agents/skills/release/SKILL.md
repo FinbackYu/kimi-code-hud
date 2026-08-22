@@ -58,4 +58,4 @@ commit / tag / push / `gh release create` 均为对外动作，执行前需用�
 
 - `docs/showcase/` 仅 `docs/media/*.png` 两个产物入库；`hud-states.js`、两个 HTML 页面、`xhs/` 素材均 gitignore。
 - release-metadata 测试在 showcase 页面缺席时（CI）跳过、本地存在时强制——本地升了版本忘同步页面常量会红。
-- `hud-demo.png` 的静态首帧来自 `startup-page.html` 里手维护的 CONFIG 复刻，不经过 `render-states.mjs`，会与真实渲染行为漂移（2026-08-21 时点：缺 provisional TPS 暗显、effort 未置灰）。发布读图时顺手检查；漂移要么修 CONFIG 重出图，要么在发布报告中明示。
+- `hud-demo.png` 的静态首帧来自 `startup-page.html` 里手维护的 CONFIG 复刻，不经过 `render-states.mjs`。发布读图时必须同时核对 provisional TPS 与未确认 effort 的暗显；发现漂移就修 CONFIG 重出图，不把手写首帧当成真实渲染的自动产物。
