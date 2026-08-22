@@ -19,6 +19,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
   let mainSpeed = false;
   let soleActive = null;
   let changed = false;
+  const orchestrated = state.swarmMode === true || state.towerMode === true;
   const names = agentNames && agentNames.size ? [...agentNames] : Object.keys(state.agents);
   for (const name of names) {
     const agent = state.agents[name];
@@ -47,17 +48,16 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
     // or an active turn.cancel) leaves the fleet immediately; the recency
     // window only keeps genuinely mid-turn agents counted. Main is exempt so
     // its just-finished speed survives until the stale TTL as before — except
-    // in swarm mode, where a parked main (blocked inside the AgentSwarm tool,
-    // no request in flight) must drop out too: otherwise its pre-swarm
-    // samples keep it counted — and summed into the fleet total — for the
+    // in an orchestration mode, where a parked main (blocked while workers
+    // run, with no request in flight) must drop out too: otherwise its earlier
+    // samples stay counted — and summed into the fleet total — for the
     // whole recency window while it is not generating at all.
     const settled =
       name !== 'main' &&
       agent.lastTurnEndAt !== null &&
       (fresh.length === 0 || agent.lastTurnEndAt >= fresh[fresh.length - 1].t) &&
       (agent.lastRequestAt === null || agent.lastTurnEndAt >= agent.lastRequestAt);
-    const parkedMain =
-      name === 'main' && state.swarmMode === true && !generating;
+    const parkedMain = name === 'main' && orchestrated && !generating;
     if (parkedMain || (!generating && (!recent || settled))) continue;
     activeAgents += 1;
     soleActive = { bucket: agent, fresh };
@@ -107,7 +107,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       tpsStale = true;
     }
     // A lone live agent still reports its reading as a one-agent fleet
-    // figure: a swarm that has run down to its last subagent must keep
+    // figure: an orchestration run down to its last worker must keep
     // feeding the renderer's fleet style.
     if (tps !== null) {
       tpsTotal = tps;
@@ -159,6 +159,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       modelAlias: state.modelAlias ?? null,
       hostVersion: state.hostVersion ?? null,
       swarmMode: state.swarmMode === true,
+      towerMode: state.towerMode === true,
       cache: cacheMetricFromState(state),
       modelUsage: sessionUsageMetricFromState(state, agentNames),
       tpsTotal,
@@ -166,7 +167,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       activeAgents,
       // Whether the main agent is part of the fleet figures — the renderer
       // labels such head counts "main+N" so they can't be misread as a pure
-      // subagent count while a swarm is running.
+      // subagent count while an orchestration mode is running.
       mainActive,
       mainSpeed,
       turnStartedAt,

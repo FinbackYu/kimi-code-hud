@@ -148,6 +148,6 @@ test('getMetrics current backfill picks up goal ops from before the offset', () 
   const m = getMetrics(id, { sessionsRoot: root, stateDir });
   assert.equal(m.goal.turnsUsed, 5);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 9);
+  assert.equal(state.backfillScanV, 10);
   assert.equal(state.thinkingScanV, undefined); // legacy marker dropped
 });

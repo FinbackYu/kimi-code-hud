@@ -60,8 +60,7 @@ export { SESSIONS_ROOT, findSessionDir, findWirePath, CACHE_BACKFILL_MAX_BYTES, 
  * agent only, and only between turns — a mid-turn auto-compaction is not
  * tracked). The main agent additionally feeds the state-level handlers —
  * the session cache counters, config.update (model alias + thinking level),
- * goal ops, the background-task registry and the swarm_mode.enter/exit
- * journal.
+ * goal ops, the background-task registry and the swarm/tower mode journals.
  * @param {object} state mutated in place
  * @param {object} row parsed wire.jsonl line
  * @param {string} [agent] which agent's wire this row comes from
@@ -164,6 +163,7 @@ function isBackfillLine(line) {
     line.includes('"type":"goal.') ||
     line.includes('"type":"forked"') ||
     line.includes('"type":"swarm_mode.') ||
+    line.includes('"type":"tower_mode.') ||
     line.includes('"type":"turn.prompt"') ||
     line.includes('"type":"turn.cancel"') ||
     line.includes('"type":"turn.ended"') ||
@@ -201,6 +201,7 @@ function newBackfill(fileId, targetOffset, state) {
   shadow.thinkingLevel = state.thinkingLevel ?? null;
   shadow.goal = state.goal ? { ...state.goal } : null;
   shadow.swarmMode = state.swarmMode === true;
+  shadow.towerMode = state.towerMode === true;
   if (state.agents?.main) {
     const source = normAgent(state.agents.main);
     const target = emptyAgent();
@@ -250,6 +251,7 @@ function installBackfillProjection(state, shadow) {
   state.thinkingLevel = shadow.thinkingLevel ?? null;
   state.goal = shadow.goal ?? null;
   state.swarmMode = shadow.swarmMode === true;
+  state.towerMode = shadow.towerMode === true;
   const source = normAgent(shadow.agents?.main);
   const target = normAgent(state.agents?.main);
   state.agents.main = target;
@@ -305,6 +307,7 @@ function resetMainDerivedState(state) {
   state.thinkingLevel = null;
   state.modelAlias = null;
   state.swarmMode = false;
+  state.towerMode = false;
   resetCacheState(state);
   resetWireTasks(state);
   state.cacheScanV = CACHE_SCAN_V;
@@ -378,7 +381,7 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
 
 /**
  * Incrementally read the session's wire logs (main agent + every subagent)
- * and return current speed metrics, thinking level, goal/swarm state and
+ * and return current speed metrics, thinking level, goal/orchestration state and
  * cache usage.
  *
  * Samples are timestamped and bucketed per agent: only the freshest
@@ -387,16 +390,16 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * Agents with a request in flight or a sample newer than ACTIVE_WINDOW_MS
  * count as active, except that a subagent whose turn has ended drops out
  * immediately (its wire's closing end_turn step.end settles it, so finished
- * swarm members never linger in the head count), and except that in swarm
- * mode a parked main (blocked inside the AgentSwarm tool, no request in
- * flight) drops out too, so its pre-swarm speed is never summed into the
+ * orchestration workers never linger in the head count), and except that in
+ * swarm/tower mode a parked main (blocked while workers run, no request in
+ * flight) drops out too, so its earlier speed is never summed into the
  * fleet while it is not generating: with several active
- * (swarm/subagent runs) the result
+ * (swarm/tower/subagent runs) the result
  * carries the fleet total (`tpsTotal`), the per-agent average (`tps`) and
  * the head counts, and TTFT is the median across active agents so one
  * stuck agent cannot poison the display. A single live agent with a speed
- * reading reports `tpsTotal`/`tpsAgents` too (1 × `tps`), so a swarm that
- * has run down to its last subagent keeps the fleet display. `activeAgents`
+ * reading reports `tpsTotal`/`tpsAgents` too (1 × `tps`), so an orchestration
+ * run down to its last worker keeps the fleet display. `activeAgents`
  * counts every live
  * agent (the gen-ticker head count); `tpsAgents` counts only those with a
  * fresh speed reading, so an agent still waiting on its first step never
@@ -422,7 +425,7 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * @param {number} [opts.deadline] absolute `performance.now()` deadline
  * @param {number} [opts.readBudgetBytes] total wire bytes allowed this frame
  * @param {string|null} [opts.hostVersion] Kimi Code version from the status-line payload
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, cache: object|null, modelUsage: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null, tasks: {bash: number, agents: number}}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, towerMode: boolean, cache: object|null, modelUsage: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null, tasks: {bash: number, agents: number}}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
@@ -434,7 +437,8 @@ export function getMetrics(sessionId, {
 } = {}) {
   const empty = {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
-    modelAlias: null, swarmMode: false, hostVersion: null, cache: null, modelUsage: null,
+    modelAlias: null, swarmMode: false, towerMode: false, hostVersion: null,
+    cache: null, modelUsage: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
     turnStartedAt: null, compactingSince: null, compactionMs: null,
     tasks: { bash: 0, agents: 0 },

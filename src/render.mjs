@@ -26,7 +26,7 @@ const DARK = {
   ...ANSI,
   warning: rgb(232, 168, 56), // #E8A838 — auto/yolo badges
   primary: rgb(79, 168, 255), // #4FA8FF — plan badge
-  accent: rgb(91, 192, 190), //  #5BC0BE — swarm badge
+  accent: rgb(91, 192, 190), //  #5BC0BE — orchestration badges
   barRed: ANSI.red,
   barYellow: ANSI.yellow,
   barGreen: ANSI.green,
@@ -41,7 +41,7 @@ const LIGHT = {
   brightRed: `${ESC}1;91m`, //                bold — auto badge
   warning: `${ESC}1m${rgb(217, 119, 6)}`, //  bold #D97706 — yolo/goal blocked
   primary: `${ESC}1m${rgb(21, 101, 192)}`, // bold #1565C0 — plan/model
-  accent: `${ESC}1m${rgb(20, 184, 166)}`, //  bold #14B8A6 — swarm
+  accent: `${ESC}1m${rgb(20, 184, 166)}`, //  bold #14B8A6 — orchestration
   barRed: rgb(185, 28, 28), //                #B91C1C — host light error
   barYellow: rgb(217, 119, 6), //             #D97706 — matches the badge amber
   barGreen: rgb(14, 122, 56), //              #0E7A38 — host light success
@@ -202,7 +202,7 @@ function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-function badges(payload, color, swarmOn, C) {
+function badges(payload, color, swarmOn, towerOn, C) {
   const out = [];
   // Host defaults render auto/yolo in warning amber and plan in primary
   // blue; auto keeps bright red here per user preference to stay distinct.
@@ -217,6 +217,10 @@ function badges(payload, color, swarmOn, C) {
   // payload.swarmMode field also turns it on (accent cyan, same as the
   // built-in footer).
   if (swarmOn || payload.swarmMode) out.push(colorize(color, C.accent, '[swarm]'));
+  // Tower is another multi-agent orchestration mode, so it shares the accent
+  // slot. Its durable wire rows are authoritative; a future payload field is
+  // accepted as the same additive shortcut used for swarm.
+  if (towerOn || payload.towerMode) out.push(colorize(color, C.accent, '[tower]'));
   return out;
 }
 
@@ -304,20 +308,22 @@ function speedSegment({ layout, metrics, color, now, C }) {
   const turnStart = metrics && typeof metrics.turnStartedAt === 'number'
     ? metrics.turnStartedAt
     : null;
-  // Live subagents: every active agent except main. A swarm that has run
-  // down to its last member is still a fleet, so fleet style holds while at
-  // least one subagent lives; once only main remains it falls back to solo.
+  // Live subagents: every active agent except main. An orchestration run that
+  // has wound down to its last worker is still a fleet, so fleet style holds
+  // while at least one subagent lives; once only main remains it falls back
+  // to solo.
   const liveSubagents =
     metrics && typeof metrics.activeAgents === 'number'
       ? metrics.activeAgents - (metrics.mainActive === true ? 1 : 0)
       : 0;
+  const orchestrated = metrics?.swarmMode === true || metrics?.towerMode === true;
   // The parenthetical head count must match the agents actually feeding the
   // total/average: an agent still waiting on its first step counts as active
   // (gen ticker) but has no speed reading yet (tpsAgents).
   const multi =
     metrics &&
     typeof metrics.tpsAgents === 'number' &&
-    (metrics.tpsAgents > 1 || (metrics.swarmMode === true && liveSubagents >= 1 && metrics.tpsAgents >= 1));
+    (metrics.tpsAgents > 1 || (orchestrated && liveSubagents >= 1 && metrics.tpsAgents >= 1));
   const generatedFor =
     !goalLive && turnStart !== null ? formatElapsed(now - turnStart) : null;
   const compacting =
@@ -357,7 +363,7 @@ function speedSegment({ layout, metrics, color, now, C }) {
     return paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`);
   }
   if (!goalLive && metrics && turnStart !== null) {
-    const agents = metrics.activeAgents > 1 || (metrics.swarmMode === true && liveSubagents >= 1)
+    const agents = metrics.activeAgents > 1 || (orchestrated && liveSubagents >= 1)
       ? ` (${fleetLabel(metrics.activeAgents, metrics.mainActive)})`
       : '';
     return `⚡ gen ${generatedFor}${agents}`;
@@ -373,7 +379,7 @@ function speedSegment({ layout, metrics, color, now, C }) {
 /**
  * Fleet head-count label. The main agent is named explicitly whenever it is
  * part of the figure, so "main+4 agents" can't be misread as a pure subagent
- * count while a swarm is running. A lone member is singular ("1 agent").
+ * count while orchestration is running. A lone member is singular ("1 agent").
  * @param {number} count agents feeding the figure
  * @param {boolean} [includesMain]
  * @returns {string}
@@ -538,7 +544,7 @@ function buildSegments(layout, ctx) {
  * @param {object} ctx.payload stdin snapshot from the host
  * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
  * @param {object|object[]|null} ctx.providerUsage normalized provider facts
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs, tasks}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, towerMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs, tasks}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] normal|compact
  * @param {boolean} [ctx.color]
@@ -554,7 +560,13 @@ export function renderHud(ctx) {
   const startIdx = Math.max(0, LAYOUT_ORDER.indexOf(ctx.layout || 'normal'));
   for (let i = startIdx; i < LAYOUT_ORDER.length; i++) {
     const layout = LAYOUT_ORDER[i];
-    const prefix = badges(payload, color, ctx.metrics?.swarmMode === true, C);
+    const prefix = badges(
+      payload,
+      color,
+      ctx.metrics?.swarmMode === true,
+      ctx.metrics?.towerMode === true,
+      C,
+    );
     const goal = goalBadge(ctx.metrics?.goal, color, now, C);
     if (goal) prefix.push(goal);
     const segs = buildSegments(layout, { ...ctx, payload, color, now, C });

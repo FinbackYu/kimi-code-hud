@@ -1,8 +1,7 @@
 # HUD capabilities
 
-- Last verified: 2026-08-20
-- HUD behavior baseline: `v0.7.2` (`ef48b22`), plus the dual-region quota fix
-  in the working tree (pending release)
+- Last verified: 2026-08-22
+- HUD behavior baseline: `v0.7.6` (`f90ff15`)
 - Kimi Code baseline: `0.38.0` (`0999454bdcb5ddd98f39bffee434dcf0a810f394`)
 
 This is the canonical inventory of footer coverage, readable data, and
@@ -94,8 +93,8 @@ Baseline delta (0.36.1 → 0.37.2):
 - The persisted wire manifest drops five transient record types (`cron.*`,
   `permission.rules.add`, `skill.activate`) and adds durable `prompt.accepted`,
   `runtime.set_binding`, and `tower_mode.enter` / `tower_mode.exit`. HUD
-  reducers gate on known types and ignore the additions; tower mode is a new
-  host-owned capability the HUD does not render.
+  reducers gate on known types; this 0.39.0 prep branch now folds the Tower
+  pair and renders `[tower]`, while every other addition remains ignored.
 - Durable wire records now always carry a `time` stamp; HUD reducers already
   read `time` defensively, so the change is additive.
 - agent-core-v2 rewired its journal internals from op-based Models to
@@ -126,8 +125,8 @@ Baseline delta (0.37.2 → 0.38.0):
   (`https://api.kimi.com/coding/v1/usages`), and 0.38.0 adds a global region
   (`https://api.kimi.ai/coding/v1/usages`, with credentials persisted in a
   scoped slot `credentials/kimi-code-env-<16 hex>.json` via
-  `packages/oauth/src/region.ts` / `managed-kimi-code.ts`). The HUD-side
-  change sits in the working tree: the detached `--refresh-quota` path now
+  `packages/oauth/src/region.ts` / `managed-kimi-code.ts`). Shipped in HUD
+  v0.7.3, the detached `--refresh-quota` path now
   resolves the region (env `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST`, then
   the `[providers."managed:kimi-code"]` `oauth` sub-table and `base_url` in
   config.toml, then the mainland default), derives the credential file from
@@ -139,6 +138,19 @@ Baseline delta (0.37.2 → 0.38.0):
   credentials directory layout are unchanged; upstream only moved internal
   modules between packages.
 
+Candidate delta (0.38.0 → 0.39.0, unreleased):
+
+- `tower_mode.enter` gains an optional `sessionId`; the HUD deliberately
+  ignores that metadata and keeps the boolean last-enter/exit-wins fold. Both
+  Tower records fold the upstream `tower` and `tower.owner` state keys, but
+  `tower.owner` is not itself a wire record and the HUD never treats it as one.
+- A one-time bounded projection upgrade re-scans existing main-wire history so
+  a resumed Tower session is not stuck off merely because an older HUD cursor
+  had already passed the enter row. The normal shared deadline and byte budget
+  remain in force.
+- Sessions on 0.38.0 that contain no Tower records retain the prior badge and
+  fleet behavior: `towerMode` defaults false and contributes no output.
+
 ## Footer coverage
 
 Legend: **covered** means the state is reconstructed end to end; **variant** is
@@ -146,11 +158,12 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.38.0 | HUD v0.7.2 | Status |
+| Official line-1 slot or state | Upstream 0.38.0 | HUD v0.7.6 | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows `[manual]`, and makes `[auto]` red | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
 | swarm mode | `swarm` in the mode slot | Rebuilds state from main-wire `swarm_mode.enter` / `swarm_mode.exit`; a future `payload.swarmMode` also works | covered since HUD 0.2.7 |
+| tower mode | separate orchestration state | Rebuilds state from main-wire `tower_mode.enter` / `tower_mode.exit`; optional enter `sessionId` is metadata only; a future `payload.towerMode` also works | prepared for 0.39.0; release-day verification pending |
 | goal | status, elapsed time, turns, optional turn budget | Rebuilds `goal.create` / `goal.update` / `goal.clear` / `forked` and renders the same lifecycle fields | covered |
 | model and thinking | display name plus `thinking` or `thinking: <effort>` | Uses payload model plus wire/config snapshot; renders bare effort (`K3 high`), muted while only config-inferred (pre-first-turn lazy start) until the wire confirms it | covered, presentation variant |
 | background Shell | `[N task(s) running]` for running `process` / `bash-*` tasks | Reduces main-wire `task.started` / `task.terminated` and reconciles `tasks/<taskId>.json` sidecars; renders the same badge between model and cwd | covered — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) closed |
@@ -179,6 +192,7 @@ commands are documented in [README.md](README.md#安装) and
 | permission mode | use `/permission`, `/auto [on\|off]`, or `/yolo [on\|off]` | `[manual]`, `[auto]`, or `[yolo]` | available |
 | plan mode | use `/plan`, `/plan on`, or `/plan off` | `[plan]` while plan mode is active | available |
 | swarm mode | use `/swarm`, `/swarm on`, `/swarm off`, or `/swarm <task>` | `[swarm]`; fleet speed appears when multiple agent wires contribute | available |
+| tower mode | start the Tower workflow with `/tower` | `[tower]`; a parked main is excluded and live workers retain fleet-style speed | prepared for 0.39.0; release-day verification pending |
 | goal lifecycle | start with `/goal <objective>`; inspect or manage with `/goal status`, `/goal pause`, `/goal resume`, `/goal cancel`, or `/goal replace <objective>` | goal status, elapsed time, turns, and optional turn budget | available |
 | model and thinking | use `/model`; set thinking effort with `/effort` or its `/thinking` alias | model display name and thinking-effort suffix | available |
 | TPS, TTFT, and generation time | run normal prompts; no separate command is required | live `gen`; TPS and TTFT after enough valid samples exist | available, automatic |
