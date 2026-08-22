@@ -1,11 +1,11 @@
 ---
 name: upstream-issue-flow
-description: 处理 kimi-code-hud 仓库 GitHub issue 的完整工作流——从读 issue、按上游发布状态分类（发布前准备 vs 当下修复）、分支隔离、实现与验证，到 issue 进度同步、发布后验收合并、关闭与 worklog。当用户说"看一下/处理 kimi-code-hud 的 issue"、"跟进上游变化"、"跑一下 issue #N"、"处理监测报警"时使用。本 skill 只覆盖本仓库的 issue 处理规范，不覆盖上游监测本身（那是 Repo-Overwatch 的职责）。
+description: 处理 kimi-code-hud 仓库 GitHub issue 的完整工作流——从读 issue、按上游发布状态分类（发布前准备 vs 当下修复）、分支隔离、实现与验证，到 issue 进度同步、发布后验收合并与关闭。当用户说"看一下/处理 kimi-code-hud 的 issue"、"跟进上游变化"、"跑一下 issue #N"、"处理监测报警"时使用。本 skill 只覆盖本仓库的 issue 处理规范，不覆盖上游监测本身（那是 Repo-Overwatch 的职责）。
 ---
 
 # Upstream Issue Flow
 
-kimi-code-hud 的代码改动以 issue 为锚点。本 skill 定义「读 issue → 分类 → 分支 → 实现 → 验证 → 同步 → 合并/关闭 → worklog」全流程规范；部分约定参照上游 MoonshotAI/kimi-code 的 CONTRIBUTING，但按单人仓库的实际精简过。
+kimi-code-hud 的代码改动以 issue 为锚点。本 skill 定义「读 issue → 分类 → 分支 → 实现 → 验证 → 同步 → 合并/关闭」全流程规范；部分约定参照上游 MoonshotAI/kimi-code 的 CONTRIBUTING，但按单人仓库的实际精简过。
 
 ## 第零步：是否需要 issue
 
@@ -80,10 +80,6 @@ git diff --check         # 无空白错误
 2. 逐条执行各 issue 评论中留下的实测 checklist（真实安装新版本、真实触发新功能、对照预期行为）。
 3. 全部通过 → 合并 main → 推送 → 关闭相关 issue → 删除已合并分支（本地+远端）。
 4. 任一不通过 → 在分支上修复后重验；若上游契约已漂移，在 issue 评论记录差异并更新实现。
-
-## 第八步：worklog
-
-每个有意义的工作段结束，按 `creating-worklogs` skill 记项目 worklog 到 `worklog/YYYY-MM/`，一个工作段一篇、不追加旧篇。issue 编号写进 worklog 正文便于回溯。本仓库为公开仓库，`worklog/` 已入 .gitignore——只本地留存，不提交不推送。
 
 ## 反模式（不要做）
 
