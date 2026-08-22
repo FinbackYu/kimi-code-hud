@@ -303,9 +303,12 @@ Resolution:
   path): any custom or mismatched host/base pair fails closed to the
   mainland default, and `requestQuota` re-checks the same whitelist before
   sending;
-- the render hot path never parses config.toml and the cache carries no
-  endpoint tag, so after a region switch the previous region's figures may
-  render for at most one TTL (60s) until the next refresh rewrites them.
+- the render hot path never parses config.toml and `quota.json` carries no
+  account, credential-slot, or endpoint tag. After an account or region
+  switch, the previous figures may continue to render; the 60s TTL marks the
+  cache stale and schedules refresh but does not evict it. A successful
+  refresh replaces the value, while repeated 401/403 responses with a
+  remaining `refresh_token` may preserve the stale value beyond one TTL.
 
 Acceptance criteria:
 
@@ -316,7 +319,9 @@ Acceptance criteria:
 - a mainland config with no env override and no `oauth_host` keeps the
   unchanged `api.kimi.com` URL and the default `credentials/kimi-code.json`
   slot;
-- after a region switch, stale figures render for at most one TTL (60s);
+- after an account or region switch, refresh targets the newly resolved
+  endpoint and a successful response replaces the cache; until then the
+  previous value may remain and is marked stale after the 60s TTL;
 - regression tests cover all of the above (`test/quota.test.mjs`).
 
 ## KI-13: Tracked showcase PNGs drift from current rendering behavior
