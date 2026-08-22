@@ -86,6 +86,8 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
 ## 配置
 
 - `~/.kimi-code-hud/config.json`：`{"layout":"compact"|"normal"}`（默认 `normal`）；`"disabled": true` 是 `--off` 写入的开关旗标（缺省即启用，`--on` 删除该键）
+- `KIMI_CODE_HOME`：覆盖 Kimi Code 数据根；本文出现的 `~/.kimi-code` 都是未设置该变量时的默认路径
+- `KIMI_HUD_HOME`：覆盖 HUD 自有配置与缓存根；默认是 `~/.kimi-code-hud`
 - 环境变量 `KIMI_HUD_LAYOUT` 优先于配置文件
 - `NO_COLOR` 或 `KIMI_HUD_NO_COLOR`：禁用全部 ANSI 颜色
 - `KIMI_HUD_THEME=dark|light`：手动固定配色主题。缺省跟随 `tui.toml` 顶层的 `theme` 设置；`"auto"` 经 `COLORFGBG` 判定、回退 dark（状态行无法在 300ms 热路径上执行宿主的 OSC 11 查询）；自定义主题名回退 dark。light 下徽标（模型名、`[plan]`、`[yolo]`、`[swarm]`、`[auto]`）加粗显示，琥珀/青色比宿主默认更亮（`#D97706`/`#14B8A6`），额度柱体从刺眼的 ANSI 红改为柔和真彩色（`#B91C1C`/`#D97706`/`#0E7A38`）；dark 模式不变，柱体 ANSI 色由终端按自身主题重映射
@@ -163,7 +165,7 @@ DeepSeek / OpenAI / Anthropic 价格表以 **2026-08-09** 核对到的 DeepSeek 
 
 ## 能力与已知问题
 
-- [能力清单](CAPABILITIES.md)：Kimi Code 0.36.1 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
+- [能力清单](CAPABILITIES.md)：Kimi Code 0.38.0 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
 - [已知问题](KNOWN_ISSUES.md)：Git、终端宽度、失败帧与全屏动态验证缺口及验收条件。
 
 ## 本地开发

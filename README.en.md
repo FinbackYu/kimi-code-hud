@@ -86,6 +86,8 @@ Backs up first, then removes this tool's `command` line from `[status_line]` and
 ## Configuration
 
 - `~/.kimi-code-hud/config.json`: `{"layout":"compact"|"normal"}` (default `normal`); `"disabled": true` is the switch flag written by `--off` (absent means enabled; `--on` deletes the key)
+- `KIMI_CODE_HOME`: overrides the Kimi Code data root; every `~/.kimi-code` path in this README is the default when it is unset
+- `KIMI_HUD_HOME`: overrides the HUD's own config and cache root; the default is `~/.kimi-code-hud`
 - `KIMI_HUD_LAYOUT` env var overrides the config file
 - `NO_COLOR` or `KIMI_HUD_NO_COLOR`: disable all ANSI colors
 - `KIMI_HUD_THEME=dark|light`: pin the color theme manually. By default it follows the top-level `theme` setting in `tui.toml`; `"auto"` resolves via `COLORFGBG` with a dark fallback (a status line can't run the host's OSC 11 query on the 300ms hot path); custom theme names fall back to dark. On light, badges (model name, `[plan]`, `[yolo]`, `[swarm]`, `[auto]`) render bold, the amber/teal are brighter than the host defaults (`#D97706`/`#14B8A6`), and the quota bars use calmer truecolor hues (`#B91C1C`/`#D97706`/`#0E7A38`) instead of glaring ANSI red. Dark mode is unchanged: bars keep terminal-remapped ANSI colors
@@ -163,7 +165,7 @@ The DeepSeek / OpenAI / Anthropic table is based on the standard text-token rate
 
 ## Capabilities & known issues
 
-- [Capabilities](CAPABILITIES.md): coverage of Kimi Code 0.36.1's line-1 slots, data sources, and readable-but-unrendered Cache/token/goal/task/Git information;
+- [Capabilities](CAPABILITIES.md): coverage of Kimi Code 0.38.0's line-1 slots, data sources, and readable-but-unrendered Cache/token/goal/task/Git information;
 - [Known issues](KNOWN_ISSUES.md): open Git, terminal-width, stale-frame, and fullscreen verification gaps with acceptance criteria.
 
 ## Development
