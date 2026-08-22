@@ -225,24 +225,23 @@ function badges(payload, color, swarmOn, towerOn, C) {
 }
 
 /**
- * Goal badge, mirroring the built-in footer's goal slot (`mode → goal →
- * model`): colored status dot (active = primary blue, blocked = warning
- * amber, paused = muted) inside muted brackets. The status-line payload
- * carries no goal field; the state comes from the wire journal's goal ops.
- * Shown in every layout tier — a live goal is too important to drop.
+ * Goal badge in the built-in footer's goal slot (`mode → goal → model`):
+ * `[goal 7 turns]` (`3/10 turns` with a turn budget). All three states
+ * share the same shape and differ only in color: the word "goal" carries
+ * the status color — active = primary blue, blocked = warning amber —
+ * with the brackets and turn count in the default foreground; paused
+ * renders the whole badge muted. The status-line payload carries no goal
+ * field; the state comes from the wire journal's goal ops. Shown in every
+ * layout tier — a live goal is too important to drop.
  */
-function goalBadge(goal, color, now, C) {
-  const badge = formatGoalBadge(goal, now);
+function goalBadge(goal, color, C) {
+  const badge = formatGoalBadge(goal);
   if (!badge) return null;
   const text = sanitizeTerminalText(badge.text);
-  const dotColor =
-    badge.status === 'active' ? C.primary : badge.status === 'blocked' ? C.warning : C.muted;
   if (!color) return text;
-  // Repaint the dot (always the 7th char: "[goal ●") and mute the rest.
-  const dotIdx = text.indexOf('●');
-  const before = text.slice(0, dotIdx);
-  const after = text.slice(dotIdx + 1);
-  return `${C.muted}${before}${RESET}${dotColor}●${RESET}${C.muted}${after}${RESET}`;
+  if (badge.status === 'paused') return `${C.muted}${text}${RESET}`;
+  const statusColor = badge.status === 'active' ? C.primary : C.warning;
+  return `[${statusColor}goal${RESET}${text.slice('[goal'.length)}`;
 }
 
 const LAYOUT_LEVEL = { compact: 0, normal: 1 };
@@ -297,14 +296,6 @@ function taskSegment({ metrics, color, C }) {
 }
 
 function speedSegment({ layout, metrics, color, now, C }) {
-  // While a goal badge is up it already carries the session clock, so the
-  // gen ticker, TTFT and the compaction state are all redundant — show
-  // throughput only, leaving the horizontal space to the badge. (Same
-  // reason auto-compactions inside a turn stay hidden: the clock that
-  // covers the task's duration already accounts for that span.)
-  const goalStatus = metrics?.goal?.status;
-  const goalLive =
-    goalStatus === 'active' || goalStatus === 'paused' || goalStatus === 'blocked';
   const turnStart = metrics && typeof metrics.turnStartedAt === 'number'
     ? metrics.turnStartedAt
     : null;
@@ -325,13 +316,13 @@ function speedSegment({ layout, metrics, color, now, C }) {
     typeof metrics.tpsAgents === 'number' &&
     (metrics.tpsAgents > 1 || (orchestrated && liveSubagents >= 1 && metrics.tpsAgents >= 1));
   const generatedFor =
-    !goalLive && turnStart !== null ? formatElapsed(now - turnStart) : null;
+    turnStart !== null ? formatElapsed(now - turnStart) : null;
   const compacting =
-    !goalLive && !generatedFor && metrics && typeof metrics.compactingSince === 'number'
+    !generatedFor && metrics && typeof metrics.compactingSince === 'number'
       ? formatElapsed(now - metrics.compactingSince)
       : null;
   const compacted =
-    !goalLive && !generatedFor && !compacting && metrics && typeof metrics.compactionMs === 'number'
+    !generatedFor && !compacting && metrics && typeof metrics.compactionMs === 'number'
       ? formatElapsed(metrics.compactionMs)
       : null;
   if (metrics && typeof metrics.tps === 'number') {
@@ -359,10 +350,10 @@ function speedSegment({ layout, metrics, color, now, C }) {
     if (compacted) {
       return `${paint(base)}${colorize(color, C.muted, ` · compacted ${compacted}`)}`;
     }
-    const ttft = goalLive ? null : formatTtft(metrics.ttftMs);
+    const ttft = formatTtft(metrics.ttftMs);
     return paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`);
   }
-  if (!goalLive && metrics && turnStart !== null) {
+  if (metrics && turnStart !== null) {
     const agents = metrics.activeAgents > 1 || (orchestrated && liveSubagents >= 1)
       ? ` (${fleetLabel(metrics.activeAgents, metrics.mainActive)})`
       : '';
@@ -372,7 +363,7 @@ function speedSegment({ layout, metrics, color, now, C }) {
   if (metrics && compacted && layout !== 'compact') {
     return colorize(color, C.muted, `compacted ${compacted}`);
   }
-  const ttft = metrics && !goalLive ? formatTtft(metrics.ttftMs) : null;
+  const ttft = metrics ? formatTtft(metrics.ttftMs) : null;
   return ttft ? `TTFT ${ttft}` : null;
 }
 
@@ -567,7 +558,7 @@ export function renderHud(ctx) {
       ctx.metrics?.towerMode === true,
       C,
     );
-    const goal = goalBadge(ctx.metrics?.goal, color, now, C);
+    const goal = goalBadge(ctx.metrics?.goal, color, C);
     if (goal) prefix.push(goal);
     const segs = buildSegments(layout, { ...ctx, payload, color, now, C });
     const line = [...prefix, segs.join(' │ ')].filter(Boolean).join(' ');

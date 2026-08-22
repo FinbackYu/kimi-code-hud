@@ -6,6 +6,17 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Goal badge rework: shortened to `[goal 7 turns]` (`3/10 turns` when the
+  goal carries a turn budget) — the status dot, status word and elapsed
+  clock are gone. All three states share one shape and differ only in
+  color: the word "goal" carries the status color (active blue, blocked
+  amber) with the brackets and turn count in the default foreground;
+  paused renders the whole badge muted. With the badge clock gone, the
+  speed segment shows the gen timer, TTFT and compaction states again
+  while a goal is live.
+
 ## [0.7.6] - 2026-08-21
 
 ### Changed

@@ -1,0 +1,258 @@
+<!doctype html>
+<!--
+  kimi-code-hud 展示页 · 启动页 1:1 复刻 + 核心 HUD 状态堆叠
+  ──────────────────────────────────────────────────────────
+  页头、对话、输入框：与 startup-page.html 完全一致的静态复刻，启动页版式
+  更新时请同步本页上半部分。
+  line 1（HUD 状态行）与 line 3 起的堆叠：均取自 hud-states.js（真实
+  renderHud() 输出，方块柱体无圆角；line 1 用 startup 状态，堆叠条目由
+  GALLERY_IDS 挑选）。line 2 与堆叠区之间有一条裁剪线，标明实际 HUD 到
+  line 2 为止、以下为示例。调整状态本身编辑 render-states.mjs 的
+  STATES 后重跑：
+    node docs/showcase/render-states.mjs
+
+  外层为 Ghostty 单 tab 窗口框（红绿灯 + 窗口标题，与终端同色 #1e1e2e）
+  + L0 背景画布（personal-design-style L0 cover #F3FAFA），与
+  startup-page.html 一致；窗口几何按真实 Ghostty 截图量取。
+
+  导出 PNG（窗口宽度随最长行自适应，视口 1597 留有富余；行变更长时加大视口宽）：
+    npx playwright screenshot --full-page --viewport-size=1597,818 \
+      docs/showcase/states-gallery.html states-gallery.png
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>kimi-code-hud 展示</title>
+<style>
+  :root {
+    /* ── 颜色（取自原截图取色，Catppuccin Mocha 系） ── */
+    --bg:           #1e1e2e;
+    --bg-term:      #181825;
+    --text:         #cdd6f4;
+    --blue:         #4ea8ff;
+    --muted:        #888888;
+    --dim:          #595b70;
+    --yellow:       #ffcb6b;
+    --border:       #5a5a5a;
+    --soft:         #e0e0e0;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    /* ── 外层画布与窗口框（展示装饰，非终端内容） ── */
+    --l0:           #F3FAFA;  /* 背景画布：personal-design-style L0 cover（qing-50）；
+                                 其他页型深度：content/data #E2F2F3、section #9ECFD3 */
+    --chrome-text:  #c8c8d4;  /* 窗口标题 */
+    --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--l0);
+    font-family: var(--mono);
+    font-size: 13.3px;
+    line-height: 1.32;
+    padding: 64px;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Ghostty 窗口框（单 tab：标题栏与终端同为 #1e1e2e，实测取色一致） ── */
+  .window {
+    /* 宽度 = 最长行的固有宽度：堆叠行 nowrap，由 goal 行（最长）撑开，
+       HUD 文字变化后窗口自动跟随，无需手改 */
+    width: max-content;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--bg);
+    box-shadow: 0 24px 68px rgba(0, 0, 0, .28),   /* macOS 系统窗口投影：大而软的黑影 + */
+                0 4px 18px rgba(0, 0, 0, .14),    /* 近处补一层，外加 0.5px 边缘线      */
+                0 0 0 .5px rgba(0, 0, 0, .12);
+  }
+  .titlebar {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    padding: 0 11px;
+    gap: 14px;
+    font-family: var(--ui);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--chrome-text);
+  }
+  .lights { display: flex; gap: 10px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; }
+  .lights .r { background: #ff5f57; }
+  .lights .y { background: #febc2e; }
+  .lights .g { background: #28c840; }
+  .titlebar .wtitle { display: flex; align-items: center; gap: 5px; }
+
+  /* ── 终端内容区 ── */
+  .terminal {
+    background: var(--bg);
+    color: var(--text);
+    padding: 13px 17.5px 24px 14px;
+  }
+
+  /* ── 欢迎框 ── */
+  .welcome {
+    border: 1px solid var(--blue);
+    border-radius: 4px;
+    padding: 25px 23px 17px;
+    height: 171px;
+  }
+  .welcome .head { display: flex; align-items: center; gap: 20.5px; }
+  .welcome .title { color: var(--blue); font-weight: 700; }
+  .welcome .subtitle { color: var(--muted); }
+  .welcome .info { margin-top: 19px; }
+  .welcome .info .k { color: var(--muted); }
+
+  /* ── 对话区 ── */
+  .chat { margin-top: 41px; line-height: 20px; }
+  .msg { white-space: pre-wrap; }
+  .msg.user { color: var(--yellow); margin-bottom: 16px; }
+  .msg.thought { color: var(--muted); font-style: italic; }
+  .msg.reply .dot { color: var(--soft); font-style: normal; }
+
+  /* ── 输入框 ── */
+  .inputbox {
+    margin-top: 35px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    height: 34.5px;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+  }
+  .cursor {
+    display: inline-block;
+    width: 12px;
+    height: 20px;
+    margin-left: 1ch;
+    background: var(--text);
+  }
+
+  /* ── line 1：HUD 状态行（取自 hud-states.js，真实 renderHud() 输出） ── */
+  .hud { margin-top: 8px; margin-left: -2px; line-height: 20px; }
+  .hud .line { letter-spacing: -0.04px; }
+  /* line 2：context 行 */
+  .hud .ctx {
+    margin-top: 1px;
+    text-align: right;
+    color: var(--soft);
+  }
+
+  /* ── 裁剪线：实际 HUD 到 line 2 为止，line 3 起为示例堆叠 ── */
+  .cutline {
+    margin-top: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--dim);
+    font-size: 11px;
+  }
+  .cutline::before,
+  .cutline::after {
+    content: "";
+    flex: 1;
+    border-top: 1px dashed var(--dim);
+    opacity: .55;
+  }
+
+  /* ── line 3 起：核心 HUD 状态堆叠（真实 renderHud() 输出，与 line 1 左对齐） ── */
+  .stack {
+    margin-top: 14px;
+    margin-left: -2px;
+  }
+  .stack .row {
+    white-space: nowrap;
+    line-height: 20px;
+    letter-spacing: -0.04px;
+  }
+  .stack .row + .row { margin-top: 11px; }
+</style>
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar">
+      <span class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></span>
+      <span class="wtitle"><svg width="14" height="12" viewBox="0 0 14 12" style="display:block"><path d="M1 2a1 1 0 0 1 1-1h3l1.5 1.8H12a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2z" fill="#5eb0ef"/></svg><span id="wtitle-text"></span></span>
+    </div>
+    <div class="terminal">
+      <div class="welcome">
+        <div class="head">
+          <svg width="48" height="34" viewBox="0 0 48 34" style="display:block">
+            <rect x="0" y="0" width="48" height="34" rx="2.5" fill="var(--blue)"/>
+            <rect x="16" y="8.5" width="3.75" height="8" rx="1.8" fill="var(--bg)"/>
+            <rect x="32" y="8.5" width="3.75" height="8" rx="1.8" fill="var(--bg)"/>
+          </svg>
+          <div>
+            <div class="title">Welcome to Kimi Code!</div>
+            <div class="subtitle">Send /help for help information.</div>
+          </div>
+        </div>
+        <div class="info">
+          <div><span class="k">Directory:</span> kimi-code-hud</div>
+          <div><span class="k">Session:</span> session_4ebc1d34-0b60-430f-bc3d-f9580d3c9d2e</div>
+          <div><span class="k">Model:</span> K3</div>
+          <div><span class="k">Version:</span> <span id="version"></span></div>
+        </div>
+      </div>
+
+      <div class="chat">
+        <div class="msg user">✨&#xFE0E; 你好</div>
+        <div class="msg thought">● Simple greeting. Reply in Chinese.</div>
+        <div class="msg reply"><span class="dot">●</span> 你好！有什么可以帮你的吗？比如看看 kimi-code-hud 这个项目，或者别的开发任务都可以。</div>
+      </div>
+
+      <div class="inputbox">
+        <span>&gt;</span><span class="cursor"></span>
+      </div>
+
+      <!-- line 1 / line 2：line 1 取自 hud-states.js 的 startup 状态（真实输出，方块柱体无圆角） -->
+      <div class="hud">
+        <div class="line" id="line1"></div>
+        <div class="ctx">context: 3% (30.7k/1M)</div>
+      </div>
+
+      <!-- 裁剪线：实际界面到 line 2 为止 -->
+      <div class="cutline">状态示例</div>
+
+      <!-- line 3 起：真实 renderHud() 输出堆叠 -->
+      <div class="stack" id="stack"></div>
+    </div>
+  </div>
+
+<script src="hud-states.js"></script>
+<script>
+/* 版本默认常量：与 startup-page.html 一致（HUD_VERSION 取 kimi.plugin.json 的
+   version，CLI_VERSION 取 CAPABILITIES.md 的 Kimi Code baseline）；
+   export-assets.py 导出时以 ?hudver=…&cliver=… 注入覆盖，standalone 打开即默认 */
+const HUD_VERSION = '0.7.6';
+const CLI_VERSION = '0.38.0';
+const params = new URLSearchParams(location.search);
+const hudver = params.get('hudver') || HUD_VERSION;
+const cliver = params.get('cliver') || CLI_VERSION;
+document.getElementById('wtitle-text').textContent = `Kimi Code Hud ${hudver}`;
+document.getElementById('version').textContent = cliver;
+
+/* 展示哪几条改这里（可选 id 见 hud-states.js / render-states.mjs；@yolo/@auto
+ * 是 gallery 专用的徽标变体，在 render-states.mjs 的 GALLERY_BADGES 里维护）。
+ * 顺序即对齐策略：每行原样呈现 CLI 输出，按「权限徽标 → +短徽标 → +长徽标」、
+ * 同级再按速度段长度排序，让段错位逐行渐变，形成平滑阶梯而非随机参差 */
+const GALLERY_IDS = [
+  'gen@yolo',        // [yolo] 琥珀徽标 · 速度段最短（⚡ 52 t/s · gen 45s）· 黄条（5h 72%，仅此一处）
+  'quota-crit@yolo', // [yolo] · 红条仅此一处（5h 93%）
+  'compacted@auto',  // [auto] 亮红徽标 · 速度段最长（⚡ 52 t/s · compacted 8s）· 绿条
+  'swarm@auto',      // [auto] + [swarm] 短徽标，段右移一小步
+  'goal-active@auto',// [auto] + [goal ● …] 长徽标，段右移一大步
+];
+const byId = Object.fromEntries((window.HUD_STATES || []).map(s => [s.id, s]));
+document.getElementById('line1').innerHTML = (byId.startup || {}).html || '';
+document.getElementById('stack').innerHTML = GALLERY_IDS
+  .map(id => byId[id])
+  .filter(Boolean)
+  .map(s => `<div class="row">${s.html}</div>`)
+  .join('');
+</script>
+</body>
+</html>

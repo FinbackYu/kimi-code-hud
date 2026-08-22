@@ -1,0 +1,359 @@
+<!doctype html>
+<!--
+  Kimi Code 启动页 + kimi-code-hud 状态栏 · 像素级复刻模板
+  ────────────────────────────────────────────────────────
+  用法：只需要改下方 <script> 里的 CONFIG（所有文字、HUD 段落、窗口标题都在那里），
+  保存后刷新浏览器即可。终端内容按原图 2938×860（2x 视网膜）制作，逻辑尺寸 1469×430；
+  外层的 Ghostty 窗口框（单 tab：红绿灯 + 窗口标题，与终端同色 #1e1e2e）与
+  L0 背景画布（#F3FAFA）为展示用装饰，窗口几何按真实 Ghostty 截图量取。
+
+  导出 2x PNG：用 ?scale=2 放大后按 2 倍视口截图（整页逻辑尺寸 1597×586）
+    npx playwright screenshot --viewport-size=3194,1172 \
+      "docs/showcase/startup-page.html?scale=2&static" showcase.png
+
+  HUD 轮播：页面加载 2s 后，状态栏会按 hud-states.js 里的真实 renderHud() 输出
+  循环切换（gen → compacting → compacted → goal → swarm → 配额/Context 水位…），
+  适合录 GIF；点击状态栏暂停/继续，加 ?static 参数可关闭轮播。
+  状态内容由 docs/showcase/render-states.mjs 生成，HUD 更新后重跑一次即可同步；
+  全状态静态一览见 states-gallery.html。
+
+  静态 CONFIG 的 HUD 段落文字也请与真实 `node bin/kimi-hud.mjs` 输出保持一致，
+  更新 HUD 样式后同步修改 CONFIG.hud。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Kimi Code 启动页复刻</title>
+<style>
+  :root {
+    /* ── 颜色（取自原截图取色，Catppuccin Mocha 系） ── */
+    --bg:           #1e1e2e;  /* 页面底色 */
+    --text:         #cdd6f4;  /* 正文 */
+    --blue:         #4ea8ff;  /* 欢迎框边框 / 标题 / 模型名 / logo */
+    --muted:        #888888;  /* 次要文字（Send /help、标签、思考行） */
+    --dim:          #595b70;  /* HUD [manual] 徽标 */
+    --yellow:       #ffcb6b;  /* 用户消息 */
+    --border:       #5a5a5a;  /* 输入框边框 */
+    --soft:         #e0e0e0;  /* 回复行圆点 / context 行 */
+    --green:        #a6e3a1;  /* 5h 配额条 */
+    --green-track:  #404f4c;
+    --pink:         #f38ba8;  /* 7d 配额条 */
+    --pink-track:   #543a4d;
+    /* ── 尺寸（逻辑像素，截图 ÷2） ── */
+    --page-w: 1469px;
+    --page-h: 430px;
+    --fs: 13.3px;             /* 终端字号；字宽 ≈ 0.6em = 8px */
+    --lh: 1.32;               /* 行高 ≈ 17.5px */
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    /* ── 外层画布与窗口框（展示装饰，非终端内容） ── */
+    --l0:           #F3FAFA;  /* 背景画布：personal-design-style L0 cover（qing-50）；
+                                 其他页型深度：content/data #E2F2F3、section #9ECFD3 */
+    --chrome-text:  #c8c8d4;  /* 窗口标题 */
+    --chrome-h: 28px;         /* Ghostty 单 tab 形态：仅标题栏（无标签栏），与终端同色 */
+    --canvas-pad: 64px;
+    --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: var(--l0); }
+  body {
+    width: calc(var(--page-w) + var(--canvas-pad) * 2);
+    height: calc(var(--page-h) + var(--chrome-h) + var(--canvas-pad) * 2);
+    font-family: var(--mono);
+    font-size: var(--fs);
+    line-height: var(--lh);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  .canvas {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ── Ghostty 窗口框（单 tab：标题栏与终端同为 #1e1e2e，实测取色一致） ── */
+  .window {
+    width: var(--page-w);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--bg);
+    box-shadow: 0 24px 68px rgba(0, 0, 0, .28),   /* macOS 系统窗口投影：大而软的黑影 + */
+                0 4px 18px rgba(0, 0, 0, .14),    /* 近处补一层，外加 0.5px 边缘线      */
+                0 0 0 .5px rgba(0, 0, 0, .12);
+  }
+  .titlebar {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    padding: 0 11px;
+    gap: 14px;
+    font-family: var(--ui);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--chrome-text);
+  }
+  .lights { display: flex; gap: 10px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; }
+  .lights .r { background: #ff5f57; }
+  .lights .y { background: #febc2e; }
+  .lights .g { background: #28c840; }
+  .titlebar .wtitle { display: flex; align-items: center; gap: 5px; }
+
+  /* ── 终端内容区（原页面内容，尺寸与原图一致） ── */
+  .terminal {
+    height: var(--page-h);
+    padding: 13px 17.5px 0 14px;
+    color: var(--text);
+    overflow: hidden;
+  }
+
+  /* ── 欢迎框 ── */
+  .welcome {
+    border: 1px solid var(--blue);
+    border-radius: 4px;
+    padding: 25px 23px 17px;
+    height: 171px;
+  }
+  .welcome .head { display: flex; align-items: center; gap: 20.5px; }
+  .welcome .title { color: var(--blue); font-weight: 700; }
+  .welcome .subtitle { color: var(--muted); }
+  .welcome .info { margin-top: 19px; }
+  .welcome .info .k { color: var(--muted); }
+  .welcome .info .v { color: var(--text); }
+
+  /* ── 对话区 ── */
+  .chat { margin-top: 41px; line-height: 20px; }
+  .msg { white-space: pre-wrap; }
+  .msg.user { color: var(--yellow); margin-bottom: 16px; }
+  .msg.thought { color: var(--muted); font-style: italic; }
+  .msg.reply .dot { color: var(--soft); font-style: normal; }
+
+  /* ── 输入框 ── */
+  .inputbox {
+    margin-top: 35px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    height: 34.5px;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+  }
+  .inputbox .prompt { color: var(--text); }
+  .cursor {
+    display: inline-block;
+    width: 12px;
+    height: 20px;
+    margin-left: 1ch;
+    background: var(--text);
+  }
+
+  /* ── HUD 状态栏 ── */
+  .hud { margin-top: 8px; margin-left: -2px; line-height: 20px; }
+  .hud .line { letter-spacing: -0.04px; }
+  .hud .dim { color: var(--dim); }
+  .hud .blue { color: var(--blue); }
+  .hud .sep { color: var(--text); }
+  .bar {
+    display: inline-block;
+    width: 6em;               /* 10 个字符宽 */
+    height: 1.24em;
+    border-radius: 3px;
+    overflow: hidden;
+    transform: translateY(2.5px);
+    background: var(--track);
+  }
+  .bar > i { display: block; height: 100%; background: var(--fill); }
+  .hud .ctx {
+    margin-top: 1px;
+    text-align: right;
+    color: var(--soft);
+  }
+</style>
+</head>
+<body>
+  <div class="canvas">
+    <div class="window">
+      <div class="titlebar">
+        <span class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></span>
+        <span class="wtitle" id="wtitle"></span>
+      </div>
+      <div class="terminal">
+        <div class="welcome">
+          <div class="head">
+            <span id="logo"></span>
+            <div>
+              <div class="title" id="title"></div>
+              <div class="subtitle" id="subtitle"></div>
+            </div>
+          </div>
+          <div class="info" id="info"></div>
+        </div>
+
+        <div class="chat" id="chat"></div>
+
+        <div class="inputbox">
+          <span class="prompt" id="prompt"></span><span class="cursor"></span>
+        </div>
+
+        <div class="hud">
+          <div class="line" id="hudline"></div>
+          <div class="ctx" id="hudctx"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* 版本默认常量：HUD_VERSION 与 kimi.plugin.json 的 version 一致，CLI_VERSION 与
+   CAPABILITIES.md 的 Kimi Code baseline 一致；export-assets.py 导出时以
+   ?hudver=…&cliver=… 注入覆盖，standalone 打开（无参数）即显示默认值 */
+const HUD_VERSION = '0.7.6';
+const CLI_VERSION = '0.38.0';
+const params = new URLSearchParams(location.search);
+const hudver = params.get('hudver') || HUD_VERSION;
+const cliver = params.get('cliver') || CLI_VERSION;
+
+/* ═══════════════════════ CONFIG：改这里 ═══════════════════════ */
+const CONFIG = {
+  /* 窗口框：标题栏文字（Ghostty 单 tab 形态显示会话名；HUD 版本取 hudver） */
+  window: {
+    title: `Kimi Code Hud ${hudver}`,
+  },
+
+  /* 欢迎框 */
+  welcome: {
+    title: 'Welcome to Kimi Code!',
+    subtitle: 'Send /help for help information.',
+    info: [
+      ['Directory:', 'kimi-code-hud'],
+      ['Session:',   'session_4ebc1d34-0b60-430f-bc3d-f9580d3c9d2e'],
+      ['Model:',     'K3'],
+      ['Version:',   cliver],
+    ],
+  },
+
+  /* 对话区：type 为 user（黄）/ thought（灰斜体）/ reply（白） */
+  messages: [
+    { type: 'user',    text: '✨\uFE0E 你好' },
+    { type: 'thought', text: 'Simple greeting. Reply in Chinese.' },
+    { type: 'reply',   text: '你好！有什么可以帮你的吗？比如看看 kimi-code-hud 这个项目，或者别的开发任务都可以。' },
+  ],
+
+  /* 输入框提示符 */
+  prompt: '>',
+
+  /* HUD 状态栏（与 bin/kimi-hud.mjs 真实输出保持一致） */
+  hud: {
+    /* 左侧纯文本段；sep:true 渲染分隔符 "|"；cls 可选 dim / blue */
+    segments: [
+      { t: '[manual]', cls: 'dim' },
+      { t: 'K3', cls: 'blue' },
+      { t: 'high', cls: 'dim' },
+      { sep: true },
+      { t: 'kimi-code-hud git:(main)' },
+      { sep: true },
+      { t: '⚡' },
+      { t: '52 t/s', cls: 'dim' },
+      { t: '·' },
+      { t: 'TTFT 10.2s', cls: 'dim' },
+      { sep: true },
+      { t: 'Cache 98%' },
+      { sep: true },
+    ],
+    /* 配额条：label 前缀、pct 百分比、eta 剩余时间、fill/track 颜色 */
+    quotas: [
+      { label: '5h', pct: 47, eta: '~2h43m',  fill: 'var(--green)', track: 'var(--green-track)' },
+      { label: '7d', pct: 41, eta: '~2d12h',  fill: 'var(--green)', track: 'var(--green-track)'  },
+    ],
+    /* 右下角 context 行（留空则隐藏） */
+    context: 'context: 3% (30.7k/1M)',
+  },
+};
+/* ═════════════════════ CONFIG 结束，下面不用动 ═════════════════ */
+
+// ?scale=2 整页放大，用于导出高清 PNG：视口设成 1597*2 × 586*2 即可
+const scale = Number(params.get('scale')) || 1;
+if (scale !== 1) document.body.style.zoom = scale;
+
+// 窗口标题栏：蓝色文件夹图标 + 标题
+document.getElementById('wtitle').innerHTML = `
+  <svg width="14" height="12" viewBox="0 0 14 12" style="display:block">
+    <path d="M1 2a1 1 0 0 1 1-1h3l1.5 1.8H12a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2z" fill="#5eb0ef"/>
+  </svg><span></span>`;
+document.getElementById('wtitle').querySelector('span').textContent = CONFIG.window.title;
+
+// logo：48×34 圆角方块 + 两只底色竖眼（与原图一致）
+document.getElementById('logo').innerHTML = `
+  <svg width="48" height="34" viewBox="0 0 48 34" style="display:block">
+    <rect x="0" y="0" width="48" height="34" rx="2.5" fill="var(--blue)"/>
+    <rect x="16" y="8.5" width="3.75" height="8" rx="1.8" fill="var(--bg)"/>
+    <rect x="32" y="8.5" width="3.75" height="8" rx="1.8" fill="var(--bg)"/>
+  </svg>`;
+
+document.getElementById('title').textContent = CONFIG.welcome.title;
+document.getElementById('subtitle').textContent = CONFIG.welcome.subtitle;
+document.getElementById('info').innerHTML = CONFIG.welcome.info
+  .map(([k, v]) => `<div><span class="k">${k}</span> <span class="v">${v}</span></div>`)
+  .join('');
+
+document.getElementById('chat').innerHTML = CONFIG.messages.map(m => {
+  if (m.type === 'user') return `<div class="msg user">${m.text}</div>`;
+  if (m.type === 'thought') return `<div class="msg thought">● ${m.text}</div>`;
+  return `<div class="msg reply"><span class="dot">●</span> ${m.text}</div>`;
+}).join('');
+
+document.getElementById('prompt').textContent = CONFIG.prompt;
+
+const segHtml = CONFIG.hud.segments.map(s => {
+  if (s.sep) return '<span class="sep">|</span>';
+  return s.cls ? `<span class="${s.cls}">${s.t}</span>` : `<span>${s.t}</span>`;
+}).join(' ');
+
+const quotaHtml = CONFIG.hud.quotas.map(q =>
+  `<span>${q.label}</span> ` +
+  `<span class="bar" style="--fill:${q.fill};--track:${q.track}">` +
+  // 与真实 HUD 一致：10 格条，向下取整填格
+  `<i style="width:${Math.floor(q.pct / 10) * 10}%"></i></span> ` +
+  `<span>${q.pct}% ${q.eta}</span>`
+).join(' <span class="sep">·</span> ');
+
+document.getElementById('hudline').innerHTML = [segHtml, quotaHtml].filter(Boolean).join(' ');
+const ctxEl = document.getElementById('hudctx');
+if (CONFIG.hud.context) ctxEl.textContent = CONFIG.hud.context;
+else ctxEl.style.display = 'none';
+</script>
+
+<!-- 真实 renderHud() 输出（node docs/showcase/render-states.mjs 生成） -->
+<script src="hud-states.js"></script>
+<script>
+/* HUD 状态轮播：?static 关闭；点击状态栏暂停/继续 */
+(function () {
+  if (!window.HUD_STATES) return;
+  if (params.has('static')) return;
+  // 只放 normal 布局状态；renderHud 会在超过 200 字符时自行降级 compact
+  var IDS = [
+    'gen', 'compacting', 'compacted', 'goal-active',
+    'swarm', 'auto', 'quota-warn', 'quota-crit', 'stale',
+  ];
+  var states = IDS.map(function (id) {
+    return window.HUD_STATES.find(function (s) { return s.id === id; });
+  }).filter(Boolean);
+  if (!states.length) return;
+  var el = document.getElementById('hudline');
+  var i = 0;
+  var timer = null;
+  var tick = function () {
+    el.innerHTML = states[i].html;
+    i = (i + 1) % states.length;
+  };
+  var start = function () { if (!timer) timer = setInterval(tick, 2600); };
+  var stop = function () { clearInterval(timer); timer = null; };
+  setTimeout(start, 2000); // 先留 2s 静态像素复刻，再开始轮播
+  el.closest('.hud').addEventListener('click', function () {
+    if (timer) stop(); else start();
+  });
+})();
+</script>
+</body>
+</html>
