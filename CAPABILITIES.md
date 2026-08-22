@@ -1,8 +1,7 @@
 # HUD capabilities
 
-- Last verified: 2026-08-20
-- HUD behavior baseline: `v0.7.2` (`ef48b22`), plus the dual-region quota fix
-  in the working tree (pending release)
+- Last verified: 2026-08-22
+- HUD behavior baseline: `v0.7.6` (`f90ff15`)
 - Kimi Code baseline: `0.38.0` (`0999454bdcb5ddd98f39bffee434dcf0a810f394`)
 
 This is the canonical inventory of footer coverage, readable data, and
@@ -126,8 +125,8 @@ Baseline delta (0.37.2 → 0.38.0):
   (`https://api.kimi.com/coding/v1/usages`), and 0.38.0 adds a global region
   (`https://api.kimi.ai/coding/v1/usages`, with credentials persisted in a
   scoped slot `credentials/kimi-code-env-<16 hex>.json` via
-  `packages/oauth/src/region.ts` / `managed-kimi-code.ts`). The HUD-side
-  change sits in the working tree: the detached `--refresh-quota` path now
+  `packages/oauth/src/region.ts` / `managed-kimi-code.ts`). Shipped in HUD
+  v0.7.3, the detached `--refresh-quota` path now
   resolves the region (env `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST`, then
   the `[providers."managed:kimi-code"]` `oauth` sub-table and `base_url` in
   config.toml, then the mainland default), derives the credential file from
@@ -146,7 +145,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.38.0 | HUD v0.7.2 | Status |
+| Official line-1 slot or state | Upstream 0.38.0 | HUD v0.7.6 | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows `[manual]`, and makes `[auto]` red | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
