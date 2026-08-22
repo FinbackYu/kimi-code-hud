@@ -1,8 +1,7 @@
 # Known issues
 
-- Last verified: 2026-08-20
-- HUD behavior baseline: `v0.7.2` (`ef48b22`), plus the dual-region quota fix
-  in the working tree (pending release)
+- Last verified: 2026-08-22
+- HUD behavior baseline: `v0.7.6` (`f90ff15`)
 - Kimi Code baseline: `0.38.0` (`0999454bdcb5ddd98f39bffee434dcf0a810f394`)
 
 This file tracks open footer parity problems and information boundaries. Close
@@ -274,7 +273,7 @@ Resolution:
 
 ## KI-12: Global-region quota is unavailable
 
-Status: closed (fix implemented in the working tree, pending release)
+Status: closed (fixed in HUD `v0.7.3`)
 
 Affected area: quota region resolution
 
