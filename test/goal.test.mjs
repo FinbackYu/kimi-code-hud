@@ -3,12 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import {
-  applyGoalOp,
-  formatGoalBadge,
-  formatGoalElapsed,
-  goalElapsedMs,
-} from '../src/goal.mjs';
+import { applyGoalOp, formatGoalBadge } from '../src/goal.mjs';
 import { getMetrics } from '../src/metrics.mjs';
 
 function makeSession() {
@@ -30,9 +25,8 @@ test('applyGoalOp lifecycle: create → update → clear', () => {
     wallClockResumedAt: 1000,
     time: 1000,
   });
-  assert.equal(goal.status, 'active');
-  assert.equal(goal.turnsUsed, 0);
-  assert.equal(goal.wallClockResumedAt, 1000);
+  // Wall-clock wire fields are ignored — the badge renders no clock.
+  assert.deepEqual(goal, { status: 'active', turnsUsed: 0, turnBudget: null });
 
   goal = applyGoalOp(goal, { type: 'goal.update', turnsUsed: 7, time: 2000 });
   assert.equal(goal.turnsUsed, 7);
@@ -45,8 +39,7 @@ test('applyGoalOp lifecycle: create → update → clear', () => {
     time: 3000,
   });
   assert.equal(goal.status, 'paused');
-  assert.equal(goal.wallClockMs, 61000);
-  assert.equal(goal.wallClockResumedAt, null); // clock anchor cleared off-active
+  assert.equal(goal.wallClockMs, undefined);
 
   goal = applyGoalOp(goal, { type: 'goal.clear' });
   assert.equal(goal, null);
@@ -55,9 +48,9 @@ test('applyGoalOp lifecycle: create → update → clear', () => {
   assert.equal(applyGoalOp(null, { type: 'goal.update', turnsUsed: 3 }), null);
 });
 
-test('applyGoalOp: forked clears; create falls back to row.time anchor', () => {
+test('applyGoalOp: forked clears the live goal', () => {
   let goal = applyGoalOp(null, { type: 'goal.create', goalId: 'g1', time: 5000 });
-  assert.equal(goal.wallClockResumedAt, 5000);
+  assert.equal(goal.status, 'active');
   goal = applyGoalOp(goal, { type: 'forked' });
   assert.equal(goal, null);
 });
@@ -67,40 +60,26 @@ test('applyGoalOp picks up the turn budget', () => {
   assert.equal(goal.turnBudget, null);
   goal = applyGoalOp(goal, { type: 'goal.update', budgetLimits: { turnBudget: 10 } });
   assert.equal(goal.turnBudget, 10);
+  goal = applyGoalOp(null, {
+    type: 'goal.create',
+    goalId: 'g2',
+    budgetLimits: { turnBudget: 5 },
+  });
+  assert.equal(goal.turnBudget, 5);
 });
 
-test('formatGoalElapsed mirrors the host badge clock', () => {
-  assert.equal(formatGoalElapsed(42_000), '42s');
-  assert.equal(formatGoalElapsed(4 * 60_000), '4m');
-  assert.equal(formatGoalElapsed(3 * 3_600_000 + 38 * 60_000), '3h38m');
-});
-
-test('goalElapsedMs: active keeps ticking, paused is frozen', () => {
-  const active = { status: 'active', wallClockMs: 60_000, wallClockResumedAt: 10_000 };
-  assert.equal(goalElapsedMs(active, 40_000), 90_000);
-  const paused = { status: 'paused', wallClockMs: 60_000, wallClockResumedAt: null };
-  assert.equal(goalElapsedMs(paused, 40_000), 60_000);
-});
-
-test('formatGoalBadge matches the host format', () => {
-  const goal = { status: 'active', turnsUsed: 7, wallClockMs: 0, wallClockResumedAt: 0 };
-  const badge = formatGoalBadge(goal, 4 * 60_000);
+test('formatGoalBadge: status-colored word plus turn count, no clock', () => {
+  const badge = formatGoalBadge({ status: 'active', turnsUsed: 7 });
   assert.equal(badge.status, 'active');
-  assert.equal(badge.text, '[goal ● active · 4m · 7 turns]');
+  assert.equal(badge.text, '[goal 7 turns]');
 
+  assert.equal(formatGoalBadge({ status: 'paused', turnsUsed: 1 }).text, '[goal 1 turn]');
   assert.equal(
-    formatGoalBadge({ status: 'paused', turnsUsed: 1, wallClockMs: 30_000 }, 0).text,
-    '[goal ● paused · 30s · 1 turn]',
-  );
-  assert.equal(
-    formatGoalBadge(
-      { status: 'blocked', turnsUsed: 3, turnBudget: 10, wallClockMs: 0 },
-      0,
-    ).text,
-    '[goal ● blocked · 0s · 3/10 turns]',
+    formatGoalBadge({ status: 'blocked', turnsUsed: 3, turnBudget: 10 }).text,
+    '[goal 3/10 turns]',
   );
   // Terminal/absent goals render nothing (the host clears on complete).
-  assert.equal(formatGoalBadge({ status: 'complete', turnsUsed: 9, wallClockMs: 0 }), null);
+  assert.equal(formatGoalBadge({ status: 'complete', turnsUsed: 9 }), null);
   assert.equal(formatGoalBadge(null), null);
 });
 

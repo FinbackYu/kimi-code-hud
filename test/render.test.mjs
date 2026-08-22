@@ -551,14 +551,14 @@ test('swarm badge renders from wire-derived metrics.swarmMode (payload has no fi
 });
 
 test('goal badge sits between mode badges and model, in every tier', () => {
-  const goal = { status: 'active', turnsUsed: 7, wallClockMs: 0, wallClockResumedAt: NOW - 4 * 60_000 };
+  const goal = { status: 'active', turnsUsed: 7 };
   for (const layout of ['compact', 'normal']) {
     const [line] = renderHud(baseCtx({
       layout,
       metrics: { tps: 47, ttftMs: 1300, goal },
     }));
     assert.ok(
-      line.startsWith('[manual] [goal ● active · 4m · 7 turns] K3'),
+      line.startsWith('[manual] [goal 7 turns] K3'),
       `${layout}: ${line}`,
     );
   }
@@ -567,56 +567,56 @@ test('goal badge sits between mode badges and model, in every tier', () => {
   assert.ok(plain.startsWith('[manual] K3'));
 });
 
-test('goal badge keeps the speed segment at throughput only', () => {
-  const goal = { status: 'active', turnsUsed: 3, wallClockMs: 0, wallClockResumedAt: NOW - 60_000 };
-  // Idle turn: TTFT would normally tail the speed.
+test('goal badge leaves the full speed segment in place', () => {
+  const goal = { status: 'active', turnsUsed: 3 };
+  // Idle turn: TTFT tails the speed, goal or not.
   const [idle] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, goal } }));
   assert.ok(idle.includes('⚡ 47 t/s'));
-  assert.ok(!idle.includes('TTFT'));
-  // Running turn: the gen ticker is redundant with the badge's own clock.
+  assert.ok(idle.includes('TTFT'));
+  // Running turn: the badge renders no clock, so the gen ticker shows.
   const [running] = renderHud(baseCtx({
     metrics: { tps: 47, ttftMs: 1300, goal, turnStartedAt: NOW - 3000 },
   }));
-  assert.ok(running.includes('⚡ 47 t/s'));
-  assert.ok(!running.includes('gen'));
-  assert.ok(!running.includes('TTFT'));
-  // Compact tier drops to the bare number too.
+  assert.ok(running.includes('⚡ 47 t/s · gen 3s'));
+  // Compact tier keeps the ticker too.
   const [compact] = renderHud(baseCtx({
     layout: 'compact',
     metrics: { tps: 47, ttftMs: 1300, goal, turnStartedAt: NOW - 3000 },
   }));
-  assert.ok(compact.split(' │ ').includes('⚡ 47'));
-  // Compaction state hides too — like auto-compactions inside a turn, the
-  // span is already covered by the badge's clock.
+  assert.ok(compact.split(' │ ').includes('⚡ 47 gen 3s'));
+  // Compaction states show as well.
   const [compacted] = renderHud(baseCtx({
     metrics: { tps: 47, ttftMs: 1300, goal, compactionMs: 12_000 },
   }));
-  assert.ok(!compacted.includes('compacted'));
+  assert.ok(compacted.includes('compacted 12s'));
   const [compacting] = renderHud(baseCtx({
     metrics: { tps: 47, ttftMs: 1300, goal, compactingSince: NOW - 5000 },
   }));
-  assert.ok(!compacting.includes('compacting'));
-  // Goal cleared: ticker and TTFT come back.
+  assert.ok(compacting.includes('compacting 5s'));
+  // No goal: same behavior.
   const [cleared] = renderHud(baseCtx({
     metrics: { tps: 47, ttftMs: 1300, turnStartedAt: NOW - 3000 },
   }));
   assert.ok(cleared.includes('⚡ 47 t/s · gen 3s'));
 });
 
-test('goal badge colors: dot by status, brackets muted', () => {
-  const goal = { status: 'active', turnsUsed: 1, wallClockMs: 0, wallClockResumedAt: NOW };
+test('goal badge colors: the three states differ only in color', () => {
+  const goal = { status: 'active', turnsUsed: 1 };
   const [line] = renderHud(baseCtx({ color: true, metrics: { goal } }));
-  assert.ok(line.includes('\x1b[38;2;79;168;255m●')); // active: primary blue
+  // active: primary-blue word, brackets/turns in the default foreground
+  assert.ok(line.includes('[\x1b[38;2;79;168;255mgoal\x1b[0m 1 turn]'), line);
   const [blocked] = renderHud(baseCtx({
     color: true,
-    metrics: { goal: { ...goal, status: 'blocked', wallClockResumedAt: null } },
+    metrics: { goal: { ...goal, status: 'blocked' } },
   }));
-  assert.ok(blocked.includes('\x1b[38;2;232;168;56m●')); // blocked: warning amber
+  // blocked: same shape as active, warning-amber word
+  assert.ok(blocked.includes('[\x1b[38;2;232;168;56mgoal\x1b[0m 1 turn]'), blocked);
   const [paused] = renderHud(baseCtx({
     color: true,
-    metrics: { goal: { ...goal, status: 'paused', wallClockResumedAt: null } },
+    metrics: { goal: { ...goal, status: 'paused' } },
   }));
-  assert.ok(paused.includes('\x1b[90m●')); // paused: muted
+  // paused: the whole badge goes muted
+  assert.ok(paused.includes('\x1b[90m[goal 1 turn]\x1b[0m'), paused);
 });
 
 test('fleet speed shows total, head count and per-agent average', () => {
