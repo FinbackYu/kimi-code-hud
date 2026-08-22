@@ -473,11 +473,13 @@ export async function requestQuota({
  * only an expired access_token — the cache survives until the CLI's lazy
  * refresh lets the next attempt succeed.
  *
- * The cache deliberately carries no endpoint tag: after a region switch the
- * previous region's figures may render for up to one TTL (60s) until this
- * refresh — which always re-resolves the region — rewrites it. A tag would
- * not help: the render hot path must not re-parse config.toml to learn the
- * expected endpoint, so it could not act on a mismatch anyway.
+ * The cache deliberately carries no account, credential-slot, or endpoint
+ * tag. After an account or region switch, previous figures may keep rendering:
+ * the 60s TTL marks them stale and schedules this refresh, but does not evict
+ * them. A successful refresh — which always re-resolves the region — rewrites
+ * the cache; repeated 401/403 responses with a remaining refresh_token may
+ * preserve it beyond one TTL. A tag would not help the render hot path unless
+ * that path also re-parsed config.toml to learn the expected context.
  * @param {object} [opts]
  * @returns {Promise<boolean>} true when the cache was updated
  */
