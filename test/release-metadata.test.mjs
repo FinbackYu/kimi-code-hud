@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deflateSync, inflateSync } from 'node:zlib';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPORARY_RELEASE_STATE = /working(?:[ -]|\r?\n)+tree|pending(?:[ -]|\r?\n)+release/i;
@@ -76,35 +77,113 @@ function assertNoTemporaryReleaseState(capabilities, knownIssues) {
   }
 }
 
-function pngTextEntries(relativePath) {
-  const data = fs.readFileSync(path.join(ROOT, relativePath));
-  assert.ok(data.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE), `${relativePath} must be a PNG`);
+function crc32(data) {
+  let crc = 0xFFFFFFFF;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ ((crc & 1) ? 0xEDB88320 : 0);
+    }
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function pngChunk(type, payload = Buffer.alloc(0)) {
+  const typeBytes = Buffer.from(type, 'ascii');
+  const chunk = Buffer.alloc(payload.length + 12);
+  chunk.writeUInt32BE(payload.length, 0);
+  typeBytes.copy(chunk, 4);
+  payload.copy(chunk, 8);
+  chunk.writeUInt32BE(crc32(Buffer.concat([typeBytes, payload])), payload.length + 8);
+  return chunk;
+}
+
+function pngTextEntry(type, payload, name) {
+  const separator = payload.indexOf(0);
+  assert.ok(separator > 0, `${name} has an invalid PNG ${type} keyword`);
+  const keyword = payload.toString('latin1', 0, separator);
+  if (type === 'tEXt') {
+    return { type, keyword, value: payload.toString('latin1', separator + 1) };
+  }
+  if (type === 'zTXt') {
+    assert.ok(separator + 2 <= payload.length, `${name} has a truncated PNG zTXt chunk`);
+    assert.equal(payload[separator + 1], 0, `${name} has an unsupported PNG zTXt compression method`);
+    return {
+      type,
+      keyword,
+      value: inflateSync(payload.subarray(separator + 2)).toString('latin1'),
+    };
+  }
+
+  let cursor = separator + 1;
+  assert.ok(cursor + 2 <= payload.length, `${name} has a truncated PNG iTXt header`);
+  const compressionFlag = payload[cursor];
+  const compressionMethod = payload[cursor + 1];
+  assert.ok(compressionFlag === 0 || compressionFlag === 1,
+    `${name} has an invalid PNG iTXt compression flag`);
+  assert.equal(compressionMethod, 0, `${name} has an unsupported PNG iTXt compression method`);
+  cursor += 2;
+  const languageEnd = payload.indexOf(0, cursor);
+  assert.ok(languageEnd >= cursor, `${name} has an invalid PNG iTXt language tag`);
+  cursor = languageEnd + 1;
+  const translatedEnd = payload.indexOf(0, cursor);
+  assert.ok(translatedEnd >= cursor, `${name} has an invalid PNG iTXt translated keyword`);
+  const text = payload.subarray(translatedEnd + 1);
+  return {
+    type,
+    keyword,
+    value: (compressionFlag === 1 ? inflateSync(text) : text).toString('utf8'),
+  };
+}
+
+function pngTextEntries(data, name) {
+  assert.ok(data.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE), `${name} must be a PNG`);
   const entries = [];
   let offset = PNG_SIGNATURE.length;
   let sawIend = false;
   while (offset < data.length) {
-    assert.ok(offset + 12 <= data.length, `${relativePath} has a truncated PNG chunk header`);
+    assert.ok(offset + 12 <= data.length, `${name} has a truncated PNG chunk header`);
     const length = data.readUInt32BE(offset);
     const end = offset + 12 + length;
-    assert.ok(end <= data.length, `${relativePath} has a truncated PNG chunk`);
+    assert.ok(end <= data.length, `${name} has a truncated PNG chunk`);
     const type = data.toString('ascii', offset + 4, offset + 8);
     const payload = data.subarray(offset + 8, offset + 8 + length);
-    if (type === 'tEXt') {
-      const separator = payload.indexOf(0);
-      assert.ok(separator > 0, `${relativePath} has an invalid PNG tEXt chunk`);
-      entries.push({
-        keyword: payload.toString('latin1', 0, separator),
-        value: payload.toString('latin1', separator + 1),
-      });
+    const actualCrc = data.readUInt32BE(offset + 8 + length);
+    const expectedCrc = crc32(data.subarray(offset + 4, offset + 8 + length));
+    assert.equal(actualCrc, expectedCrc, `${name} has an invalid PNG ${type} CRC`);
+    if (type === 'tEXt' || type === 'zTXt' || type === 'iTXt') {
+      entries.push(pngTextEntry(type, payload, name));
     }
     offset = end;
     if (type === 'IEND') {
       sawIend = true;
-      assert.equal(offset, data.length, `${relativePath} must not contain bytes after IEND`);
+      assert.equal(offset, data.length, `${name} must not contain bytes after IEND`);
     }
   }
-  assert.ok(sawIend, `${relativePath} is missing IEND`);
+  assert.ok(sawIend, `${name} is missing IEND`);
   return entries;
+}
+
+function assertPngAuthor(data, name, author) {
+  const authorEntries = pngTextEntries(data, name).filter(({ keyword }) => keyword === 'Author');
+  assert.deepEqual(authorEntries, [{ type: 'tEXt', keyword: 'Author', value: author }],
+    `${name} must contain exactly one tEXt Author entry from kimi.plugin.json`);
+}
+
+function pngWithTextChunks(textChunks) {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(1, 0);
+  ihdr.writeUInt32BE(1, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const idat = deflateSync(Buffer.from([0, 0, 0, 0]));
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    pngChunk('IHDR', ihdr),
+    ...textChunks,
+    pngChunk('IDAT', idat),
+    pngChunk('IEND'),
+  ]);
 }
 
 test('package and plugin manifest versions stay aligned', () => {
@@ -173,10 +252,36 @@ test('public showcase source chain is present and contains no private checkout p
 test('public showcase PNGs carry the plugin author as standard text metadata', () => {
   const plugin = JSON.parse(fs.readFileSync(path.join(ROOT, 'kimi.plugin.json'), 'utf8'));
   for (const relativePath of PUBLIC_SHOWCASE_IMAGES) {
-    const authorEntries = pngTextEntries(relativePath).filter(({ keyword }) => keyword === 'Author');
-    assert.deepEqual(authorEntries, [{ keyword: 'Author', value: plugin.author }],
-      `${relativePath} must contain exactly one Author tEXt entry from kimi.plugin.json`);
+    assertPngAuthor(fs.readFileSync(path.join(ROOT, relativePath)), relativePath, plugin.author);
   }
+});
+
+test('strict PNG metadata detects cross-type duplicate Author chunks in memory', () => {
+  const author = 'FinbackYu';
+  const duplicateAuthors = pngWithTextChunks([
+    pngChunk('tEXt', Buffer.from(`Author\0${author}`, 'latin1')),
+    pngChunk('zTXt', Buffer.concat([
+      Buffer.from('Author\0', 'latin1'),
+      Buffer.from([0]),
+      deflateSync(Buffer.from(author, 'latin1')),
+    ])),
+    pngChunk('iTXt', Buffer.concat([
+      Buffer.from('Author\0', 'latin1'),
+      Buffer.from([0, 0, 0, 0]),
+      Buffer.from(author, 'utf8'),
+    ])),
+  ]);
+  const authorEntries = pngTextEntries(duplicateAuthors, 'in-memory PNG')
+    .filter(({ keyword }) => keyword === 'Author');
+  assert.deepEqual(authorEntries, [
+    { type: 'tEXt', keyword: 'Author', value: author },
+    { type: 'zTXt', keyword: 'Author', value: author },
+    { type: 'iTXt', keyword: 'Author', value: author },
+  ]);
+  assert.throws(
+    () => assertPngAuthor(duplicateAuthors, 'in-memory PNG', author),
+    /exactly one tEXt Author/,
+  );
 });
 
 test('released metadata rejects a HUD behavior commit after its tag', (t) => {
