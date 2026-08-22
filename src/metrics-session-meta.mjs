@@ -16,7 +16,7 @@ function adoptModelAlias(state, modelAlias) {
   state.modelAlias = alias;
 }
 
-/** Fold main-wire model/thinking/swarm metadata. */
+/** Fold main-wire model/thinking/swarm/tower metadata. */
 export function applySessionMetaRow(state, row, agent = 'main') {
   if (agent !== 'main') return;
   if (row?.type === 'config.update' || row?.type === 'profile.bind') {
@@ -44,5 +44,8 @@ export function applySessionMetaRow(state, row, agent = 'main') {
   }
   if (row?.type === 'swarm_mode.enter' || row?.type === 'swarm_mode.exit') {
     state.swarmMode = row.type === 'swarm_mode.enter';
+  }
+  if (row?.type === 'tower_mode.enter' || row?.type === 'tower_mode.exit') {
+    state.towerMode = row.type === 'tower_mode.enter';
   }
 }

@@ -19,6 +19,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
   let mainSpeed = false;
   let soleActive = null;
   let changed = false;
+  const orchestrated = state.swarmMode === true || state.towerMode === true;
   const names = agentNames && agentNames.size ? [...agentNames] : Object.keys(state.agents);
   for (const name of names) {
     const agent = state.agents[name];
@@ -50,14 +51,15 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
     // when it is parked: a main blocked inside a tool call must drop out too,
     // or its pre-block samples keep it counted — and summed into the fleet
     // total — for the whole recency window while it is not generating at all.
-    // This covers the swarm's AgentSwarm tool and a solo main directly calling
-    // a single Agent tool (wire tool.call name "Agent"), where the block is
-    // equally real. "Blocked" cannot be read off `generating` alone: a tool_use
-    // step's step.end is journaled only when the tool returns, so the step's
-    // llm.request looks in-flight for the entire block. The step's tool.call
-    // row is the point where the LLM actually stopped generating, so a request
-    // superseded by an unanswered tool.call is waiting, not streaming. In
-    // swarm mode that is enough; with swarm off, a solo main keeps the old
+    // This covers the swarm's AgentSwarm tool, a tower run's parked main and
+    // a solo main directly calling a single Agent tool (wire tool.call name
+    // "Agent"), where the block is equally real. "Blocked" cannot be read off
+    // `generating` alone: a tool_use step's step.end is journaled only when
+    // the tool returns, so the step's llm.request looks in-flight for the
+    // entire block. The step's tool.call row is the point where the LLM
+    // actually stopped generating, so a request superseded by an unanswered
+    // tool.call is waiting, not streaming. In an orchestration mode (swarm or
+    // tower) that is enough; with orchestration off, a solo main keeps the old
     // exemption except while its own turn is still open (a fresh turn.prompt
     // with no later turn end), which is exactly the single-Agent block. Hosts
     // that predate the tool.call journal keep the old request-based reading.
@@ -74,7 +76,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       (agent.lastTurnEndAt === null || agent.lastTurnPromptAt > agent.lastTurnEndAt);
     const parkedMain =
       name === 'main' && (!generating || waitingOnTool) &&
-      (state.swarmMode === true || turnOpen);
+      (orchestrated || turnOpen);
     if (parkedMain || (!generating && (!recent || settled))) continue;
     activeAgents += 1;
     soleActive = { bucket: agent, fresh };
@@ -124,7 +126,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       tpsStale = true;
     }
     // A lone live agent still reports its reading as a one-agent fleet
-    // figure: a swarm that has run down to its last subagent must keep
+    // figure: an orchestration run down to its last worker must keep
     // feeding the renderer's fleet style.
     if (tps !== null) {
       tpsTotal = tps;
@@ -176,6 +178,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       modelAlias: state.modelAlias ?? null,
       hostVersion: state.hostVersion ?? null,
       swarmMode: state.swarmMode === true,
+      towerMode: state.towerMode === true,
       cache: cacheMetricFromState(state),
       modelUsage: sessionUsageMetricFromState(state, agentNames),
       tpsTotal,
@@ -183,7 +186,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       activeAgents,
       // Whether the main agent is part of the fleet figures — the renderer
       // labels such head counts "main+N" so they can't be misread as a pure
-      // subagent count while a swarm is running.
+      // subagent count while an orchestration mode is running.
       mainActive,
       mainSpeed,
       turnStartedAt,

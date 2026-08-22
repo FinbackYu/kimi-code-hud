@@ -45,6 +45,18 @@ The project follows [Semantic Versioning](https://semver.org/).
   paused renders the whole badge muted. With the badge clock gone, the
   speed segment shows the gen timer, TTFT and compaction states again
   while a goal is live.
+- Advance the audited Kimi Code compatibility baseline from 0.38.0 to 0.39.0:
+  the status-line payload/runner contract (300ms ceiling, 1s rerun interval,
+  64KB capture budget) is unchanged and still carries no `towerMode` field,
+  with the wire event set staying at 55 record types; Tower became a
+  first-class `/tower` orchestration mode behind the experimental
+  `KIMI_CODE_EXPERIMENTAL_TOWER` flag and `tower_mode.enter` gains an optional
+  `sessionId`, which the HUD folds into the `[tower]` accent badge; concurrent
+  `subagent_fork` (also experimental, off by default) keeps the ordinary
+  session layout and `agent` task kind; the shared protocol `taskSchema` gains
+  optional `parent_tool_call_id` / `run_in_background` and KAP REST adds
+  `POST /tasks/{id}:detach` (both host-owned, not consumed by the HUD); and
+  `--allow-remote-terminals` was removed.
 
 ## [0.7.6] - 2026-08-21
 
