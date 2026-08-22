@@ -132,8 +132,12 @@ Baseline delta (0.37.2 → 0.38.0):
   config.toml, then the mainland default), derives the credential file from
   the persisted `oauth.key`, and sends the token only to the two official
   hosts, failing closed on any custom or mismatched configuration. The
-  render hot path is unchanged; after a region switch the previous cache may
-  render for at most one TTL (60s).
+  render hot path is unchanged, and `quota.json` carries no account,
+  credential-slot, or endpoint tag. After an account or region switch, the
+  previous cache may continue to render; the 60s TTL marks it stale and
+  schedules refresh but does not evict it. A successful refresh replaces the
+  value, while repeated 401/403 responses with a remaining `refresh_token`
+  may preserve the stale value beyond one TTL.
 - The `SessionStart` hook, plugin manifest, `KIMI_CODE_HOME` resolution, and
   credentials directory layout are unchanged; upstream only moved internal
   modules between packages.
