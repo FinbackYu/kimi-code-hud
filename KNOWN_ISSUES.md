@@ -319,27 +319,23 @@ Acceptance criteria:
 - after a region switch, stale figures render for at most one TTL (60s);
 - regression tests cover all of the above (`test/quota.test.mjs`).
 
-## KI-13: Tracked showcase PNGs lag the provisional startup renderer
+## KI-13: Tracked showcase PNGs drift from current rendering behavior
 
-Status: open release-asset drift / pending explicit asset-generation authorization
+Status: open release-asset drift
 
 Affected area: documentation showcase assets
 
-The ignored showcase sources now match runtime semantics: an unconfirmed
-thinking effort is dim, and provisional throughput dims the whole speed segment
-including TTFT. The tracked `docs/media/hud-states.png` and
-`docs/media/hud-demo.png` were generated before that correction and still show
-the older brighter startup state. Runtime behavior and tests are unaffected,
-but the README images remain visually stale.
-
-The required browser export would overwrite both tracked PNGs. The 2026-08-22
-cleanup attempt was not authorized to perform that external asset write, so the
-images were deliberately left unchanged rather than being reported as current.
+The tracked `docs/media/hud-states.png` and `docs/media/hud-demo.png` do not
+match the current startup rendering behavior. An unconfirmed thinking effort is
+dim, and provisional throughput dims the whole speed segment including TTFT;
+the images still show the older brighter startup state. Runtime behavior and
+tests are unaffected, but the README images remain visually stale.
 
 Acceptance criteria:
 
-- with explicit asset-generation authorization, run
+- regenerate both images from the tracked showcase sources with
   `node docs/showcase/render-states.mjs && python3 docs/showcase/export-assets.py`;
 - read both PNGs back and verify dim effort plus dim TPS/TTFT in the startup row;
+- verify both PNGs carry the expected `Author` metadata;
 - run strict release metadata and the full HUD test suite before staging the
   two generated assets.
