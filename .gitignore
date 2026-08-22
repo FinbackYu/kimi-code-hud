@@ -3,6 +3,16 @@ node_modules/
 *.log
 docs/*
 !docs/media/
+!docs/showcase/
+docs/showcase/*
+!docs/showcase/README.md
+!docs/showcase/export-assets.py
+!docs/showcase/render-states.mjs
+!docs/showcase/startup-page.html
+!docs/showcase/states-gallery.html
+docs/showcase/hud-states.js
+docs/showcase/xhs/
+docs/superpowers/
 
 # worklog 为本地过程记录，公开仓库不入库
 worklog/
