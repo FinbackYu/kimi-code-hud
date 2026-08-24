@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-08-24
+
 ### Fixed
 
 - Swarm mode now also drops a main agent parked inside a blocking tool call,
@@ -454,7 +456,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.7...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.8...HEAD
+[0.7.8]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.8
 [0.7.7]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.7
 [0.7.6]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.6
 [0.7.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.5
