@@ -47,17 +47,25 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
     // or an active turn.cancel) leaves the fleet immediately; the recency
     // window only keeps genuinely mid-turn agents counted. Main is exempt so
     // its just-finished speed survives until the stale TTL as before — except
-    // in swarm mode, where a parked main (blocked inside the AgentSwarm tool,
-    // no request in flight) must drop out too: otherwise its pre-swarm
-    // samples keep it counted — and summed into the fleet total — for the
-    // whole recency window while it is not generating at all.
+    // in swarm mode, where a parked main (blocked inside the AgentSwarm tool)
+    // must drop out too: otherwise its pre-swarm samples keep it counted —
+    // and summed into the fleet total — for the whole recency window while
+    // it is not generating at all. "Blocked" cannot be read off `generating`
+    // alone: a tool_use step's step.end is journaled only when the tool
+    // returns, so the step's llm.request looks in-flight for the entire
+    // block. The step's tool.call row is the point where the LLM actually
+    // stopped generating, so a request superseded by an unanswered tool.call
+    // is waiting, not streaming. Hosts that predate the tool.call journal
+    // keep the old request-based reading.
     const settled =
       name !== 'main' &&
       agent.lastTurnEndAt !== null &&
       (fresh.length === 0 || agent.lastTurnEndAt >= fresh[fresh.length - 1].t) &&
       (agent.lastRequestAt === null || agent.lastTurnEndAt >= agent.lastRequestAt);
+    const waitingOnTool =
+      agent.lastToolCallAt !== null && agent.lastToolCallAt > agent.lastRequestAt;
     const parkedMain =
-      name === 'main' && state.swarmMode === true && !generating;
+      name === 'main' && state.swarmMode === true && (!generating || waitingOnTool);
     if (parkedMain || (!generating && (!recent || settled))) continue;
     activeAgents += 1;
     soleActive = { bucket: agent, fresh };

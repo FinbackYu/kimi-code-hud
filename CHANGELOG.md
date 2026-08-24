@@ -6,6 +6,18 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Swarm mode now also drops a main agent parked inside a blocking tool call,
+  not just one with no request in flight: a tool_use step's `step.end` is
+  journaled only when the tool returns, so an AgentSwarm block kept main's
+  `llm.request` looking in-flight — and the fleet head count at `main+N` —
+  for the entire wait. The throughput reducer now folds `tool.call` rows per
+  agent, and the fleet summary treats a main whose latest request is
+  superseded by an unanswered `tool.call` as waiting rather than generating;
+  hosts that predate the `tool.call` journal keep the previous request-based
+  reading.
+
 ## [0.7.7] - 2026-08-23
 
 ### Changed
