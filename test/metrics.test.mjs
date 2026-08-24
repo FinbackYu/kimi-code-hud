@@ -54,6 +54,22 @@ function llmRequest({ kind = 'loop', time = EVENT_TIME } = {}) {
   return JSON.stringify({ type: 'llm.request', kind, time });
 }
 
+function toolCall({ name = 'AgentSwarm', time = EVENT_TIME } = {}) {
+  return JSON.stringify({
+    type: 'context.append_loop_event',
+    event: { type: 'tool.call', turnId: '6', step: 11, toolCallId: 'tool_x', name, args: {} },
+    time,
+  });
+}
+
+function toolResult({ time = EVENT_TIME } = {}) {
+  return JSON.stringify({
+    type: 'context.append_loop_event',
+    event: { type: 'tool.result', turnId: '6', step: 11, toolCallId: 'tool_x', result: {} },
+    time,
+  });
+}
+
 function turnEnded({ reason = 'completed', time = EVENT_TIME, turnId = 0 } = {}) {
   return JSON.stringify({ type: 'turn.ended', turnId, reason, time });
 }
@@ -1314,6 +1330,95 @@ test('getMetrics swarm mode keeps a generating main in the fleet', () => {
   assert.equal(m.tpsAgents, 3);
   assert.equal(m.tpsTotal, 911);
   assert.equal(m.tps, 911 / 3);
+  assert.equal(m.mainActive, true);
+  assert.equal(m.mainSpeed, true);
+});
+
+test('getMetrics swarm mode drops a main blocked inside a long tool call', () => {
+  // Regression: the real wire journals a blocking tool_use step as
+  // llm.request at the step start and step.end only when the tool returns
+  // (the reported AgentSwarm block lasted ~7 minutes), so
+  // `lastRequestAt > lastStepEndAt` — and the old request-based parked check
+  // never fired while the HUD showed "main+7". The step's tool.call row is
+  // the moment the LLM actually stopped generating: a request superseded by
+  // an unanswered tool.call is waiting, not generating.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0', 'agent-1'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    `{"type":"swarm_mode.enter","trigger":"prompt","time":${EVENT_TIME - 1000}}\n` +
+      [0, 1, 2].map((n) => stepEnd({
+        output: 111, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n, finishReason: 'tool_use',
+      })).join('\n') + '\n' +
+      llmRequest({ time: EVENT_TIME + 10 }) + '\n' +
+      toolCall({ name: 'AgentSwarm', time: EVENT_TIME + 20 }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-1'],
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  let m = getMetrics(id, opts);
+  assert.equal(m.swarmMode, true);
+  assert.equal(m.activeAgents, 2);
+  assert.equal(m.tpsAgents, 2);
+  assert.equal(m.tpsTotal, 800);
+  assert.equal(m.mainActive, false);
+  assert.equal(m.mainSpeed, false);
+
+  // The swarm returns: tool.result and the closing step.end land together,
+  // the next request starts streaming, and main re-joins the fleet with its
+  // pre-block samples still fresh.
+  fs.appendFileSync(
+    wires.main,
+    toolResult({ time: EVENT_TIME + 30 }) + '\n' +
+      stepEnd({
+        output: 500, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 30, finishReason: 'tool_use',
+      }) + '\n' +
+      llmRequest({ time: EVENT_TIME + 40 }) + '\n',
+  );
+  m = getMetrics(id, opts);
+  assert.equal(m.activeAgents, 3);
+  assert.equal(m.tpsAgents, 3);
+  assert.equal(m.mainActive, true);
+  assert.equal(m.mainSpeed, true);
+});
+
+test('getMetrics swarm mode keeps a main whose latest request postdates its tool call', () => {
+  // Between waves main streams a fresh step: its llm.request is newer than
+  // the previous step's (already answered) tool.call, so it is generating,
+  // not parked — only an unanswered tool.call newer than the request parks
+  // the main agent.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0', 'agent-1'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    `{"type":"swarm_mode.enter","trigger":"prompt","time":${EVENT_TIME - 1000}}\n` +
+      stepEnd({ output: 111, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n' +
+      toolCall({ name: 'Read', time: EVENT_TIME + 10 }) + '\n' +
+      toolResult({ time: EVENT_TIME + 20 }) + '\n' +
+      stepEnd({
+        output: 111, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 20, finishReason: 'tool_use',
+      }) + '\n' +
+      llmRequest({ time: EVENT_TIME + 30 }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-1'],
+    stepEnd({ output: 500, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  const m = getMetrics(id, opts);
+  assert.equal(m.swarmMode, true);
+  assert.equal(m.activeAgents, 3);
+  assert.equal(m.tpsAgents, 3);
   assert.equal(m.mainActive, true);
   assert.equal(m.mainSpeed, true);
 });

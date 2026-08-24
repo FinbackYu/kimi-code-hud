@@ -12,6 +12,7 @@ export function emptyAgent() {
     lastSampleAt: null,
     lastRequestAt: null,
     lastStepEndAt: null,
+    lastToolCallAt: null,
     lastTurnPromptAt: null,
     lastTurnEndAt: null,
     lastCompactionBeginAt: null,
@@ -34,6 +35,7 @@ export function normAgent(agent) {
   if (typeof agent.lastSampleAt !== 'number') agent.lastSampleAt = null;
   if (typeof agent.lastRequestAt !== 'number') agent.lastRequestAt = null;
   if (typeof agent.lastStepEndAt !== 'number') agent.lastStepEndAt = null;
+  if (typeof agent.lastToolCallAt !== 'number') agent.lastToolCallAt = null;
   if (typeof agent.lastTurnPromptAt !== 'number') agent.lastTurnPromptAt = null;
   if (typeof agent.lastTurnEndAt !== 'number') agent.lastTurnEndAt = null;
   if (typeof agent.lastCompactionBeginAt !== 'number') agent.lastCompactionBeginAt = null;

@@ -50,6 +50,19 @@ export function applyThroughputRow(state, row, agent = 'main') {
     return;
   }
   const event = row?.event;
+  // A tool_use step's step.end is journaled only when the tool returns, so
+  // while a long-blocking tool runs (AgentSwarm being the extreme case) the
+  // step's llm.request keeps looking "in flight". The tool.call row marks
+  // the moment the LLM actually stopped generating; the swarm-mode parked
+  // check in metrics-summary uses it to tell streaming from waiting.
+  if (
+    row?.type === 'context.append_loop_event' &&
+    event?.type === 'tool.call' &&
+    rowTime !== null &&
+    (bucket.lastToolCallAt === null || rowTime > bucket.lastToolCallAt)
+  ) {
+    bucket.lastToolCallAt = rowTime;
+  }
   if (row?.type !== 'context.append_loop_event' || event?.type !== 'step.end') return;
   if (
     rowTime !== null &&
