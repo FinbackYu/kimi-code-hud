@@ -6,6 +6,19 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A main agent parked on a blocking tool call is now excluded from the fleet
+  head count and TPS total even in a plain (non-swarm) single-`Agent` call,
+  not just in swarm mode: the parked-main gate was previously keyed on
+  `swarmMode`, so a foreground main blocked inside one `Agent` tool (a
+  `tool_use` step whose `step.end` is journaled only when the tool returns)
+  stayed counted while its `llm.request` looked in flight — showing
+  `main+1 @ (main + agent)` for the whole wait. The discriminator is now
+  `swarmMode` or an unfinished turn, and `waitingOnTool` is tightened to an
+  unanswered `tool.call` (one whose `step.end` never lands); hosts that
+  predate the `tool.call` journal keep the previous request-based reading.
+
 ## [0.7.8] - 2026-08-24
 
 ### Fixed

@@ -387,10 +387,11 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * Agents with a request in flight or a sample newer than ACTIVE_WINDOW_MS
  * count as active, except that a subagent whose turn has ended drops out
  * immediately (its wire's closing end_turn step.end settles it, so finished
- * swarm members never linger in the head count), and except that in swarm
- * mode a parked main (blocked inside the AgentSwarm tool, no request in
- * flight) drops out too, so its pre-swarm speed is never summed into the
- * fleet while it is not generating: with several active
+ * swarm members never linger in the head count), and except that a parked
+ * main drops out too — blocked inside the AgentSwarm tool, or a solo main
+ * blocked in a single Agent tool call while its turn is still open — so its
+ * pre-block speed is never summed into the fleet while it is not generating:
+ * with several active
  * (swarm/subagent runs) the result
  * carries the fleet total (`tpsTotal`), the per-agent average (`tps`) and
  * the head counts, and TTFT is the median across active agents so one
