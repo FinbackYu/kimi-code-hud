@@ -364,7 +364,9 @@ function speedSegment({ layout, metrics, color, now, C }) {
 /**
  * Fleet head-count label. The main agent is named explicitly whenever it is
  * part of the figure, so "main+4 agents" can't be misread as a pure subagent
- * count while a swarm is running. A lone member is singular ("1 agent").
+ * count while a swarm is running — or while a main blocked in a single Agent
+ * tool call (non-swarm turn still open) is still counted. A lone member is
+ * singular ("1 agent").
  * @param {number} count agents feeding the figure
  * @param {boolean} [includesMain]
  * @returns {string}

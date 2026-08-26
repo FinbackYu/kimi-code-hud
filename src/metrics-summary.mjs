@@ -47,25 +47,34 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
     // or an active turn.cancel) leaves the fleet immediately; the recency
     // window only keeps genuinely mid-turn agents counted. Main is exempt so
     // its just-finished speed survives until the stale TTL as before — except
-    // in swarm mode, where a parked main (blocked inside the AgentSwarm tool)
-    // must drop out too: otherwise its pre-swarm samples keep it counted —
-    // and summed into the fleet total — for the whole recency window while
-    // it is not generating at all. "Blocked" cannot be read off `generating`
-    // alone: a tool_use step's step.end is journaled only when the tool
-    // returns, so the step's llm.request looks in-flight for the entire
-    // block. The step's tool.call row is the point where the LLM actually
-    // stopped generating, so a request superseded by an unanswered tool.call
-    // is waiting, not streaming. Hosts that predate the tool.call journal
-    // keep the old request-based reading.
+    // when it is parked: a main blocked inside a tool call must drop out too,
+    // or its pre-block samples keep it counted — and summed into the fleet
+    // total — for the whole recency window while it is not generating at all.
+    // This covers the swarm's AgentSwarm tool and a solo main directly calling
+    // a single Agent tool (wire tool.call name "Agent"), where the block is
+    // equally real. "Blocked" cannot be read off `generating` alone: a tool_use
+    // step's step.end is journaled only when the tool returns, so the step's
+    // llm.request looks in-flight for the entire block. The step's tool.call
+    // row is the point where the LLM actually stopped generating, so a request
+    // superseded by an unanswered tool.call is waiting, not streaming. In
+    // swarm mode that is enough; with swarm off, a solo main keeps the old
+    // exemption except while its own turn is still open (a fresh turn.prompt
+    // with no later turn end), which is exactly the single-Agent block. Hosts
+    // that predate the tool.call journal keep the old request-based reading.
     const settled =
       name !== 'main' &&
       agent.lastTurnEndAt !== null &&
       (fresh.length === 0 || agent.lastTurnEndAt >= fresh[fresh.length - 1].t) &&
       (agent.lastRequestAt === null || agent.lastTurnEndAt >= agent.lastRequestAt);
     const waitingOnTool =
-      agent.lastToolCallAt !== null && agent.lastToolCallAt > agent.lastRequestAt;
+      agent.lastToolCallAt !== null &&
+      agent.lastToolCallAt > agent.lastRequestAt &&
+      (agent.lastStepEndAt === null || agent.lastToolCallAt > agent.lastStepEndAt);
+    const turnOpen = agent.lastTurnPromptAt !== null &&
+      (agent.lastTurnEndAt === null || agent.lastTurnPromptAt > agent.lastTurnEndAt);
     const parkedMain =
-      name === 'main' && state.swarmMode === true && (!generating || waitingOnTool);
+      name === 'main' && (!generating || waitingOnTool) &&
+      (state.swarmMode === true || turnOpen);
     if (parkedMain || (!generating && (!recent || settled))) continue;
     activeAgents += 1;
     soleActive = { bucket: agent, fresh };

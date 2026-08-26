@@ -1476,6 +1476,70 @@ test('getMetrics after swarm_mode.exit the just-finished main speed stays live a
   assert.equal(m.mainActive, true);
 });
 
+test('getMetrics drops a solo main blocked in a single Agent tool call (non-swarm)', () => {
+  // Bug report: with swarm mode off, main directly calling a single `Agent`
+  // tool blocks the same way — llm.request lands at the step start and
+  // step.end only when the tool returns — so `generating` reads true for the
+  // whole block. The old parked check required swarmMode===true, leaving main
+  // counted (and summed into the fleet) as a live agent. A main waiting on an
+  // unanswered tool.call while its own turn is still open must drop out.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    turnPrompt({ time: EVENT_TIME - 10 }) + '\n' +
+      [0, 1, 2].map((n) => stepEnd({
+        output: 111, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + n, finishReason: 'tool_use',
+      })).join('\n') + '\n' +
+      llmRequest({ time: EVENT_TIME + 10 }) + '\n' +
+      toolCall({ name: 'Agent', time: EVENT_TIME + 20 }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  const m = getMetrics(id, opts);
+  assert.equal(m.swarmMode, false);
+  assert.equal(m.activeAgents, 1);
+  assert.equal(m.tpsAgents, 1);
+  assert.equal(m.tpsTotal, 300);
+  assert.equal(m.mainActive, false);
+  assert.equal(m.mainSpeed, false);
+});
+
+test('getMetrics keeps a solo main whose tool.call has already been answered (non-swarm)', () => {
+  // A tool_use step that has fully returned (tool.result and the closing
+  // step.end landed) is not a block: the request postdates the tool.call, so
+  // the step is generating again. The "unanswered tool.call" gate must not
+  // misjudge an answered one — main stays in the fleet and in the total.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-0'] });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
+  fs.writeFileSync(
+    wires.main,
+    stepEnd({ output: 111, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n' +
+      toolCall({ name: 'Read', time: EVENT_TIME + 10 }) + '\n' +
+      toolResult({ time: EVENT_TIME + 20 }) + '\n' +
+      stepEnd({
+        output: 111, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 20, finishReason: 'tool_use',
+      }) + '\n' +
+      llmRequest({ time: EVENT_TIME + 30 }) + '\n',
+  );
+  fs.writeFileSync(
+    wires['agent-0'],
+    stepEnd({ output: 300, streamMs: 1000, ttftMs: 100, finishReason: 'tool_use' }) + '\n',
+  );
+  const m = getMetrics(id, opts);
+  assert.equal(m.swarmMode, false);
+  assert.equal(m.activeAgents, 2);
+  assert.equal(m.tpsAgents, 2);
+  assert.equal(m.tpsTotal, 411);
+  assert.equal(m.tps, 411 / 2);
+  assert.equal(m.mainActive, true);
+  assert.equal(m.mainSpeed, true);
+});
+
 test('getMetrics solo display shows a provisional reading below MIN_SAMPLES', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));

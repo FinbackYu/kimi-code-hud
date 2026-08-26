@@ -346,3 +346,31 @@ Resolution:
 - verified both PNGs carry the expected `Author=FinbackYu` metadata;
 - ran strict release metadata and the full HUD test suite before staging the
   two generated assets.
+
+## KI-14: A parked main in a single-Agent call was counted into the fleet
+
+Status: closed (fixed in the `[Unreleased]` milestone)
+
+Affected area: throughput / fleet summary
+
+A foreground main calling a single `Agent` tool (the wire `tool.call` with
+`name` "Agent", the host's non-swarm subagent-invoke path) kept its
+`llm.request` looking in flight for the whole wait, because a `tool_use`
+step's `step.end` is journaled only when the tool returns (observed at 911
+seconds). The parked-main gate required `state.swarmMode === true`, so a
+single-Agent direct call (`swarmMode === false`) never matched: main's median
+speed stayed in the fleet total and head count, showing `main+1 @ (main +
+agent)` for the entire wait. The swarm-mode variant of this defect was fixed
+in HUD `v0.7.8` (`8c78d2a`); the generalization to the non-swarm single-Agent
+path is in `[Unreleased]`.
+
+Resolution:
+
+- the gate now treats main as waiting when it is parked on an unanswered
+  `tool.call` — a `tool.call` that follows its last request and is never
+  closed by a later `step.end` — or when it is simply not generating with no
+  request in flight; the discriminator is now `swarmMode` or an unfinished
+  turn, so a non-swarm single-Agent call is covered while the just-finished
+  speed of a settled turn keeps surviving to the stale TTL as before;
+- hosts that predate the `tool.call` journal keep the previous request-based
+  reading.
