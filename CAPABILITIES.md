@@ -155,7 +155,8 @@ Baseline delta (0.38.0 → 0.39.0):
   `agentId`, and `enter` gains an optional `sessionId`, which the HUD ignores
   while keeping the boolean last-enter/exit-wins fold over both Tower records
   and the upstream `tower` / `tower.owner` state keys (`tower.owner` is not
-  itself a wire record); it renders the `[tower]` accent badge (covered). The
+  itself a wire record); it renders the `[tower]` accent badge (wire contract
+  verified against 0.39.0; live `/tower` smoke still pending). The
   host `AppState` exposes `towerMode`, but the status-line payload does not
   carry it, so it stays host-owned and is not drawn by the command. A one-time
   bounded projection upgrade re-scans existing main-wire history so a resumed
@@ -184,7 +185,7 @@ does not need to be redrawn by the command.
 | permission mode | `manual` has no badge; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows `[manual]`, and makes `[auto]` red | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
 | swarm mode | `swarm` in the mode slot | Rebuilds state from main-wire `swarm_mode.enter` / `swarm_mode.exit`; a future `payload.swarmMode` also works | covered since HUD 0.2.7 |
-| tower mode | separate orchestration state | Rebuilds state from main-wire `tower_mode.enter` / `tower_mode.exit`; optional enter `sessionId` is metadata only; a future `payload.towerMode` also works | covered |
+| tower mode | separate orchestration state | Rebuilds state from main-wire `tower_mode.enter` / `tower_mode.exit`; optional enter `sessionId` is metadata only; a future `payload.towerMode` also works | wire contract verified against 0.39.0; live `/tower` smoke pending |
 | goal | status, elapsed time, turns, optional turn budget | Rebuilds `goal.create` / `goal.update` / `goal.clear` / `forked`; renders a shortened badge — status lives on the goal word's color (active blue, blocked amber, paused muted), turns and optional turn budget kept, elapsed clock dropped | covered, presentation variant |
 | model and thinking | display name plus `thinking` or `thinking: <effort>` | Uses payload model plus wire/config snapshot; renders bare effort (`K3 high`), muted while only config-inferred (pre-first-turn lazy start) until the wire confirms it | covered, presentation variant |
 | background Shell | `[N task(s) running]` for running `process` / `bash-*` tasks | Reduces main-wire `task.started` / `task.terminated` and reconciles `tasks/<taskId>.json` sidecars; renders the same badge between model and cwd | covered — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) closed |
@@ -213,7 +214,7 @@ commands are documented in [README.md](README.md#安装) and
 | permission mode | use `/permission`, `/auto [on\|off]`, or `/yolo [on\|off]` | `[manual]`, `[auto]`, or `[yolo]` | available |
 | plan mode | use `/plan`, `/plan on`, or `/plan off` | `[plan]` while plan mode is active | available |
 | swarm mode | use `/swarm`, `/swarm on`, `/swarm off`, or `/swarm <task>` | `[swarm]`; fleet speed appears when multiple agent wires contribute | available |
-| tower mode | start the Tower workflow with `/tower` | `[tower]`; a parked main is excluded and live workers retain fleet-style speed | available |
+| tower mode | start the Tower workflow with `/tower` | `[tower]`; a parked main is excluded and live workers retain fleet-style speed | behind the upstream experimental flag; live smoke pending |
 | goal lifecycle | start with `/goal <objective>`; inspect or manage with `/goal status`, `/goal pause`, `/goal resume`, `/goal cancel`, or `/goal replace <objective>` | goal status as the badge word's color, turns, and optional turn budget | available |
 | model and thinking | use `/model`; set thinking effort with `/effort` or its `/thinking` alias | model display name and thinking-effort suffix | available |
 | TPS, TTFT, and generation time | run normal prompts; no separate command is required | live `gen`; TPS and TTFT after enough valid samples exist | available, automatic |
