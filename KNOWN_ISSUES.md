@@ -1,7 +1,7 @@
 # Known issues
 
 - Last verified: 2026-08-28
-- HUD behavior baseline: `v0.7.8` (`8c78d2a`)
+- HUD behavior baseline: `v0.8.0` (`2224128`)
 - Kimi Code baseline: `0.39.0` (`52e8d19dbd17efebc2e73f8e1a879bef7f23c2b1`)
 
 This file tracks open footer parity problems, information boundaries, and
@@ -174,9 +174,10 @@ Resolution:
 - regression coverage includes both a known second provider and an
   unconfigured subagent model.
 
-The 0.39.0 Tower candidate can also produce a session whose workers use a
+The 0.39.0 Tower mode can also produce a session whose workers use a
 different provider from main. The same all-agent rule applies: any nonzero
-cross-provider row hides the whole Session Cost estimate. A missing cost in
+cross-provider row hides the whole Session Cost estimate; this fail-closed
+behavior was exercised in the live 0.39.0 `/tower` smoke. A missing cost in
 that case is the intended fail-closed signal, not a partial-total regression.
 
 ## KI-7: The Git dirty probe used a bare executable name before trust
