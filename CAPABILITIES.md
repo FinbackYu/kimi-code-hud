@@ -1,8 +1,8 @@
 # HUD capabilities
 
-- Last verified: 2026-08-24
+- Last verified: 2026-08-28
 - HUD behavior baseline: `v0.7.8` (`8c78d2a`)
-- Kimi Code baseline: `0.38.0` (`0999454bdcb5ddd98f39bffee434dcf0a810f394`)
+- Kimi Code baseline: `0.39.0` (`52e8d19dbd17efebc2e73f8e1a879bef7f23c2b1`)
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
@@ -12,11 +12,11 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/apps/kimi-code/src/utils/git/git-status.ts)
-- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/packages/agent-core-v2/docs/wire-manifest.d.ts)
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/52e8d19dbd17efebc2e73f8e1a879bef7f23c2b1/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/52e8d19dbd17efebc2e73f8e1a879bef7f23c2b1/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/52e8d19dbd17efebc2e73f8e1a879bef7f23c2b1/apps/kimi-code/src/utils/git/git-status.ts)
+- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/52e8d19dbd17efebc2e73f8e1a879bef7f23c2b1/packages/agent-core-v2/docs/wire-manifest.d.ts)
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/52e8d19dbd17efebc2e73f8e1a879bef7f23c2b1/apps/kimi-code/src/tui/commands/registry.ts)
 
 Baseline delta (0.32.0 → 0.33.0):
 
@@ -93,8 +93,8 @@ Baseline delta (0.36.1 → 0.37.2):
 - The persisted wire manifest drops five transient record types (`cron.*`,
   `permission.rules.add`, `skill.activate`) and adds durable `prompt.accepted`,
   `runtime.set_binding`, and `tower_mode.enter` / `tower_mode.exit`. HUD
-  reducers gate on known types and ignore the additions; tower mode is a new
-  host-owned capability the HUD does not render.
+  reducers gate on known types; this 0.39.0 prep branch now folds the Tower
+  pair and renders `[tower]`, while every other addition remains ignored.
 - Durable wire records now always carry a `time` stamp; HUD reducers already
   read `time` defensively, so the change is additive.
 - agent-core-v2 rewired its journal internals from op-based Models to
@@ -142,6 +142,37 @@ Baseline delta (0.37.2 → 0.38.0):
   credentials directory layout are unchanged; upstream only moved internal
   modules between packages.
 
+Baseline delta (0.38.0 → 0.39.0):
+
+- The `status_line.command` payload/runner contract is unchanged: the 300ms
+  host ceiling, 1s rerun interval, and 64KB capture budget are the same, and
+  the payload still carries no `towerMode` field. The wire event set stays at
+  55 record types with no renames, so HUD reducers need no rework for the
+  events.
+- Tower became a first-class orchestration mode (`/tower`, PR #3099) behind
+  the experimental `KIMI_CODE_EXPERIMENTAL_TOWER` flag (off by default). The
+  durable `tower_mode.enter` / `tower_mode.exit` records carry a required
+  `agentId`, and `enter` gains an optional `sessionId`, which the HUD ignores
+  while keeping the boolean last-enter/exit-wins fold over both Tower records
+  and the upstream `tower` / `tower.owner` state keys (`tower.owner` is not
+  itself a wire record); it renders the `[tower]` accent badge (covered, verified
+  end to end against a live 0.39.0 `/tower` session). The
+  host `AppState` exposes `towerMode`, but the status-line payload does not
+  carry it, so it stays host-owned and is not drawn by the command. A one-time
+  bounded projection upgrade re-scans existing main-wire history so a resumed
+  Tower session is not stuck off because an older HUD cursor passed the enter
+  row; sessions with no Tower records keep the prior badge (`towerMode`
+  defaults false).
+- Concurrent `subagent_fork` (PR #3007, `KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK`,
+  off by default) forks subagents that keep the ordinary session layout
+  (`agents/<id>/wire.jsonl`) and report task `kind` as `agent`; session
+  discovery and usage enumeration are unaffected (covered).
+- The shared protocol `taskSchema` adds optional `parent_tool_call_id` and
+  `run_in_background`, and KAP REST adds `POST /tasks/{id}:detach`; both are
+  host-owned and not consumed by the HUD.
+- `--allow-remote-terminals` was removed; it is a host security surface with no
+  HUD dependency.
+
 ## Footer coverage
 
 Legend: **covered** means the state is reconstructed end to end; **variant** is
@@ -149,11 +180,12 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.38.0 | HUD v0.7.7 | Status |
+| Official line-1 slot or state | Upstream 0.39.0 | HUD v0.8.0 | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows `[manual]`, and makes `[auto]` red | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
 | swarm mode | `swarm` in the mode slot | Rebuilds state from main-wire `swarm_mode.enter` / `swarm_mode.exit`; a future `payload.swarmMode` also works | covered since HUD 0.2.7 |
+| tower mode | separate orchestration state | Rebuilds state from main-wire `tower_mode.enter` / `tower_mode.exit`; optional enter `sessionId` is metadata only; a future `payload.towerMode` also works | covered |
 | goal | status, elapsed time, turns, optional turn budget | Rebuilds `goal.create` / `goal.update` / `goal.clear` / `forked`; renders a shortened badge — status lives on the goal word's color (active blue, blocked amber, paused muted), turns and optional turn budget kept, elapsed clock dropped | covered, presentation variant |
 | model and thinking | display name plus `thinking` or `thinking: <effort>` | Uses payload model plus wire/config snapshot; renders bare effort (`K3 high`), muted while only config-inferred (pre-first-turn lazy start) until the wire confirms it | covered, presentation variant |
 | background Shell | `[N task(s) running]` for running `process` / `bash-*` tasks | Reduces main-wire `task.started` / `task.terminated` and reconciles `tasks/<taskId>.json` sidecars; renders the same badge between model and cwd | covered — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) closed |
@@ -172,7 +204,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 0.38.0. HUD installation, configuration, and lifecycle
+built into Kimi Code 0.39.0. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 
@@ -182,6 +214,7 @@ commands are documented in [README.md](README.md#安装) and
 | permission mode | use `/permission`, `/auto [on\|off]`, or `/yolo [on\|off]` | `[manual]`, `[auto]`, or `[yolo]` | available |
 | plan mode | use `/plan`, `/plan on`, or `/plan off` | `[plan]` while plan mode is active | available |
 | swarm mode | use `/swarm`, `/swarm on`, `/swarm off`, or `/swarm <task>` | `[swarm]`; fleet speed appears when multiple agent wires contribute | available |
+| tower mode | start the Tower workflow with `/tower` | `[tower]`; a parked main is excluded and live workers retain fleet-style speed | available behind the upstream experimental flag |
 | goal lifecycle | start with `/goal <objective>`; inspect or manage with `/goal status`, `/goal pause`, `/goal resume`, `/goal cancel`, or `/goal replace <objective>` | goal status as the badge word's color, turns, and optional turn budget | available |
 | model and thinking | use `/model`; set thinking effort with `/effort` or its `/thinking` alias | model display name and thinking-effort suffix | available |
 | TPS, TTFT, and generation time | run normal prompts; no separate command is required | live `gen`; TPS and TTFT after enough valid samples exist | available, automatic |

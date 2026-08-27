@@ -867,7 +867,7 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   assert.equal(m.thinkingLevel, 'high');
   // Second run must not rescan (versioned scan marker persisted).
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 9);
+  assert.equal(state.backfillScanV, 10);
 });
 
 test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
@@ -888,7 +888,7 @@ test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', ()
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 9);
+  assert.equal(state.backfillScanV, 10);
   assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
 });
 
@@ -919,7 +919,7 @@ test('getMetrics v9 backfill re-scans v8 states and picks up request-level effor
   assert.equal(m.thinkingLevel, 'max'); // last llm.request wins
   assert.equal(m.modelAlias, 'deepseek/deepseek-v4-flash');
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 9);
+  assert.equal(state.backfillScanV, 10);
 });
 
 test('getMetrics fresh sessions derive tracked rows without a separate backfill scan', () => {
@@ -939,7 +939,7 @@ test('getMetrics fresh sessions derive tracked rows without a separate backfill 
   assert.ok(m.goal);
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 9); // marker still set, no rescan later
+  assert.equal(state.backfillScanV, 10); // marker still set, no rescan later
 });
 
 test('getMetrics tracks swarm mode from the wire journal', () => {
@@ -983,7 +983,7 @@ test('getMetrics v6 backfill re-scans v5 states and anchors the turn timer', () 
   // end_turn means the timer is anchored right now.
   assert.equal(m.turnStartedAt, EVENT_TIME);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 9);
+  assert.equal(state.backfillScanV, 10);
 });
 
 test('getMetrics v7 backfill re-scans v6 states and recovers turn.ended', () => {
@@ -1013,7 +1013,7 @@ test('getMetrics v7 backfill re-scans v6 states and recovers turn.ended', () => 
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
   assert.equal(state.agents.main.lastTurnPromptAt, EVENT_TIME);
   assert.equal(state.agents.main.lastTurnEndAt, EVENT_TIME + 1000);
-  assert.equal(state.backfillScanV, 9);
+  assert.equal(state.backfillScanV, 10);
 });
 
 test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', () => {
@@ -1033,7 +1033,7 @@ test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', 
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 9);
+  assert.equal(state.backfillScanV, 10);
 });
 
 test('getMetrics aggregates an active fleet: total, average, count, TTFT median', () => {
@@ -1791,7 +1791,8 @@ test('getMetrics returns nulls for unknown sessions', () => {
   });
   assert.deepEqual(m, {
     tps: null, tpsStale: false, ttftMs: null, thinkingLevel: null, goal: null,
-    modelAlias: null, swarmMode: false, hostVersion: null, cache: null, modelUsage: null,
+    modelAlias: null, swarmMode: false, towerMode: false, hostVersion: null,
+    cache: null, modelUsage: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
     turnStartedAt: null, compactingSince: null, compactionMs: null,
     tasks: { bash: 0, agents: 0 },
@@ -1942,5 +1943,5 @@ test('getMetrics v8 backfill recovers an in-flight compaction', () => {
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME + 5000 });
   assert.equal(m.compactingSince, EVENT_TIME);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 9);
+  assert.equal(state.backfillScanV, 10);
 });

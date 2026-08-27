@@ -9,5 +9,5 @@ export const MAX_STORED_SAMPLES = 20;
 export const SAMPLE_STATE_V = 1;
 export const CACHE_SCAN_V = 2;
 export const CACHE_BACKFILL_MAX_BYTES = 1024 * 1024;
-export const BACKFILL_SCAN_V = 9;
+export const BACKFILL_SCAN_V = 10;
 export const METRICS_STATE_V = 8;

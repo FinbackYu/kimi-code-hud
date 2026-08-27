@@ -37,6 +37,7 @@ export function emptyState() {
     thinkingLevel: null,
     goal: null,
     swarmMode: false,
+    towerMode: false,
     hostVersion: null,
     cacheScanV: CACHE_SCAN_V,
     tasks: emptyTasksState(),
@@ -66,6 +67,7 @@ function normalizeBackfill(raw) {
     shadow.agents[name] = normAgent(shadow.agents[name]);
   }
   if (typeof shadow.swarmMode !== 'boolean') shadow.swarmMode = false;
+  if (typeof shadow.towerMode !== 'boolean') shadow.towerMode = false;
   shadow.backfill = null;
   const targetOffset = Number.isInteger(raw.targetOffset) && raw.targetOffset >= 0
     ? Math.max(raw.targetOffset, reader.offset)
@@ -105,6 +107,7 @@ function migrateFlatState(raw) {
   if (typeof raw.thinkingLevel === 'string') state.thinkingLevel = raw.thinkingLevel;
   if (raw.goal && typeof raw.goal === 'object') state.goal = raw.goal;
   if (typeof raw.swarmMode === 'boolean') state.swarmMode = raw.swarmMode;
+  if (typeof raw.towerMode === 'boolean') state.towerMode = raw.towerMode;
   if (typeof raw.backfillScanV === 'number') state.backfillScanV = raw.backfillScanV;
   else if (typeof raw.thinkingScanV === 'number') state.backfillScanV = raw.thinkingScanV;
   state.cacheScanV = typeof raw.cacheScanV === 'number' ? raw.cacheScanV : 0;
@@ -168,6 +171,7 @@ export function loadState(statePath) {
           state.agents[name] = normAgent(state.agents[name]);
         }
         if (typeof state.swarmMode !== 'boolean') state.swarmMode = false;
+        if (typeof state.towerMode !== 'boolean') state.towerMode = false;
         if (typeof state.sessionDir !== 'string') state.sessionDir = null;
         if (!Number.isInteger(state.agentCursor) || state.agentCursor < 0) {
           state.agentCursor = 0;
