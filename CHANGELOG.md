@@ -6,18 +6,49 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-28
+
+### Added
+
+- Tower mode support for Kimi Code 0.39.0 (experimental, behind the upstream
+  `KIMI_CODE_EXPERIMENTAL_TOWER` flag): the HUD rebuilds tower state from the
+  main-wire `tower_mode.enter` / `tower_mode.exit` records (last record wins;
+  the optional `sessionId` on enter is metadata only) and renders the
+  `[tower]` accent badge; a main parked while its tower workers run drops out
+  of the fleet head count and TPS total, while live workers keep the
+  fleet-style speed. A one-time bounded backfill re-scan lights the badge for
+  resumed tower sessions whose HUD cursor had already passed the enter
+  record, and hosts without tower records render exactly as before. Verified
+  end to end against a live 0.39.0 `/tower` session.
+
+### Changed
+
+- Advance the audited Kimi Code compatibility baseline from 0.38.0 to 0.39.0:
+  the status-line payload/runner contract (300ms ceiling, 1s rerun interval,
+  64KB capture budget) is unchanged and still carries no `towerMode` field,
+  with the wire event set staying at 55 record types; Tower became a
+  first-class `/tower` orchestration mode behind the experimental
+  `KIMI_CODE_EXPERIMENTAL_TOWER` flag and `tower_mode.enter` gains an optional
+  `sessionId`, which the HUD folds into the `[tower]` accent badge; concurrent
+  `subagent_fork` (also experimental, off by default) keeps the ordinary
+  session layout and `agent` task kind; the shared protocol `taskSchema` gains
+  optional `parent_tool_call_id` / `run_in_background` and KAP REST adds
+  `POST /tasks/{id}:detach` (both host-owned, not consumed by the HUD); and
+  `--allow-remote-terminals` was removed.
+
 ### Fixed
 
 - A main agent parked on a blocking tool call is now excluded from the fleet
-  head count and TPS total even in a plain (non-swarm) single-`Agent` call,
-  not just in swarm mode: the parked-main gate was previously keyed on
+  head count and TPS total even in a plain (non-orchestrated) single-`Agent`
+  call, not just in swarm mode: the parked-main gate was previously keyed on
   `swarmMode`, so a foreground main blocked inside one `Agent` tool (a
   `tool_use` step whose `step.end` is journaled only when the tool returns)
   stayed counted while its `llm.request` looked in flight — showing
-  `main+1 @ (main + agent)` for the whole wait. The discriminator is now
-  `swarmMode` or an unfinished turn, and `waitingOnTool` is tightened to an
-  unanswered `tool.call` (one whose `step.end` never lands); hosts that
-  predate the `tool.call` journal keep the previous request-based reading.
+  `main+1 @ (main + agent)` for the whole wait. The discriminator is now an
+  orchestration mode (swarm or tower) or an unfinished turn, and
+  `waitingOnTool` is tightened to an unanswered `tool.call` (one whose
+  `step.end` never lands); hosts that predate the `tool.call` journal keep
+  the previous request-based reading.
 
 ## [0.7.8] - 2026-08-24
 
@@ -45,18 +76,6 @@ The project follows [Semantic Versioning](https://semver.org/).
   paused renders the whole badge muted. With the badge clock gone, the
   speed segment shows the gen timer, TTFT and compaction states again
   while a goal is live.
-- Advance the audited Kimi Code compatibility baseline from 0.38.0 to 0.39.0:
-  the status-line payload/runner contract (300ms ceiling, 1s rerun interval,
-  64KB capture budget) is unchanged and still carries no `towerMode` field,
-  with the wire event set staying at 55 record types; Tower became a
-  first-class `/tower` orchestration mode behind the experimental
-  `KIMI_CODE_EXPERIMENTAL_TOWER` flag and `tower_mode.enter` gains an optional
-  `sessionId`, which the HUD folds into the `[tower]` accent badge; concurrent
-  `subagent_fork` (also experimental, off by default) keeps the ordinary
-  session layout and `agent` task kind; the shared protocol `taskSchema` gains
-  optional `parent_tool_call_id` / `run_in_background` and KAP REST adds
-  `POST /tasks/{id}:detach` (both host-owned, not consumed by the HUD); and
-  `--allow-remote-terminals` was removed.
 
 ## [0.7.6] - 2026-08-21
 
@@ -481,7 +500,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.7.8...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.0
 [0.7.8]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.8
 [0.7.7]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.7
 [0.7.6]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.6
