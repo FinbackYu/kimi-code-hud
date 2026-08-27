@@ -165,7 +165,7 @@ DeepSeek / OpenAI / Anthropic 价格表以 **2026-08-09** 核对到的 DeepSeek 
 
 ## 能力与已知问题
 
-- [能力清单](CAPABILITIES.md)：Kimi Code 0.38.0 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
+- [能力清单](CAPABILITIES.md)：Kimi Code 0.39.0 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
 - [已知问题](KNOWN_ISSUES.md)：Git、终端宽度、失败帧与全屏动态验证缺口及验收条件。
 
 ## 本地开发
