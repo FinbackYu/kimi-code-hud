@@ -1,78 +1,48 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { getMetrics, processWireChunk } from '../src/metrics.mjs';
 import { emptyState } from '../src/metrics-state.mjs';
 import { renderHud } from '../src/render.mjs';
+import {
+  EVENT_TIME,
+  FRESH_NOW,
+  baseCtx,
+  basePayload,
+  makeSession as makeWireSession,
+  stepEnd as wireStepEnd,
+} from './.helpers.mjs';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const WIRE_FIXTURE = path.join(FIXTURES, 'wire-events-tower.jsonl');
-const EVENT_TIME = 1785456000000;
-const FRESH_NOW = EVENT_TIME + 60_000;
 const AFTER_FIXTURE = 1785456011000;
 
 const TOWER_DARK = '\x1b[38;2;91;192;190m[tower]\x1b[0m';
 const TOWER_LIGHT = '\x1b[1m\x1b[38;2;20;184;166m[tower]\x1b[0m';
 
-function basePayload(overrides = {}) {
-  return {
-    model: 'K3',
-    cwd: '/workspace/kimi-code-hud',
-    gitBranch: 'main',
-    permissionMode: 'manual',
-    planMode: false,
-    sessionId: 'abc123',
-    ...overrides,
-  };
-}
-
-function baseCtx(overrides = {}) {
-  return {
-    payload: basePayload(),
-    metrics: { tps: 47, ttftMs: 1300 },
-    gitDirty: false,
-    color: false,
-    ...overrides,
-  };
-}
-
 function makeSession({ agents = ['main'] } = {}) {
-  const sessionsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-tower-'));
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-tower-state-'));
-  const id = 'abc123';
-  const sessionDir = path.join(sessionsRoot, 'workspace-redacted', `session_${id}`);
-  const wires = {};
-  for (const agent of agents) {
-    const agentDir = path.join(sessionDir, 'agents', agent);
-    fs.mkdirSync(agentDir, { recursive: true });
-    wires[agent] = path.join(agentDir, 'wire.jsonl');
-    fs.writeFileSync(wires[agent], '');
-  }
-  return { sessionsRoot, stateDir, id, wires };
+  return makeWireSession({
+    tmpPrefix: 'kimi-hud-tower-',
+    wd: 'workspace-redacted',
+    prefix: 'session_',
+    agents,
+    stateDir: true,
+    stateTmpPrefix: 'kimi-hud-tower-state-',
+  });
 }
 
+// Tower rows carry the redacted agentId stamp of the sanitized fixture world.
 function stepEnd({ output, time, finishReason = 'tool_use' }) {
-  return JSON.stringify({
-    type: 'context.append_loop_event',
-    agentId: 'redacted',
-    event: {
-      type: 'step.end',
-      turnId: 'redacted',
-      usage: {
-        inputOther: 100,
-        output,
-        inputCacheRead: 300,
-        inputCacheCreation: 100,
-      },
-      finishReason,
-      llmFirstTokenLatencyMs: 100,
-      llmStreamDurationMs: 1000,
-    },
+  return wireStepEnd({
+    output,
     time,
+    finishReason,
+    turnId: 'redacted',
+    agentId: 'redacted',
+    ttftMs: 100,
   });
 }
 

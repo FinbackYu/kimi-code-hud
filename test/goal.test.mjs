@@ -1,19 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import os from 'node:os';
+import path from 'node:path';
 import { applyGoalOp, formatGoalBadge } from '../src/goal.mjs';
 import { getMetrics } from '../src/metrics.mjs';
+import { makeSession as makeWireSession } from './.helpers.mjs';
 
 function makeSession() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-ses-'));
-  const id = 'goal123';
-  const dir = path.join(root, 'wd_1', `session_${id}`, 'agents', 'main');
-  fs.mkdirSync(dir, { recursive: true });
-  const wirePath = path.join(dir, 'wire.jsonl');
-  fs.writeFileSync(wirePath, '');
-  return { root, id, wirePath };
+  return makeWireSession({ id: 'goal123', prefix: 'session_' });
 }
 
 test('applyGoalOp lifecycle: create → update → clear', () => {

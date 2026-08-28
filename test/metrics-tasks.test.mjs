@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import os from 'node:os';
+import path from 'node:path';
 import {
   MAX_TASK_ENTRIES,
   applyTaskRow,
@@ -12,6 +12,7 @@ import {
   taskCountsFromState,
 } from '../src/metrics-tasks.mjs';
 import { getMetrics, processWireChunk } from '../src/metrics.mjs';
+import { makeSession as makeWireSession } from './.helpers.mjs';
 
 const EVENT_TIME = Date.parse('2026-08-02T00:00:00Z');
 
@@ -38,14 +39,7 @@ function taskInfo(overrides = {}) {
 }
 
 function makeSession() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-tasks-'));
-  const id = 'abc123';
-  const sessionDir = path.join(root, 'wd_1', `ses_${id}`);
-  const wireDir = path.join(sessionDir, 'agents', 'main');
-  fs.mkdirSync(wireDir, { recursive: true });
-  const wirePath = path.join(wireDir, 'wire.jsonl');
-  fs.writeFileSync(wirePath, '');
-  return { root, id, sessionDir, wirePath };
+  return makeWireSession({ tmpPrefix: 'kimi-hud-tasks-' });
 }
 
 function writeSidecar(sessionDir, info) {
