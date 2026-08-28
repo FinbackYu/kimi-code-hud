@@ -806,54 +806,52 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   assert.equal(state.backfillScanV, 10);
 });
 
-// 0.3.0-era bucketed state: every derived cursor field still null.
-const bucketedLegacyState = (size, backfillScanV) => ({
-  v: 6,
-  agents: {
-    main: {
-      offset: size, fileId: null, samples: [], lastTtftMs: null,
-      lastSampleAt: null, lastRequestAt: null, lastStepEndAt: null,
-      lastTurnPromptAt: null, lastTurnEndAt: null,
-    },
-  },
-  backfillScanV,
-});
-
 /**
  * The persisted-state backfill is one generic mechanism: when the current
  * BACKFILL_SCAN_V is newer than the state's marker, the wire journal is
- * re-scanned from byte zero and the missed projections are recovered. Each
- * historical schema bump (v1 flat states → v10) only varies the legacy state
- * shape and the field it had not captured yet, so the cases share one table.
+ * re-scanned from byte zero through the ordinary fold path and the missed
+ * projections are recovered. Legacy states only come in two shapes — flat
+ * top-level cursors (pre-v2) and per-agent buckets (v5+) — so one
+ * representative per shape locks the path; the other fields the re-scan can
+ * recover (turn timers, swarm mode) fold through the same code and are
+ * covered by the current-shape tests below.
  */
-const LEGACY_BACKFILL_CASES = [
-  {
-    title: 'v1 flat states pick up the latest thinkingEffort',
-    wire:
-      '{"type":"config.update","modelAlias":"kimi-code/k3-256k","thinkingEffort":"low","time":1}\n' +
+test('getMetrics backfill re-scans legacy flat states and picks up missed projections', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    '{"type":"config.update","modelAlias":"kimi-code/k3-256k","thinkingEffort":"low","time":1}\n' +
       stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }) + '\n' +
       '{"type":"config.update","thinkingEffort":"max","time":2}\n',
-    // v1 state: scan marked done, level never captured, offset past the events.
-    state: (size) => ({
-      offset: size,
-      samples: [100],
-      lastTtftMs: 500,
-      thinkingLevel: null,
-      thinkingScanDone: true,
-    }),
-    check(m, state) {
-      assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
-      assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
-    },
-  },
-  {
-    title: 'v8 bucketed states pick up request-level effort',
-    wire:
-      '{"type":"profile.bind","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"high","time":1}\n' +
+  );
+  // v1 state: scan marked done, level never captured, offset past the events.
+  const size = fs.statSync(wirePath).size;
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({ offset: size, samples: [100], lastTtftMs: 500, thinkingLevel: null, thinkingScanDone: true }),
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.equal(state.backfillScanV, 10);
+  assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
+});
+
+test('getMetrics backfill re-scans legacy bucketed states and picks up missed projections', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    '{"type":"profile.bind","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"high","time":1}\n' +
       '{"type":"llm.request","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"max","time":2}\n',
-    // v8 state: offset already past the rows, scan marked done at the previous
-    // version — the request-level effort was never captured.
-    state: (size) => ({
+  );
+  // v8 state: offset already past the rows, scan marked done at the previous
+  // version — the request-level effort was never captured.
+  const size = fs.statSync(wirePath).size;
+  fs.writeFileSync(
+    path.join(stateDir, `metrics-${id}.json`),
+    JSON.stringify({
       v: 8,
       agents: { main: { offset: size, samples: [], lastMedian: null } },
       modelAlias: null,
@@ -862,64 +860,13 @@ const LEGACY_BACKFILL_CASES = [
       swarmMode: false,
       backfillScanV: 8,
     }),
-    check(m) {
-      assert.equal(m.thinkingLevel, 'max'); // last llm.request wins
-      assert.equal(m.modelAlias, 'deepseek/deepseek-v4-flash');
-    },
-  },
-  {
-    title: 'v5 states anchor the open turn timer',
-    wire:
-      turnPrompt() + '\n' +
-      stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000, finishReason: 'tool_use' }) + '\n',
-    // 0.3.0-era state: offset already past the prompt, turn boundaries never
-    // captured, marker at v5.
-    state: (size) => bucketedLegacyState(size, 5),
-    check(m) {
-      // The one-time re-scan recovers the open turn: prompt with no later
-      // end_turn means the timer is anchored right now.
-      assert.equal(m.turnStartedAt, EVENT_TIME);
-    },
-  },
-  {
-    title: 'v6 states recover turn.ended',
-    wire: turnPrompt() + '\n' + turnEnded({ reason: 'failed', time: EVENT_TIME + 1000 }) + '\n',
-    state: (size) => bucketedLegacyState(size, 6),
-    check(m, state) {
-      assert.equal(m.turnStartedAt, null);
-      assert.equal(state.agents.main.lastTurnPromptAt, EVENT_TIME);
-      assert.equal(state.agents.main.lastTurnEndAt, EVENT_TIME + 1000);
-    },
-  },
-  {
-    title: 'v4 flat states pick up swarm_mode.enter',
-    wire:
-      '{"type":"swarm_mode.enter","trigger":"manual","time":1}\n' +
-      stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }) + '\n',
-    // v4 state: offset already past the event, swarm flag never captured.
-    state: (size) => ({ offset: size, samples: [100], lastTtftMs: 500, backfillScanV: 4 }),
-    check(m) {
-      assert.equal(m.swarmMode, true);
-    },
-  },
-];
-
-for (const { title, wire, state: legacyState, check } of LEGACY_BACKFILL_CASES) {
-  test(`getMetrics backfill re-scans legacy ${title}`, () => {
-    const { root, id, wirePath } = makeSession();
-    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
-    fs.writeFileSync(wirePath, wire);
-    const size = fs.statSync(wirePath).size;
-    fs.writeFileSync(
-      path.join(stateDir, `metrics-${id}.json`),
-      JSON.stringify(legacyState(size)),
-    );
-    const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
-    const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-    check(m, state);
-    assert.equal(state.backfillScanV, 10);
-  });
-}
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(m.thinkingLevel, 'max'); // last llm.request wins
+  assert.equal(m.modelAlias, 'deepseek/deepseek-v4-flash');
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+  assert.equal(state.backfillScanV, 10);
+});
 
 test('getMetrics fresh sessions derive tracked rows without a separate backfill scan', () => {
   const { root, id, wirePath } = makeSession();
