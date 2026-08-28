@@ -1,35 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderHud, bar, formatCountdown } from '../src/render.mjs';
+import { baseCtx as sharedCtx, basePayload as sharedPayload } from './.helpers.mjs';
 
 const NOW = Date.parse('2026-07-30T10:00:00Z');
 const CACHE_METRIC = { hitRate: 88064 / 95744, readTokens: 88064, inputTokens: 95744 };
 
 function basePayload(overrides = {}) {
-  return {
-    model: 'K3',
-    cwd: '/Users/test/kimi-code-hud',
-    gitBranch: 'main',
-    permissionMode: 'manual',
-    planMode: false,
-    sessionId: 'x',
-    ...overrides,
-  };
+  return sharedPayload({ cwd: '/Users/test/kimi-code-hud', sessionId: 'x', ...overrides });
 }
 
 function baseCtx(overrides = {}) {
-  return {
+  return sharedCtx({
     payload: basePayload(),
     quota: {
       weekly: { used: 25, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
       windows: [{ label: '5h', used: 31, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
     },
-    metrics: { tps: 47, ttftMs: 1300 },
     gitDirty: true,
-    color: false,
     now: NOW,
     ...overrides,
-  };
+  });
 }
 
 test('bar renders 10 cells graded by usage', () => {

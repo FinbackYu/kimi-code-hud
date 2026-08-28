@@ -13,107 +13,40 @@ import {
 } from '../src/metrics.mjs';
 import { summarizeMetrics } from '../src/metrics-summary.mjs';
 import { emptyAgent } from '../src/metrics-agent.mjs';
+import {
+  EVENT_TIME,
+  FRESH_NOW,
+  compactionBegin,
+  compactionCancel,
+  compactionComplete,
+  llmRequest,
+  makeMetricsState,
+  makeSession as makeWireSession,
+  stepEnd as wireStepEnd,
+  toolCall,
+  toolResult,
+  turnEnded,
+  turnPrompt,
+} from './.helpers.mjs';
 
-const EVENT_TIME = Date.parse('2026-07-31T00:00:00Z');
-const FRESH_NOW = EVENT_TIME + 60_000;
-
-function stepEnd({
-  output,
-  streamMs,
-  ttftMs,
-  time = EVENT_TIME,
-  finishReason = 'end_turn',
-  turnId = '6',
-  inputOther = 952,
-  inputCacheRead = 67840,
-  inputCacheCreation = 0,
-}) {
-  return JSON.stringify({
-    type: 'context.append_loop_event',
-    event: {
-      type: 'step.end',
-      turnId,
-      step: 11,
-      usage: { inputOther, output, inputCacheRead, inputCacheCreation },
-      finishReason,
-      llmFirstTokenLatencyMs: ttftMs,
-      llmStreamDurationMs: streamMs,
-    },
-    time,
+// Bind this suite's step.end fixture defaults; the wire row shape itself
+// lives in test/.helpers.mjs.
+function stepEnd(options) {
+  return wireStepEnd({
+    turnId: '6',
+    step: 11,
+    inputOther: 952,
+    inputCacheRead: 67840,
+    inputCacheCreation: 0,
+    ...options,
   });
-}
-
-function turnPrompt(text = 'hello', time = EVENT_TIME, originKind = 'user') {
-  return JSON.stringify({
-    type: 'turn.prompt',
-    input: [{ type: 'text', text }],
-    // null originKind models pre-origin records, which were all user prompts.
-    ...(originKind === null ? {} : { origin: { kind: originKind } }),
-    time,
-  });
-}
-
-function llmRequest({ kind = 'loop', time = EVENT_TIME } = {}) {
-  return JSON.stringify({ type: 'llm.request', kind, time });
-}
-
-function toolCall({ name = 'AgentSwarm', time = EVENT_TIME } = {}) {
-  return JSON.stringify({
-    type: 'context.append_loop_event',
-    event: { type: 'tool.call', turnId: '6', step: 11, toolCallId: 'tool_x', name, args: {} },
-    time,
-  });
-}
-
-function toolResult({ time = EVENT_TIME } = {}) {
-  return JSON.stringify({
-    type: 'context.append_loop_event',
-    event: { type: 'tool.result', turnId: '6', step: 11, toolCallId: 'tool_x', result: {} },
-    time,
-  });
-}
-
-function turnEnded({ reason = 'completed', time = EVENT_TIME, turnId = 0 } = {}) {
-  return JSON.stringify({ type: 'turn.ended', turnId, reason, time });
-}
-
-function compactionBegin({ source = 'manual', time = EVENT_TIME } = {}) {
-  return JSON.stringify({ type: 'full_compaction.begin', source, time });
-}
-
-function compactionComplete({ time = EVENT_TIME } = {}) {
-  return JSON.stringify({ type: 'full_compaction.complete', time });
-}
-
-function compactionCancel({ time = EVENT_TIME } = {}) {
-  return JSON.stringify({ type: 'full_compaction.cancel', time });
 }
 
 function makeSession({ withPrefix = true, agents = ['main'] } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-ses-'));
-  const id = 'abc123';
-  const sessionDir = path.join(root, 'wd_1', withPrefix ? `ses_${id}` : id);
-  const wires = {};
-  for (const agent of agents) {
-    const dir = path.join(sessionDir, 'agents', agent);
-    fs.mkdirSync(dir, { recursive: true });
-    const wirePath = path.join(dir, 'wire.jsonl');
-    fs.writeFileSync(wirePath, '');
-    wires[agent] = wirePath;
-  }
-  return { root, id, sessionDir, wires, wirePath: wires.main };
+  return makeWireSession({ prefix: withPrefix ? 'ses_' : '', agents });
 }
 
-function makeState() {
-  return {
-    v: 7,
-    agents: {},
-    modelAlias: null,
-    thinkingLevel: null,
-    goal: null,
-    swarmMode: false,
-  };
-}
+const makeState = () => makeMetricsState();
 
 test('median of odd and even samples', () => {
   assert.equal(median([10]), 10);
@@ -873,42 +806,54 @@ test('getMetrics backfills thinkingLevel once for pre-existing sessions', () => 
   assert.equal(state.backfillScanV, 10);
 });
 
-test('getMetrics v2 backfill re-scans v1 states and picks up thinkingEffort', () => {
-  const { root, id, wirePath } = makeSession();
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
-  fs.writeFileSync(
-    wirePath,
-    '{"type":"config.update","modelAlias":"kimi-code/k3-256k","thinkingEffort":"low","time":1}\n' +
-      stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }) + '\n' +
-      '{"type":"config.update","thinkingEffort":"max","time":2}\n',
-  );
-  // v1 state: scan marked done, level never captured, offset past the events.
-  const size = fs.statSync(wirePath).size;
-  fs.writeFileSync(
-    path.join(stateDir, `metrics-${id}.json`),
-    JSON.stringify({ offset: size, samples: [100], lastTtftMs: 500, thinkingLevel: null, thinkingScanDone: true }),
-  );
-  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
-  assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
-  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 10);
-  assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
+// 0.3.0-era bucketed state: every derived cursor field still null.
+const bucketedLegacyState = (size, backfillScanV) => ({
+  v: 6,
+  agents: {
+    main: {
+      offset: size, fileId: null, samples: [], lastTtftMs: null,
+      lastSampleAt: null, lastRequestAt: null, lastStepEndAt: null,
+      lastTurnPromptAt: null, lastTurnEndAt: null,
+    },
+  },
+  backfillScanV,
 });
 
-test('getMetrics v9 backfill re-scans v8 states and picks up request-level effort', () => {
-  const { root, id, wirePath } = makeSession();
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
-  fs.writeFileSync(
-    wirePath,
-    '{"type":"profile.bind","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"high","time":1}\n' +
+/**
+ * The persisted-state backfill is one generic mechanism: when the current
+ * BACKFILL_SCAN_V is newer than the state's marker, the wire journal is
+ * re-scanned from byte zero and the missed projections are recovered. Each
+ * historical schema bump (v1 flat states → v10) only varies the legacy state
+ * shape and the field it had not captured yet, so the cases share one table.
+ */
+const LEGACY_BACKFILL_CASES = [
+  {
+    title: 'v1 flat states pick up the latest thinkingEffort',
+    wire:
+      '{"type":"config.update","modelAlias":"kimi-code/k3-256k","thinkingEffort":"low","time":1}\n' +
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }) + '\n' +
+      '{"type":"config.update","thinkingEffort":"max","time":2}\n',
+    // v1 state: scan marked done, level never captured, offset past the events.
+    state: (size) => ({
+      offset: size,
+      samples: [100],
+      lastTtftMs: 500,
+      thinkingLevel: null,
+      thinkingScanDone: true,
+    }),
+    check(m, state) {
+      assert.equal(m.thinkingLevel, 'max'); // latest config.update wins
+      assert.equal(state.thinkingScanDone, undefined); // legacy marker dropped
+    },
+  },
+  {
+    title: 'v8 bucketed states pick up request-level effort',
+    wire:
+      '{"type":"profile.bind","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"high","time":1}\n' +
       '{"type":"llm.request","modelAlias":"deepseek/deepseek-v4-flash","thinkingEffort":"max","time":2}\n',
-  );
-  // v8 state: offset already past the rows, scan marked done at the previous
-  // version — the request-level effort was never captured.
-  const size = fs.statSync(wirePath).size;
-  fs.writeFileSync(
-    path.join(stateDir, `metrics-${id}.json`),
-    JSON.stringify({
+    // v8 state: offset already past the rows, scan marked done at the previous
+    // version — the request-level effort was never captured.
+    state: (size) => ({
       v: 8,
       agents: { main: { offset: size, samples: [], lastMedian: null } },
       modelAlias: null,
@@ -917,13 +862,64 @@ test('getMetrics v9 backfill re-scans v8 states and picks up request-level effor
       swarmMode: false,
       backfillScanV: 8,
     }),
-  );
-  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
-  assert.equal(m.thinkingLevel, 'max'); // last llm.request wins
-  assert.equal(m.modelAlias, 'deepseek/deepseek-v4-flash');
-  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 10);
-});
+    check(m) {
+      assert.equal(m.thinkingLevel, 'max'); // last llm.request wins
+      assert.equal(m.modelAlias, 'deepseek/deepseek-v4-flash');
+    },
+  },
+  {
+    title: 'v5 states anchor the open turn timer',
+    wire:
+      turnPrompt() + '\n' +
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000, finishReason: 'tool_use' }) + '\n',
+    // 0.3.0-era state: offset already past the prompt, turn boundaries never
+    // captured, marker at v5.
+    state: (size) => bucketedLegacyState(size, 5),
+    check(m) {
+      // The one-time re-scan recovers the open turn: prompt with no later
+      // end_turn means the timer is anchored right now.
+      assert.equal(m.turnStartedAt, EVENT_TIME);
+    },
+  },
+  {
+    title: 'v6 states recover turn.ended',
+    wire: turnPrompt() + '\n' + turnEnded({ reason: 'failed', time: EVENT_TIME + 1000 }) + '\n',
+    state: (size) => bucketedLegacyState(size, 6),
+    check(m, state) {
+      assert.equal(m.turnStartedAt, null);
+      assert.equal(state.agents.main.lastTurnPromptAt, EVENT_TIME);
+      assert.equal(state.agents.main.lastTurnEndAt, EVENT_TIME + 1000);
+    },
+  },
+  {
+    title: 'v4 flat states pick up swarm_mode.enter',
+    wire:
+      '{"type":"swarm_mode.enter","trigger":"manual","time":1}\n' +
+      stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }) + '\n',
+    // v4 state: offset already past the event, swarm flag never captured.
+    state: (size) => ({ offset: size, samples: [100], lastTtftMs: 500, backfillScanV: 4 }),
+    check(m) {
+      assert.equal(m.swarmMode, true);
+    },
+  },
+];
+
+for (const { title, wire, state: legacyState, check } of LEGACY_BACKFILL_CASES) {
+  test(`getMetrics backfill re-scans legacy ${title}`, () => {
+    const { root, id, wirePath } = makeSession();
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+    fs.writeFileSync(wirePath, wire);
+    const size = fs.statSync(wirePath).size;
+    fs.writeFileSync(
+      path.join(stateDir, `metrics-${id}.json`),
+      JSON.stringify(legacyState(size)),
+    );
+    const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+    const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
+    check(m, state);
+    assert.equal(state.backfillScanV, 10);
+  });
+}
 
 test('getMetrics fresh sessions derive tracked rows without a separate backfill scan', () => {
   const { root, id, wirePath } = makeSession();
@@ -954,89 +950,6 @@ test('getMetrics tracks swarm mode from the wire journal', () => {
   fs.appendFileSync(wirePath, '{"type":"swarm_mode.exit","time":2}\n');
   const off = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(off.swarmMode, false);
-});
-
-test('getMetrics v6 backfill re-scans v5 states and anchors the turn timer', () => {
-  const { root, id, wirePath } = makeSession();
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
-  fs.writeFileSync(
-    wirePath,
-    turnPrompt() + '\n' +
-      stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 1000, finishReason: 'tool_use' }) + '\n',
-  );
-  // 0.3.0-era state: offset already past the prompt, turn boundaries never
-  // captured, marker at v5.
-  const size = fs.statSync(wirePath).size;
-  fs.writeFileSync(
-    path.join(stateDir, `metrics-${id}.json`),
-    JSON.stringify({
-      v: 6,
-      agents: {
-        main: {
-          offset: size, fileId: null, samples: [], lastTtftMs: null,
-          lastSampleAt: null, lastRequestAt: null, lastStepEndAt: null,
-          lastTurnPromptAt: null, lastTurnEndAt: null,
-        },
-      },
-      backfillScanV: 5,
-    }),
-  );
-  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
-  // The one-time re-scan recovers the open turn: prompt with no later
-  // end_turn means the timer is anchored right now.
-  assert.equal(m.turnStartedAt, EVENT_TIME);
-  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 10);
-});
-
-test('getMetrics v7 backfill re-scans v6 states and recovers turn.ended', () => {
-  const { root, id, wirePath } = makeSession();
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
-  fs.writeFileSync(
-    wirePath,
-    turnPrompt() + '\n' + turnEnded({ reason: 'failed', time: EVENT_TIME + 1000 }) + '\n',
-  );
-  const size = fs.statSync(wirePath).size;
-  fs.writeFileSync(
-    path.join(stateDir, `metrics-${id}.json`),
-    JSON.stringify({
-      v: 6,
-      agents: {
-        main: {
-          offset: size, fileId: null, samples: [], lastTtftMs: null,
-          lastSampleAt: null, lastRequestAt: null, lastStepEndAt: null,
-          lastTurnPromptAt: null, lastTurnEndAt: null,
-        },
-      },
-      backfillScanV: 6,
-    }),
-  );
-  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
-  assert.equal(m.turnStartedAt, null);
-  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.agents.main.lastTurnPromptAt, EVENT_TIME);
-  assert.equal(state.agents.main.lastTurnEndAt, EVENT_TIME + 1000);
-  assert.equal(state.backfillScanV, 10);
-});
-
-test('getMetrics v5 backfill re-scans v4 states and picks up swarm_mode.enter', () => {
-  const { root, id, wirePath } = makeSession();
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
-  fs.writeFileSync(
-    wirePath,
-    '{"type":"swarm_mode.enter","trigger":"manual","time":1}\n' +
-      stepEnd({ output: 100, streamMs: 1000, ttftMs: 500 }) + '\n',
-  );
-  // v4 state: offset already past the event, swarm flag never captured.
-  const size = fs.statSync(wirePath).size;
-  fs.writeFileSync(
-    path.join(stateDir, `metrics-${id}.json`),
-    JSON.stringify({ offset: size, samples: [100], lastTtftMs: 500, backfillScanV: 4 }),
-  );
-  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
-  assert.equal(m.swarmMode, true);
-  const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.backfillScanV, 10);
 });
 
 test('getMetrics aggregates an active fleet: total, average, count, TTFT median', () => {
