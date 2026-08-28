@@ -380,3 +380,46 @@ Resolution:
   speed of a settled turn keeps surviving to the stale TTL as before;
 - hosts that predate the `tool.call` journal keep the previous request-based
   reading.
+
+## KI-15: A resumed background agent was invisible to the task badges
+
+Status: mitigated in HUD (heuristic); open upstream — MoonshotAI/kimi-code#3350
+
+Affected upstream slot: `tasks`
+
+When the host process restarts, in-flight background tasks are journaled as
+`task.terminated` with status `lost`. Resuming such an agent (the host's own
+`task.lost` notification recommends `Agent(resume=...)`) journals no fresh
+`task.started`, so from the lost mark until the final `task.terminated` the
+journal's latest state for the task id is `lost` — a terminal state the badge
+reducer must not count. The built-in footer reads the live in-memory task
+registry and keeps showing the agent, so the HUD badge silently disagreed for
+the whole resumed run (observed on 0.39.0 with tower reviewers: lost at the
+restart, completed 19 minutes later, badge at zero throughout).
+
+The task sidecar cannot close the gap: mid-run it carries no `endedAt`, so an
+external reader can only take `startedAt` as its update time — older than the
+lost Op, losing the fresher-wins merge.
+
+Mitigation:
+
+- `src/metrics-tasks.mjs` keeps a third `resumed` projection: a merged `lost`
+  record of kind `agent` whose own `agents/<agentId>/wire.jsonl` (resolved via
+  the sidecar's `agentId`) shows a write newer than the lost mark is counted
+  as running while that write stays within `LOST_AGENT_WIRE_FRESH_MS` (120s);
+- the agent wire is the liveness signal because it streams every LLM event
+  mid-run, unlike `tasks/<taskId>/output.log`, which for agents is typically
+  written only at completion;
+- agent ids are whitelist-checked before becoming path components, unreadable
+  or stale wires degrade silently, and a terminal record newer than the lost
+  mark always wins;
+- the heuristic admits one bounded false-positive shape: an agent lost and
+  never resumed still counts for up to one fresh window after its last write.
+
+Acceptance criteria for closing as a HUD problem:
+
+- upstream journals `task.started` (or an equivalent `task.resumed`) on the
+  resume path, making the heuristic a no-op;
+- until then the heuristic keeps the badge within one fresh window of the
+  built-in footer, with `test/metrics-tasks.test.mjs` covering the post-lost,
+  stale-wire, missing-wire, wrong-kind, and completed-after-lost paths.
