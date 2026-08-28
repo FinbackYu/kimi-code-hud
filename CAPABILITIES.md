@@ -1,7 +1,7 @@
 # HUD capabilities
 
 - Last verified: 2026-08-28
-- HUD behavior baseline: `v0.8.0` (`2224128`)
+- HUD behavior baseline: `v0.8.1` (`6b0c5d9`)
 - Kimi Code baseline: `0.39.0` (`52e8d19dbd17efebc2e73f8e1a879bef7f23c2b1`)
 
 This is the canonical inventory of footer coverage, readable data, and
