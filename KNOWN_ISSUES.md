@@ -423,3 +423,36 @@ Acceptance criteria for closing as a HUD problem:
 - until then the heuristic keeps the badge within one fresh window of the
   built-in footer, with `test/metrics-tasks.test.mjs` covering the post-lost,
   stale-wire, missing-wire, wrong-kind, and completed-after-lost paths.
+
+## KI-16: Tower notification turns kept resetting the gen timer
+
+Status: closed (fixed in the `[Unreleased]` milestone)
+
+Affected HUD segment: speed (`gen`)
+
+In tower mode the main agent's turn ends as soon as the workers are
+dispatched; every worker completion is then delivered as its own main turn
+whose `turn.prompt` carries `origin.kind: "task"`. The gen timer anchored at
+the latest `turn.prompt` regardless of origin, so each notification reset the
+clock and the parked gaps in between read as no turn at all — an 83-minute
+tower run displayed barely the last notification's processing span. Goal-mode
+continuations (`origin.kind: "system_trigger"`) could reset it too.
+
+Fix (HUD-side; the upstream notification records are by design):
+
+- `src/metrics-turn.mjs` folds a separate `lastUserPromptAt`: only
+  user-initiated origins (`user`, `skill_activation`, `plugin_command`, and
+  pre-origin legacy records) move it;
+- `src/metrics-summary.mjs` anchors the live timer at that user prompt while
+  the cascade is active — the main turn open or any subagent still generating
+  (parked-dispatch gaps included) — and, once everything has wound down,
+  freezes the total span into `genSettledMs`, which holds the slot dimmed
+  until the next user prompt (a between-turns compaction closed later is the
+  fresher terminal event and takes the slot instead);
+- state predating the anchor keeps the pre-fix reading until the next
+  user-initiated prompt lands.
+
+Regression coverage: `test/metrics.test.mjs` replays the tower turn anatomy
+(parked gap, notification turn, settle) and the origin filter;
+`test/render.test.mjs` covers the settled display and its precedence against
+the live timer and `compacted`.

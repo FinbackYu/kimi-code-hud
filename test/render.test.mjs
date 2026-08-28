@@ -696,6 +696,39 @@ test('gen ticker carries the head count for fleets without speed samples', () =>
   assert.ok(!solo.includes('agents'));
 });
 
+test('settled gen total holds the slot until the next live timer', () => {
+  // After the cascade settles, the dimmed total span since the user's prompt
+  // stays on display (the tower-run answer to "how long did that take").
+  const metrics = { tps: 47, ttftMs: 1300, genSettledMs: 83 * 60_000 };
+  const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
+  assert.ok(normal.includes('⚡ 47 t/s · gen 1h23m'));
+  assert.ok(!normal.includes('TTFT'));
+  const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
+  assert.ok(compact.includes('⚡ 47 gen 1h23m'));
+
+  // Without a speed reading the settled total stands alone, still dimmed.
+  const [solo] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: { tps: null, ttftMs: 1300, genSettledMs: 5000 },
+  }));
+  assert.ok(solo.includes('⚡ gen 5s'));
+  assert.ok(!solo.includes('TTFT'));
+
+  // The frozen value never competes with a live timer or a fresh compaction.
+  const [live] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: { tps: 47, ttftMs: 1300, turnStartedAt: NOW - 3000, genSettledMs: 83 * 60_000 },
+  }));
+  assert.ok(live.includes('gen 3s'));
+  assert.ok(!live.includes('1h23m'));
+  const [compacted] = renderHud(baseCtx({
+    layout: 'normal',
+    metrics: { tps: 47, ttftMs: 1300, compactionMs: 30_000, genSettledMs: 83 * 60_000 },
+  }));
+  assert.ok(compacted.includes('compacted 30s'));
+  assert.ok(!compacted.includes('1h23m'));
+});
+
 test('fleet gen ticker appends to the fleet speed format', () => {
   const metrics = {
     tps: 25, tpsTotal: 305, tpsAgents: 12, activeAgents: 12, ttftMs: 1300, turnStartedAt: NOW - 3000,

@@ -217,7 +217,7 @@ commands are documented in [README.md](README.md#安装) and
 | tower mode | start the Tower workflow with `/tower` | `[tower]`; a parked main is excluded and live workers retain fleet-style speed | available behind the upstream experimental flag |
 | goal lifecycle | start with `/goal <objective>`; inspect or manage with `/goal status`, `/goal pause`, `/goal resume`, `/goal cancel`, or `/goal replace <objective>` | goal status as the badge word's color, turns, and optional turn budget | available |
 | model and thinking | use `/model`; set thinking effort with `/effort` or its `/thinking` alias | model display name and thinking-effort suffix | available |
-| TPS, TTFT, and generation time | run normal prompts; no separate command is required | live `gen`; TPS and TTFT after enough valid samples exist | available, automatic |
+| TPS, TTFT, and generation time | run normal prompts; no separate command is required | live `gen` anchored at the latest user prompt (tower notification and goal-continuation turns never reset it), dimmed settled total afterwards; TPS and TTFT after enough valid samples exist | available, automatic |
 | compaction | use `/compact [instruction]`, or allow automatic compaction | live and most recent compaction duration | available, automatic |
 | prompt-cache ratio | continue using the session normally; the first complete model-step usage record initializes it | rounded session-cumulative `Cache N%` | available, automatic |
 | background tasks | start a background shell task or a detached subagent; no HUD action is required | `[N task(s) running]` and `[N agent(s) running]` between model and cwd | available, automatic |

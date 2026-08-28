@@ -11,6 +11,8 @@ import {
   findWirePath,
   findSessionDir,
 } from '../src/metrics.mjs';
+import { summarizeMetrics } from '../src/metrics-summary.mjs';
+import { emptyAgent } from '../src/metrics-agent.mjs';
 
 const EVENT_TIME = Date.parse('2026-07-31T00:00:00Z');
 const FRESH_NOW = EVENT_TIME + 60_000;
@@ -41,11 +43,12 @@ function stepEnd({
   });
 }
 
-function turnPrompt(text = 'hello', time = EVENT_TIME) {
+function turnPrompt(text = 'hello', time = EVENT_TIME, originKind = 'user') {
   return JSON.stringify({
     type: 'turn.prompt',
     input: [{ type: 'text', text }],
-    origin: { kind: 'user' },
+    // null originKind models pre-origin records, which were all user prompts.
+    ...(originKind === null ? {} : { origin: { kind: originKind } }),
     time,
   });
 }
@@ -1619,6 +1622,151 @@ test('getMetrics turn.ended stops failed and blocked turn timers', () => {
   assert.equal(m.activeAgents, 0);
 });
 
+test('getMetrics never lets task/system prompts re-anchor the user clock (tower replay)', () => {
+  // Replays the 2026-08-28 tower run's turn anatomy: the user's prompt opens
+  // a turn, main ends it once the workers are dispatched (parked gap), then
+  // every worker completion injects an origin=task turn.prompt that opens and
+  // closes its own main turn. The gen timer must stay anchored at the user's
+  // prompt throughout and settle into the full cascade span at the end.
+  const { root, id, wires } = makeSession({ agents: ['main', 'agent-1'] });
+  const mainWire = wires.main;
+  const workerWire = wires['agent-1'];
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  const opts = (now) => ({ sessionsRoot: root, stateDir, now });
+
+  fs.writeFileSync(
+    mainWire,
+    turnPrompt('起 tower 执行', EVENT_TIME) + '\n' +
+      llmRequest({ time: EVENT_TIME + 100 }) + '\n' +
+      turnEnded({ time: EVENT_TIME + 10_000, turnId: 0 }) + '\n',
+  );
+  // A worker is mid-generation while main is parked between turns.
+  fs.writeFileSync(workerWire, llmRequest({ time: EVENT_TIME + 20_000 }) + '\n');
+
+  // Parked gap: the worker keeps the cascade live; the anchor stays at the
+  // user's prompt instead of dropping to null (old behavior) until the next
+  // notification.
+  let m = getMetrics(id, opts(EVENT_TIME + 30_000));
+  assert.equal(m.turnStartedAt, EVENT_TIME);
+  assert.equal(m.genSettledMs, null);
+
+  // The first worker completion injects an origin=task prompt and main wakes
+  // to process it: the timer must NOT re-anchor at the notification.
+  fs.appendFileSync(
+    mainWire,
+    turnPrompt('<notification id="task:agent-1:completed">', EVENT_TIME + 40_000, 'task') + '\n' +
+      llmRequest({ time: EVENT_TIME + 40_100 }) + '\n',
+  );
+  m = getMetrics(id, opts(EVENT_TIME + 50_000));
+  assert.equal(m.turnStartedAt, EVENT_TIME);
+  assert.equal(m.genSettledMs, null);
+
+  // The worker settles (closing end_turn) and the notification turn ends:
+  // the cascade is over, the timer freezes at the full span since the user's
+  // prompt instead of the span since the last notification.
+  fs.appendFileSync(
+    workerWire,
+    stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 50_000, finishReason: 'end_turn' }) + '\n',
+  );
+  fs.appendFileSync(mainWire, turnEnded({ time: EVENT_TIME + 55_000, turnId: 2 }) + '\n');
+  m = getMetrics(id, opts(EVENT_TIME + 55_500));
+  assert.equal(m.activeAgents, 0);
+  assert.equal(m.turnStartedAt, null);
+  assert.equal(m.genSettledMs, 55_000);
+});
+
+test('getMetrics freezes the settled gen total until the next user prompt', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    turnPrompt('quick question', EVENT_TIME) + '\n' +
+      llmRequest({ time: EVENT_TIME + 100 }) + '\n' +
+      turnEnded({ time: EVENT_TIME + 5000 }) + '\n',
+  );
+  let m = getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME + 30_000 });
+  assert.equal(m.turnStartedAt, null);
+  assert.equal(m.genSettledMs, 5000);
+
+  // A task-origin notification alone neither revives nor re-anchors the
+  // clock: its open turn anchors at the last USER prompt, and once it ends
+  // the settled span simply grows to cover it.
+  fs.appendFileSync(
+    wirePath,
+    turnPrompt('<notification id="task:t:completed">', EVENT_TIME + 40_000, 'task') + '\n' +
+      turnEnded({ time: EVENT_TIME + 45_000, turnId: 1 }) + '\n',
+  );
+  m = getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME + 46_000 });
+  assert.equal(m.genSettledMs, 45_000);
+
+  // The next user prompt re-anchors and hands the slot back to the live timer.
+  fs.appendFileSync(wirePath, turnPrompt('next', EVENT_TIME + 50_000) + '\n');
+  m = getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME + 60_000 });
+  assert.equal(m.turnStartedAt, EVENT_TIME + 50_000);
+  assert.equal(m.genSettledMs, null);
+});
+
+test('a compaction closed after the final turn end takes the slot over genSettledMs', () => {
+  const { root, id, wirePath } = makeSession();
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
+  fs.writeFileSync(
+    wirePath,
+    turnPrompt('work', EVENT_TIME) + '\n' +
+      turnEnded({ time: EVENT_TIME + 10_000 }) + '\n' +
+      compactionBegin({ time: EVENT_TIME + 20_000 }) + '\n' +
+      compactionComplete({ time: EVENT_TIME + 50_000 }) + '\n',
+  );
+  const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
+  assert.equal(m.compactionMs, 30_000);
+  assert.equal(m.genSettledMs, null);
+});
+
+test('applyTurnRow moves the user clock only for user-initiated prompt origins', () => {
+  const state = makeState();
+  processWireChunk(state, turnPrompt('typed', EVENT_TIME) + '\n');
+  assert.equal(state.agents.main.lastUserPromptAt, EVENT_TIME);
+
+  // Task notifications and goal continuations open main turns (the raw
+  // prompt marker follows them) but never move the user clock.
+  processWireChunk(state, turnPrompt('<notification>', EVENT_TIME + 1000, 'task') + '\n');
+  assert.equal(state.agents.main.lastTurnPromptAt, EVENT_TIME + 1000);
+  assert.equal(state.agents.main.lastUserPromptAt, EVENT_TIME);
+  processWireChunk(state, turnPrompt('continue the goal', EVENT_TIME + 2000, 'system_trigger') + '\n');
+  assert.equal(state.agents.main.lastTurnPromptAt, EVENT_TIME + 2000);
+  assert.equal(state.agents.main.lastUserPromptAt, EVENT_TIME);
+
+  // Skill activations and plugin commands are user-initiated.
+  processWireChunk(state, turnPrompt('skill body', EVENT_TIME + 3000, 'skill_activation') + '\n');
+  assert.equal(state.agents.main.lastUserPromptAt, EVENT_TIME + 3000);
+  processWireChunk(state, turnPrompt('plugin cmd', EVENT_TIME + 4000, 'plugin_command') + '\n');
+  assert.equal(state.agents.main.lastUserPromptAt, EVENT_TIME + 4000);
+
+  // Pre-origin records (no origin field) were all user prompts.
+  processWireChunk(state, turnPrompt('legacy', EVENT_TIME + 5000, null) + '\n');
+  assert.equal(state.agents.main.lastUserPromptAt, EVENT_TIME + 5000);
+});
+
+test('summarizeMetrics keeps the legacy reading when no user anchor exists yet', () => {
+  // State persisted by an older build has no lastUserPromptAt: the timer
+  // keeps the pre-anchor behavior (latest prompt of any origin while open,
+  // no settled total) until the next user-initiated prompt lands.
+  const state = makeState();
+  state.agents.main = {
+    ...emptyAgent(),
+    lastTurnPromptAt: EVENT_TIME,
+    lastTurnEndAt: null,
+    lastUserPromptAt: null,
+  };
+  let m = summarizeMetrics(state, { now: FRESH_NOW }).metrics;
+  assert.equal(m.turnStartedAt, EVENT_TIME);
+  assert.equal(m.genSettledMs, null);
+
+  state.agents.main.lastTurnEndAt = EVENT_TIME + 10_000;
+  m = summarizeMetrics(state, { now: FRESH_NOW }).metrics;
+  assert.equal(m.turnStartedAt, null);
+  assert.equal(m.genSettledMs, null);
+});
+
 test('getMetrics persists and incrementally updates session-cumulative cache usage', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
@@ -1794,7 +1942,7 @@ test('getMetrics returns nulls for unknown sessions', () => {
     modelAlias: null, swarmMode: false, towerMode: false, hostVersion: null,
     cache: null, modelUsage: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
-    turnStartedAt: null, compactingSince: null, compactionMs: null,
+    turnStartedAt: null, compactingSince: null, compactionMs: null, genSettledMs: null,
     tasks: { bash: 0, agents: 0 },
   });
 });

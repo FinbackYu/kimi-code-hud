@@ -410,8 +410,14 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * pass as a pure subagent figure. A single active
  * agent keeps the hardened MIN_SAMPLES gate; an idle session falls back to
  * the last full-window median (flagged stale). `turnStartedAt` anchors the
- * live timer at the user's latest prompt (turn.prompt) until the turn ends
- * (turn.ended, or the legacy end_turn / active turn.cancel fallbacks).
+ * live timer at the user's latest prompt — only user-initiated prompt records
+ * (origin user/skill_activation/plugin_command, or pre-origin legacy rows)
+ * move that anchor, so a tower run's task-notification turns never reset the
+ * clock — and stays live for the whole cascade: the main turn open or any
+ * subagent still generating (turn end is read from turn.ended, or the legacy
+ * end_turn / active turn.cancel fallbacks). Once the cascade settles, the
+ * frozen total surfaces as `genSettledMs` and holds the slot until the next
+ * user prompt, unless a between-turns compaction closed later.
  * `compactingSince`/`compactionMs` mirror the full_compaction journal: a
  * begin without a close anchors the live compaction timer (expires after
  * SAMPLE_WINDOW_MS when the close record was lost), and the finished
@@ -426,7 +432,7 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * @param {number} [opts.deadline] absolute `performance.now()` deadline
  * @param {number} [opts.readBudgetBytes] total wire bytes allowed this frame
  * @param {string|null} [opts.hostVersion] Kimi Code version from the status-line payload
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, towerMode: boolean, cache: object|null, modelUsage: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, compactingSince: number|null, compactionMs: number|null, tasks: {bash: number, agents: number}}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, towerMode: boolean, cache: object|null, modelUsage: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, genSettledMs: number|null, compactingSince: number|null, compactionMs: number|null, tasks: {bash: number, agents: number}}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
@@ -441,7 +447,7 @@ export function getMetrics(sessionId, {
     modelAlias: null, swarmMode: false, towerMode: false, hostVersion: null,
     cache: null, modelUsage: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
-    turnStartedAt: null, compactingSince: null, compactionMs: null,
+    turnStartedAt: null, compactingSince: null, compactionMs: null, genSettledMs: null,
     tasks: { bash: 0, agents: 0 },
   };
   try {

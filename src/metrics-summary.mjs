@@ -15,6 +15,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
   const activeSpeeds = [];
   const activeTtfts = [];
   let activeAgents = 0;
+  let activeSubagents = 0;
   let mainActive = false;
   let mainSpeed = false;
   let soleActive = null;
@@ -79,6 +80,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       (orchestrated || turnOpen);
     if (parkedMain || (!generating && (!recent || settled))) continue;
     activeAgents += 1;
+    if (name !== 'main') activeSubagents += 1;
     soleActive = { bucket: agent, fresh };
     if (name === 'main') mainActive = true;
     if (speed !== null) {
@@ -143,11 +145,37 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
   }
 
   const main = state.agents.main;
-  const turnStartedAt = main
-    && main.lastTurnPromptAt !== null
-    && (main.lastTurnEndAt === null || main.lastTurnPromptAt > main.lastTurnEndAt)
-    ? main.lastTurnPromptAt
-    : null;
+  const mainTurnOpen =
+    main &&
+    main.lastTurnPromptAt !== null &&
+    (main.lastTurnEndAt === null || main.lastTurnPromptAt > main.lastTurnEndAt);
+  // The gen timer belongs to the user's latest prompt (`lastUserPromptAt` —
+  // task/system-triggered prompt records open their own main turns but never
+  // move this anchor, so a tower run's notification cascade no longer resets
+  // the timer to minutes). It stays live for the whole cascade: while the
+  // main turn is open OR any subagent is still generating (the parked gaps
+  // between a tower dispatch and its completion notifications). When the
+  // cascade has fully wound down, the total span freezes into `genSettledMs`
+  // and holds the slot until the next user prompt — unless a between-turns
+  // compaction closed even later, which is the fresher terminal event and
+  // takes the slot instead. State predating the user anchor keeps the old
+  // reading (latest prompt of any origin while the turn is open).
+  let turnStartedAt = null;
+  let genSettledMs = null;
+  if (main && main.lastUserPromptAt !== null) {
+    if (mainTurnOpen || activeSubagents > 0) {
+      turnStartedAt = main.lastUserPromptAt;
+    } else if (
+      main.lastTurnEndAt !== null &&
+      main.lastTurnEndAt > main.lastUserPromptAt &&
+      (main.lastCompactionEndAt === null ||
+        main.lastTurnEndAt >= main.lastCompactionEndAt)
+    ) {
+      genSettledMs = main.lastTurnEndAt - main.lastUserPromptAt;
+    }
+  } else if (mainTurnOpen) {
+    turnStartedAt = main.lastTurnPromptAt;
+  }
   let compactingSince = null;
   let compactionMs = null;
   if (main) {
@@ -190,6 +218,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       mainActive,
       mainSpeed,
       turnStartedAt,
+      genSettledMs,
       compactingSince,
       compactionMs,
       // Durable background-task running counts (bash processes vs background
