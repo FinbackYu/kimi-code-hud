@@ -325,6 +325,13 @@ function speedSegment({ layout, metrics, color, now, C }) {
     !generatedFor && !compacting && metrics && typeof metrics.compactionMs === 'number'
       ? formatElapsed(metrics.compactionMs)
       : null;
+  // Frozen total of the last settled cascade (user prompt → everything wound
+  // down), dimmed, until the next live timer or a fresher compaction result
+  // takes the slot.
+  const genSettled =
+    !generatedFor && !compacting && metrics && typeof metrics.genSettledMs === 'number'
+      ? formatElapsed(metrics.genSettledMs)
+      : null;
   if (metrics && typeof metrics.tps === 'number') {
     const average = Math.round(metrics.tps);
     const paint = (text) => (
@@ -339,7 +346,11 @@ function speedSegment({ layout, metrics, color, now, C }) {
         : `⚡ ${average}`;
       const live = generatedFor
         ? `gen ${generatedFor}`
-        : compacting ? `compacting ${compacting}` : null;
+        : compacting
+          ? `compacting ${compacting}`
+          : genSettled
+            ? colorize(color, C.muted, `gen ${genSettled}`)
+            : null;
       return live ? `${paint(head)} ${live}` : paint(head);
     }
     const base = multi
@@ -349,6 +360,9 @@ function speedSegment({ layout, metrics, color, now, C }) {
     if (compacting) return `${paint(base)} · compacting ${compacting}`;
     if (compacted) {
       return `${paint(base)}${colorize(color, C.muted, ` · compacted ${compacted}`)}`;
+    }
+    if (genSettled) {
+      return `${paint(base)}${colorize(color, C.muted, ` · gen ${genSettled}`)}`;
     }
     const ttft = formatTtft(metrics.ttftMs);
     return paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`);
@@ -362,6 +376,9 @@ function speedSegment({ layout, metrics, color, now, C }) {
   if (metrics && compacting) return `compacting ${compacting}`;
   if (metrics && compacted && layout !== 'compact') {
     return colorize(color, C.muted, `compacted ${compacted}`);
+  }
+  if (metrics && genSettled) {
+    return colorize(color, C.muted, `⚡ gen ${genSettled}`);
   }
   const ttft = metrics ? formatTtft(metrics.ttftMs) : null;
   return ttft ? `TTFT ${ttft}` : null;

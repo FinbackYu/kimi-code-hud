@@ -1,5 +1,13 @@
 import { normAgent } from './metrics-agent.mjs';
 
+// Prompt origins that count as user-initiated and therefore move the user
+// clock anchoring the gen timer. Task-completion notifications (`task`) and
+// goal-mode continuations (`system_trigger`) open their own main turns but
+// must never re-anchor it — a tower run injects one notification turn per
+// finished worker, and treating those as user prompts kept resetting the
+// timer to minutes instead of the full cascade span.
+const USER_PROMPT_ORIGINS = new Set(['user', 'skill_activation', 'plugin_command']);
+
 /**
  * Fold the user-turn clock without touching TPS samples. The prompt anchor is
  * main-only (the footer turn timer belongs to the user), but the turn-end
@@ -16,6 +24,15 @@ export function applyTurnRow(state, row, agent = 'main') {
   if (agent === 'main' && row?.type === 'turn.prompt') {
     if (bucket.lastTurnPromptAt === null || rowTime > bucket.lastTurnPromptAt) {
       bucket.lastTurnPromptAt = rowTime;
+    }
+    // Records predating the origin field were all user prompts.
+    const originKind =
+      row?.origin && typeof row.origin === 'object' ? row.origin.kind : undefined;
+    if (
+      (originKind === undefined || USER_PROMPT_ORIGINS.has(originKind)) &&
+      (bucket.lastUserPromptAt === null || rowTime > bucket.lastUserPromptAt)
+    ) {
+      bucket.lastUserPromptAt = rowTime;
     }
     return;
   }
