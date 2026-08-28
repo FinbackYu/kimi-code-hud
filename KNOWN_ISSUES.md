@@ -1,7 +1,7 @@
 # Known issues
 
 - Last verified: 2026-08-28
-- HUD behavior baseline: `v0.8.0` (`2224128`)
+- HUD behavior baseline: `v0.8.1` (`6b0c5d9`)
 - Kimi Code baseline: `0.39.0` (`52e8d19dbd17efebc2e73f8e1a879bef7f23c2b1`)
 
 This file tracks open footer parity problems, information boundaries, and
@@ -355,7 +355,7 @@ Resolution:
 
 ## KI-14: A parked main in a single-Agent call was counted into the fleet
 
-Status: closed (fixed in the `[Unreleased]` milestone)
+Status: closed (fixed in HUD `v0.8.0`)
 
 Affected area: throughput / fleet summary
 
@@ -368,7 +368,7 @@ single-Agent direct call (`swarmMode === false`) never matched: main's median
 speed stayed in the fleet total and head count, showing `main+1 @ (main +
 agent)` for the entire wait. The swarm-mode variant of this defect was fixed
 in HUD `v0.7.8` (`8c78d2a`); the generalization to the non-swarm single-Agent
-path is in `[Unreleased]`.
+path is in `v0.8.0`.
 
 Resolution:
 
@@ -426,7 +426,7 @@ Acceptance criteria for closing as a HUD problem:
 
 ## KI-16: Tower notification turns kept resetting the gen timer
 
-Status: closed (fixed in the `[Unreleased]` milestone)
+Status: closed (fixed in HUD `v0.8.1`)
 
 Affected HUD segment: speed (`gen`)
 

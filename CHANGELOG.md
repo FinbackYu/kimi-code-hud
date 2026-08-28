@@ -6,6 +6,31 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-28
+
+### Fixed
+
+- The gen timer no longer resets mid-run in tower mode: worker completions
+  are delivered as their own main turns whose `turn.prompt` records carry
+  `origin.kind: "task"`, and the timer previously re-anchored at every one of
+  them while the parked gaps in between read as no turn at all — an
+  83-minute tower run displayed barely the last notification's processing
+  span. The timer now anchors at the user's latest prompt (only
+  user-initiated origins move it; goal continuations no longer reset it
+  either), stays live for the whole cascade — main turn open or any subagent
+  still generating, parked-dispatch gaps included — and once everything
+  settles, the dimmed total span holds the slot until the next user prompt
+  ([KI-16](KNOWN_ISSUES.md#ki-16-tower-notification-turns-kept-resetting-the-gen-timer)).
+- The background-agent badge no longer reads zero for a lost-then-resumed
+  agent: when the host restarts and a lost background agent is resumed,
+  upstream journals no fresh `task.started`, so the journal's latest state
+  stayed `lost` for the whole resumed run while the built-in footer kept
+  showing the agent. A merged `lost` record of kind `agent` now counts as
+  running while its own `agents/<agentId>/wire.jsonl` shows a fresh post-lost
+  write, with terminal records always winning (upstream:
+  [MoonshotAI/kimi-code#3350](https://github.com/MoonshotAI/kimi-code/issues/3350);
+  [KI-15](KNOWN_ISSUES.md#ki-15-a-resumed-background-agent-was-invisible-to-the-task-badges)).
+
 ## [0.8.0] - 2026-08-28
 
 ### Added
@@ -500,7 +525,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.1
 [0.8.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.0
 [0.7.8]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.8
 [0.7.7]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.7
