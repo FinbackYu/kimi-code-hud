@@ -148,7 +148,7 @@ test('normalizeTasks discards malformed persisted entries', () => {
     ok: { kind: 'process', status: 'running', updatedAt: 1 },
   });
   assert.deepEqual(normalized.sidecar, {});
-  assert.deepEqual(normalizeTasks(undefined), { wire: {}, sidecar: {} });
+  assert.deepEqual(normalizeTasks(undefined), { wire: {}, sidecar: {}, resumed: {} });
 });
 
 test('wire registry evicts terminal entries first and never running ones', () => {
@@ -281,4 +281,116 @@ test('processWireChunk only tracks tasks for the main agent', () => {
   assert.deepEqual(taskCountsFromState(state), { bash: 0, agents: 0 });
   processWireChunk(state, taskRow('task.started', taskInfo()) + '\n', 'main');
   assert.deepEqual(taskCountsFromState(state), { bash: 1, agents: 0 });
+});
+
+function writeAgentWire(sessionDir, agentId, mtimeMs) {
+  const dir = path.join(sessionDir, 'agents', agentId);
+  fs.mkdirSync(dir, { recursive: true });
+  const wirePath = path.join(dir, 'wire.jsonl');
+  fs.writeFileSync(wirePath, '{}\n');
+  if (mtimeMs !== undefined) {
+    const at = new Date(mtimeMs);
+    fs.utimesSync(wirePath, at, at);
+  }
+  return wirePath;
+}
+
+function lostAgent(state, taskId, agentId, lostAt) {
+  applyTaskRow(state, {
+    type: 'task.started',
+    info: taskInfo({ taskId, kind: 'agent', agentId }),
+    time: lostAt - 5000,
+  });
+  applyTaskRow(state, {
+    type: 'task.terminated',
+    info: taskInfo({ taskId, kind: 'agent', status: 'lost', endedAt: lostAt }),
+    time: lostAt,
+  });
+}
+
+// Upstream gap (MoonshotAI/kimi-code#3350): resuming a lost background agent
+// journals no fresh task.started, so the journal says `lost` for the whole
+// resumed run. The HUD counts such a task as running while the agent's own
+// wire keeps being written past the lost mark.
+test('a lost agent with a post-lost active agent wire counts as running', () => {
+  const { sessionDir } = makeSession();
+  const state = makeState();
+  const lostAt = Date.now() - 10_000;
+  lostAgent(state, 'agent-lost0001', 'agent-7', lostAt);
+  writeSidecar(sessionDir, taskInfo({ taskId: 'agent-lost0001', kind: 'agent', agentId: 'agent-7', status: 'lost', endedAt: lostAt }));
+  writeAgentWire(sessionDir, 'agent-7'); // mtime = now: post-lost and fresh
+  reconcileTaskSidecars(state, sessionDir);
+  assert.deepEqual(taskCountsFromState(state), { bash: 0, agents: 1 });
+});
+
+test('a lost agent whose wire went quiet past the fresh window does not count', () => {
+  const { sessionDir } = makeSession();
+  const state = makeState();
+  const lostAt = Date.now() - 200_000;
+  lostAgent(state, 'agent-lost0001', 'agent-7', lostAt);
+  writeSidecar(sessionDir, taskInfo({ taskId: 'agent-lost0001', kind: 'agent', agentId: 'agent-7', status: 'lost', endedAt: lostAt }));
+  writeAgentWire(sessionDir, 'agent-7', Date.now() - 150_000); // post-lost but stale
+  reconcileTaskSidecars(state, sessionDir);
+  assert.deepEqual(taskCountsFromState(state), { bash: 0, agents: 0 });
+});
+
+test('a lost agent without a readable agent wire stays uncounted and silent', () => {
+  const { sessionDir } = makeSession();
+  const state = makeState();
+  const lostAt = Date.now() - 10_000;
+  lostAgent(state, 'agent-lost0001', 'agent-7', lostAt);
+  writeSidecar(sessionDir, taskInfo({ taskId: 'agent-lost0001', kind: 'agent', agentId: 'agent-7', status: 'lost', endedAt: lostAt }));
+  // No agents/agent-7/wire.jsonl at all.
+  reconcileTaskSidecars(state, sessionDir);
+  assert.deepEqual(taskCountsFromState(state), { bash: 0, agents: 0 });
+  // An agentId that cannot be a safe path component is ignored too.
+  const state2 = makeState();
+  lostAgent(state2, 'agent-lost0002', '../escape', lostAt);
+  writeSidecar(sessionDir, taskInfo({ taskId: 'agent-lost0002', kind: 'agent', agentId: '../escape', status: 'lost', endedAt: lostAt }));
+  reconcileTaskSidecars(state2, sessionDir);
+  assert.deepEqual(taskCountsFromState(state2), { bash: 0, agents: 0 });
+});
+
+test('a lost process task never gains liveness from agent wire activity', () => {
+  const { sessionDir } = makeSession();
+  const state = makeState();
+  const lostAt = Date.now() - 10_000;
+  applyTaskRow(state, { type: 'task.started', info: taskInfo(), time: lostAt - 5000 });
+  applyTaskRow(state, {
+    type: 'task.terminated',
+    info: taskInfo({ status: 'lost', endedAt: lostAt }),
+    time: lostAt,
+  });
+  // Even a fresh agent wire nearby must not revive a process-kind task.
+  writeSidecar(sessionDir, taskInfo({ status: 'lost', endedAt: lostAt, agentId: 'agent-7' }));
+  writeAgentWire(sessionDir, 'agent-7');
+  reconcileTaskSidecars(state, sessionDir);
+  assert.deepEqual(taskCountsFromState(state), { bash: 0, agents: 0 });
+});
+
+test('a completed-after-lost agent drops out even before the next reconcile', () => {
+  const { sessionDir } = makeSession();
+  const state = makeState();
+  const lostAt = Date.now() - 10_000;
+  lostAgent(state, 'agent-lost0001', 'agent-7', lostAt);
+  writeSidecar(sessionDir, taskInfo({ taskId: 'agent-lost0001', kind: 'agent', agentId: 'agent-7', status: 'lost', endedAt: lostAt }));
+  writeAgentWire(sessionDir, 'agent-7');
+  reconcileTaskSidecars(state, sessionDir);
+  assert.deepEqual(taskCountsFromState(state), { bash: 0, agents: 1 });
+  applyTaskRow(state, {
+    type: 'task.terminated',
+    info: taskInfo({ taskId: 'agent-lost0001', kind: 'agent', status: 'completed', endedAt: Date.now() }),
+    time: Date.now(),
+  });
+  assert.deepEqual(taskCountsFromState(state), { bash: 0, agents: 0 });
+});
+
+test('normalizeTasks validates the persisted resumed projection', () => {
+  const normalized = normalizeTasks({
+    wire: {},
+    sidecar: {},
+    resumed: { ok: 123, bad: 'running', bad2: -1, bad3: null },
+  });
+  assert.deepEqual(normalized.resumed, { ok: 123 });
+  assert.deepEqual(normalizeTasks(undefined).resumed, {});
 });
