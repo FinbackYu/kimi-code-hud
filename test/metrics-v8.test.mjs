@@ -1,8 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
 import { getMetrics } from '../src/metrics.mjs';
 import {
@@ -10,48 +8,21 @@ import {
   MAX_PARTIAL_LINE_BYTES,
   WIRE_READ_BUDGET_BYTES,
 } from '../src/wire-reader.mjs';
-
-const EVENT_TIME = Date.parse('2026-07-31T00:00:00Z');
+import { EVENT_TIME, makeSession as makeWireSession, stepEnd as wireStepEnd } from './.helpers.mjs';
 
 function makeSession(agents = ['main']) {
-  const sessionsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-v8-sessions-'));
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-v8-state-'));
-  const id = 'v8-session';
-  const sessionDir = path.join(sessionsRoot, 'wd', `ses_${id}`);
-  const wires = {};
-  for (const agent of agents) {
-    const agentDir = path.join(sessionDir, 'agents', agent);
-    fs.mkdirSync(agentDir, { recursive: true });
-    wires[agent] = path.join(agentDir, 'wire.jsonl');
-    fs.writeFileSync(wires[agent], '');
-  }
-  return {
-    sessionsRoot,
-    stateDir,
-    id,
-    sessionDir,
-    wires,
-    statePath: path.join(stateDir, `metrics-${id}.json`),
-  };
+  return makeWireSession({
+    tmpPrefix: 'kimi-hud-v8-sessions-',
+    id: 'v8-session',
+    wd: 'wd',
+    agents,
+    stateDir: true,
+    stateTmpPrefix: 'kimi-hud-v8-state-',
+  });
 }
 
 function stepEnd(output, time = EVENT_TIME) {
-  return JSON.stringify({
-    type: 'context.append_loop_event',
-    event: {
-      type: 'step.end',
-      usage: {
-        inputOther: 100,
-        output,
-        inputCacheRead: 300,
-        inputCacheCreation: 100,
-      },
-      finishReason: 'end_turn',
-      llmFirstTokenLatencyMs: 500,
-      llmStreamDurationMs: 1000,
-    },
-    time,
-  });
+  return wireStepEnd({ output, time });
 }
 
 function readState(filePath) {

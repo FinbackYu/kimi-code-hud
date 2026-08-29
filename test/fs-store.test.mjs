@@ -9,30 +9,27 @@ function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-fs-store-'));
 }
 
-test('atomicWriteFile writes the given content', () => {
+test('atomicWriteFile writes, overwrites, and creates missing target directories', () => {
   const file = path.join(tmpDir(), 'state.json');
   atomicWriteFile(file, '{"ok":true}');
   assert.equal(fs.readFileSync(file, 'utf8'), '{"ok":true}');
-});
 
-test('atomicWriteFile overwrites an existing file', () => {
-  const file = path.join(tmpDir(), 'state.json');
   fs.writeFileSync(file, 'old');
   atomicWriteFile(file, 'new');
   assert.equal(fs.readFileSync(file, 'utf8'), 'new');
+
+  const nested = path.join(tmpDir(), 'nested', 'deeper', 'state.json');
+  atomicWriteFile(nested, 'new');
+  assert.equal(fs.readFileSync(nested, 'utf8'), 'new');
 });
 
-test('atomicWriteFile retains existing permission bits', () => {
+test('atomicWriteFile keeps existing permission bits unless told otherwise', () => {
   const file = path.join(tmpDir(), 'state.json');
   fs.writeFileSync(file, 'old');
   fs.chmodSync(file, 0o644);
   atomicWriteFile(file, 'new', { mode: 0o600 });
   assert.equal(fs.statSync(file).mode & 0o777, 0o644);
-});
 
-test('atomicWriteFile can force mode without inheriting the target', () => {
-  const file = path.join(tmpDir(), 'state.json');
-  fs.writeFileSync(file, 'old');
   fs.chmodSync(file, 0o644);
   atomicWriteFile(file, 'new', { mode: 0o600, preserveMode: false });
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
@@ -43,10 +40,4 @@ test('atomicWriteFile leaves no .tmp- residue after success', () => {
   const file = path.join(dir, 'state.json');
   atomicWriteFile(file, 'new');
   assert.deepEqual(fs.readdirSync(dir), ['state.json']);
-});
-
-test('atomicWriteFile creates a missing target directory', () => {
-  const file = path.join(tmpDir(), 'nested', 'deeper', 'state.json');
-  atomicWriteFile(file, 'new');
-  assert.equal(fs.readFileSync(file, 'utf8'), 'new');
 });
