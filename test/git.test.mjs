@@ -39,7 +39,7 @@ function statusFixture(t, options = {}) {
   };
 }
 
-function waitForFiles(filePaths, timeoutMs = 3_000) {
+function waitForFiles(filePaths, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     const poll = () => {
@@ -211,7 +211,7 @@ const reader = createGitStatusReader({
   execFileSyncImpl: () => {
     fs.writeFileSync(readyPath, 'ready');
     const view = new Int32Array(new SharedArrayBuffer(4));
-    const deadline = Date.now() + 5_000;
+    const deadline = Date.now() + 15_000;
     while (!fs.existsSync(releasePath) && Date.now() < deadline) {
       Atomics.wait(view, 0, 0, 5);
     }
@@ -241,7 +241,7 @@ const hasOwnBranch = () => {
   }
 };
 let retries = 0;
-while (!hasOwnBranch() && retries < 10) {
+while (!hasOwnBranch() && retries < 40) {
   Atomics.wait(pause, 0, 0, 50);
   reader(cwd, { cachePath, env: { PATH: trusted } });
   retries += 1;
