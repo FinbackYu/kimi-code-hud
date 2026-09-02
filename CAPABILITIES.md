@@ -1,8 +1,8 @@
 # HUD capabilities
 
-- Last verified: 2026-08-29
+- Last verified: 2026-09-02
 - HUD behavior baseline: `v0.8.1` (`6b0c5d9`)
-- Kimi Code baseline: `0.39.1` (`5efca0c3116743855c28426000073bfe34a4862f`)
+- Kimi Code baseline: `0.40.1` (`0d45dddc57510e6b1306dd12c0b0703c37b8c63a`)
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
@@ -12,11 +12,11 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/5efca0c3116743855c28426000073bfe34a4862f/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/5efca0c3116743855c28426000073bfe34a4862f/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/5efca0c3116743855c28426000073bfe34a4862f/apps/kimi-code/src/utils/git/git-status.ts)
-- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/5efca0c3116743855c28426000073bfe34a4862f/packages/agent-core-v2/docs/wire-manifest.d.ts)
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/5efca0c3116743855c28426000073bfe34a4862f/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/0d45dddc57510e6b1306dd12c0b0703c37b8c63a/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/0d45dddc57510e6b1306dd12c0b0703c37b8c63a/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/0d45dddc57510e6b1306dd12c0b0703c37b8c63a/apps/kimi-code/src/utils/git/git-status.ts)
+- [persisted wire record manifest](https://github.com/MoonshotAI/kimi-code/blob/0d45dddc57510e6b1306dd12c0b0703c37b8c63a/packages/agent-core-v2/docs/wire-manifest.d.ts)
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/0d45dddc57510e6b1306dd12c0b0703c37b8c63a/apps/kimi-code/src/tui/commands/registry.ts)
 
 Baseline delta (0.32.0 → 0.33.0):
 
@@ -188,6 +188,63 @@ Baseline delta (0.39.0 → 0.39.1):
   no `promptAttachments`, consumes no WebSocket events, and does not call
   kap-server REST, so these are ignored rather than consumed.
 
+Baseline delta (0.39.1 → 0.40.0):
+
+- The `status_line.command` payload/runner contract is unchanged:
+  `status-line-command.ts` is untouched in the release range and the payload
+  keeps the same fields, so HUD parsing needs no rework.
+- The persisted wire manifest grows from 55 to 60 record types: new
+  `prompt.aborted` / `prompt.completed` / `prompt.steered` and
+  `turn.step.interrupted` / `turn.step.retrying` records. HUD reducers gate on
+  known types and ignore the new records; `usage.record`, `task.started`, and
+  `task.terminated` payloads are unchanged (covered).
+- `config.update` / `profile.bind` drop the optional
+  `environmentDisclosure.date` subfield, and `turn.prompt` gains an optional
+  `promptId`; the HUD folds read fixed field sets — it never read
+  `environmentDisclosure` — so removals cannot surface and additions are
+  ignored (covered).
+- `plan.revision` renames `path` to `key`; the HUD folds no `plan.revision`
+  rows (host-owned).
+- `tower_mode.enter` gains an optional `base` field, tower mode becomes
+  mutually exclusive with plan/swarm mode, and upstream tower workers now
+  start from the base checkout's uncommitted changes. The HUD's
+  last-enter/exit-wins boolean fold ignores the new field and keeps working
+  (covered; the worker-checkout change is an upstream workflow fix with no
+  HUD surface).
+- The footer line-1 permission badge wording is now sourced from a new
+  `permission-mode.ts` display table (`manual` → "Always Ask", `yolo` →
+  "Ask When Needed", `auto` → "Never Ask"). The payload `permissionMode`
+  values are unchanged, so the HUD's short `[manual]` / `[auto]` / `[yolo]`
+  badges stay accurate (variant: host presentation naming only).
+- The shared protocol `sessionAgentConfigSchema` gains optional `tower_base`,
+  kap-server REST adds workspace/skill/prompt routes, `kimi acp` no longer
+  honors `KIMI_CODE_LEGACY_FLAG`, and the `[secondary_model]` subagent pool
+  is enabled by default; none of these touch the status-line payload or the
+  wire records the HUD folds (host-owned / not consumed).
+- Upstream now parses `git status --porcelain` with `-z` for non-ASCII paths
+  (PR #3415). The HUD's own dirty probe reads non-`-z` porcelain output but
+  only derives a boolean from any non-`##` line, so quoted non-ASCII paths
+  cannot flip it (verified, no HUD impact).
+
+Baseline delta (0.40.0 → 0.40.1):
+
+- The `status_line.command` payload/runner contract, the footer, the shared
+  protocol, KAP WebSocket event schemas, and the task/subagent record shapes
+  are all untouched in the release range, so HUD parsing needs no rework.
+- The persisted wire manifest grows from 60 to 62 record types: new
+  `file_history.checkpoint` / `file_history.tracked` records behind the
+  experimental turn-level file history flag. HUD reducers gate on known types
+  and ignore both records; their payloads carry only path/hash/size metadata,
+  not file contents (covered).
+- The agent state manifest drops the internal `agentsMdReminder.pending` key
+  and adds a `fileHistory` key; no consumer reads agent state directly
+  (host-owned).
+- kap-server REST registers experimental file-history routes; the HUD calls
+  no kap-server REST (host-owned).
+- Other upstream fixes (AGENTS.md re-reminder after context loss, kimi-cli
+  migration re-prompt, vscode engine-backed @ suggestions) sit outside HUD
+  consumption (not consumed).
+
 ## Footer coverage
 
 Legend: **covered** means the state is reconstructed end to end; **variant** is
@@ -219,7 +276,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 0.39.1. HUD installation, configuration, and lifecycle
+built into Kimi Code 0.40.1. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 
