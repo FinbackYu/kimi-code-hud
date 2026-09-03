@@ -31,7 +31,8 @@
     --text:         #cdd6f4;  /* 正文 */
     --blue:         #4ea8ff;  /* 欢迎框边框 / 标题 / 模型名 / logo */
     --muted:        #888888;  /* 次要文字（Send /help、标签、思考行） */
-    --dim:          #595b70;  /* HUD [manual] 徽标 */
+    --dim:          #595b70;  /* 次要 HUD 文本（思考行 / 速度） */
+    --ask:          #54658a;  /* HUD [Always Ask] 徽标（褪色蓝） */
     --yellow:       #ffcb6b;  /* 用户消息 */
     --border:       #5a5a5a;  /* 输入框边框 */
     --soft:         #e0e0e0;  /* 回复行圆点 / context 行 */
@@ -152,6 +153,7 @@
   .hud { margin-top: 8px; margin-left: -2px; line-height: 20px; }
   .hud .line { letter-spacing: -0.04px; }
   .hud .dim { color: var(--dim); }
+  .hud .ask { color: var(--ask); }
   .hud .blue { color: var(--blue); }
   .hud .sep { color: var(--text); }
   .bar {
@@ -245,9 +247,9 @@ const CONFIG = {
 
   /* HUD 状态栏（与 bin/kimi-hud.mjs 真实输出保持一致） */
   hud: {
-    /* 左侧纯文本段；sep:true 渲染分隔符 "|"；cls 可选 dim / blue */
+    /* 左侧纯文本段；sep:true 渲染分隔符 "|"；cls 可选 dim / ask / blue */
     segments: [
-      { t: '[manual]', cls: 'dim' },
+      { t: '[Always Ask]', cls: 'ask' },
       { t: 'K3', cls: 'blue' },
       { t: 'high', cls: 'dim' },
       { sep: true },

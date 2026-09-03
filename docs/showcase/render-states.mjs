@@ -79,14 +79,14 @@ const STATES = [
   {
     id: 'auto',
     group: '权限与模式徽标',
-    label: '[auto] 自动审批',
+    label: '[Never Ask] 自动审批',
     note: '亮红徽标，permissionMode = auto',
     ctx: ctx({ payload: { permissionMode: 'auto' } }),
   },
   {
     id: 'yolo',
     group: '权限与模式徽标',
-    label: '[yolo] 跳过全部确认',
+    label: '[Ask When Needed] 跳过全部确认',
     note: '琥珀徽标，permissionMode = yolo',
     ctx: ctx({ payload: { permissionMode: 'yolo' } }),
   },
@@ -301,17 +301,26 @@ const toRow = ({ id, group, label, note, ctx: stateCtx }) => {
 
 const rows = STATES.map(toRow);
 
-/* states-gallery 状态示例堆叠专用徽标变体：前两行 [yolo]、后三行 [auto]。
+/* states-gallery 状态示例堆叠专用徽标变体：共 5 行——yolo / auto 组各有一行
+ * 用新官方称呼（[Ask When Needed] / [Never Ask]），其余三行经 permissionNames:
+ * 'short' 覆盖保留旧短徽标（[yolo] / [auto]），两种措辞同图对照。
  * 以 原id@模式 为 id 追加生成，startup-page 轮播引用的原始状态不受影响；
  * 条目可写成 { id, ctx } 在徽标之外做额外覆盖（此处只给 gen 行换黄条配额） */
 const GALLERY_BADGES = {
   yolo: [
-    // 示例第一行：gen 计时 + 脏工作区，顺路展示唯一的黄条（5h 72%）
+    // 官方称呼行（组内第一）：gen 计时 + 脏工作区，顺路展示黄条（5h 72%）
     { id: 'gen', ctx: { quota: { windows: [{ label: '5h', used: 72, limit: 100, resetAt: iso(NOW + 58 * MIN) }] } } },
-    // 示例第二行：唯一的红条（5h 93%）
-    'quota-crit',
+    // 短徽标行：唯一的红条（5h 93%）
+    { id: 'quota-crit', ctx: { permissionNames: 'short' } },
   ],
-  auto: ['compacted', 'swarm', 'goal-active'],
+  auto: [
+    // 官方称呼行（组内第一）：[swarm] 徽标 + 舰队总速
+    'swarm',
+    // 短徽标行：compacted 状态 + 绿条
+    { id: 'compacted', ctx: { permissionNames: 'short' } },
+    // 短徽标行：[goal] 长徽标
+    { id: 'goal-active', ctx: { permissionNames: 'short' } },
+  ],
 };
 for (const [mode, items] of Object.entries(GALLERY_BADGES)) {
   for (const item of items) {
