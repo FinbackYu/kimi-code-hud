@@ -46,7 +46,7 @@ test('formatCountdown formats d/h/m and reset states', () => {
 test('compact layout: model, git, speed, window pct + countdown', () => {
   const [line] = renderHud(baseCtx({ layout: 'compact' }));
   const parts = line.split(' │ ');
-  assert.equal(parts[0], '[manual] K3');
+  assert.equal(parts[0], '[Always Ask] K3');
   assert.equal(parts[1], 'git:(main*)');
   assert.equal(parts[2], '⚡ 47');
   assert.equal(parts[3], '5h 31% ~2h18m');
@@ -57,7 +57,7 @@ test('normal layout adds project, t/s+TTFT, countdown and weekly', () => {
   const [line] = renderHud(baseCtx({ layout: 'normal' }));
   assert.equal(
     line,
-    '[manual] K3 │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h',
+    '[Always Ask] K3 │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h',
   );
 });
 
@@ -225,15 +225,15 @@ test('provider cost refuses ambiguous or provider-reported spend shapes', () => 
 test('model thinking suffix from session thinkingLevel (normal and compact)', () => {
   const withLevel = (thinkingLevel, layout) =>
     renderHud(baseCtx({ layout, metrics: { tps: 47, ttftMs: 1300, thinkingLevel } }))[0];
-  assert.ok(withLevel('on', 'normal').startsWith('[manual] K3 thinking │'));
+  assert.ok(withLevel('on', 'normal').startsWith('[Always Ask] K3 thinking │'));
   // effort-capable models show the bare level without the "thinking" label
-  assert.ok(withLevel('high', 'normal').startsWith('[manual] K3 high │'));
-  assert.ok(withLevel('max', 'normal').startsWith('[manual] K3 max │'));
-  assert.ok(withLevel('off', 'normal').startsWith('[manual] K3 │'));
-  assert.ok(withLevel(null, 'normal').startsWith('[manual] K3 │'));
-  assert.ok(withLevel('high', 'compact').startsWith('[manual] K3 high │'));
-  assert.ok(withLevel('on', 'compact').startsWith('[manual] K3 on │'));
-  assert.ok(withLevel('off', 'compact').startsWith('[manual] K3 │'));
+  assert.ok(withLevel('high', 'normal').startsWith('[Always Ask] K3 high │'));
+  assert.ok(withLevel('max', 'normal').startsWith('[Always Ask] K3 max │'));
+  assert.ok(withLevel('off', 'normal').startsWith('[Always Ask] K3 │'));
+  assert.ok(withLevel(null, 'normal').startsWith('[Always Ask] K3 │'));
+  assert.ok(withLevel('high', 'compact').startsWith('[Always Ask] K3 high │'));
+  assert.ok(withLevel('on', 'compact').startsWith('[Always Ask] K3 on │'));
+  assert.ok(withLevel('off', 'compact').startsWith('[Always Ask] K3 │'));
 });
 
 test('provisional thinking suffix renders muted until wire-confirmed', () => {
@@ -267,7 +267,7 @@ test('provisional thinking suffix renders muted until wire-confirmed', () => {
   const plain = renderHud(baseCtx({
     metrics: { tps: 47, ttftMs: 1300, thinkingLevel: 'high', thinkingProvisional: true },
   }))[0];
-  assert.ok(plain.startsWith('[manual] K3 high │'));
+  assert.ok(plain.startsWith('[Always Ask] K3 high │'));
   assert.doesNotMatch(plain, /\x1b\[/);
 });
 
@@ -312,11 +312,11 @@ test('dynamic terminal text drops OSC, CSI, ESC, BEL, C0, DEL, and C1 controls',
 
 test('badges for yolo/auto permission modes', () => {
   const [yolo] = renderHud(baseCtx({ payload: basePayload({ permissionMode: 'yolo' }) }));
-  assert.ok(yolo.startsWith('[yolo] '));
+  assert.ok(yolo.startsWith('[Ask When Needed] '));
   const [auto] = renderHud(baseCtx({ payload: basePayload({ permissionMode: 'auto' }) }));
-  assert.ok(auto.startsWith('[auto] '));
+  assert.ok(auto.startsWith('[Never Ask] '));
   const [manual] = renderHud(baseCtx());
-  assert.ok(manual.startsWith('[manual] '));
+  assert.ok(manual.startsWith('[Always Ask] '));
 });
 
 test('optional segments drop cleanly', () => {
@@ -326,7 +326,7 @@ test('optional segments drop cleanly', () => {
     metrics: { tps: null, ttftMs: null },
     gitDirty: false,
   }));
-  assert.equal(line, '[manual] K3 │ kimi-code-hud');
+  assert.equal(line, '[Always Ask] K3 │ kimi-code-hud');
 });
 
 test('TTFT remains visible while TPS is warming up', () => {
@@ -433,15 +433,16 @@ test('color badges: yolo warning amber, auto bright red, plan primary blue', () 
     color: true,
     payload: basePayload({ permissionMode: 'yolo', planMode: true }),
   }));
-  assert.ok(line.includes('\x1b[38;2;232;168;56m[yolo]\x1b[0m'));
+  assert.ok(line.includes('\x1b[38;2;232;168;56m[Ask When Needed]\x1b[0m'));
   assert.ok(line.includes('\x1b[38;2;79;168;255m[plan]\x1b[0m'));
   const [auto] = renderHud(baseCtx({
     color: true,
     payload: basePayload({ permissionMode: 'auto' }),
   }));
-  assert.ok(auto.includes('\x1b[91m[auto]\x1b[0m'));
+  assert.ok(auto.includes('\x1b[91m[Never Ask]\x1b[0m'));
   const [man] = renderHud(baseCtx({ color: true }));
-  assert.ok(man.includes('\x1b[90m[manual]\x1b[0m'));
+  assert.ok(man.includes('\x1b[38;2;84;101;138m[Always Ask]\x1b[0m'));
+  assert.ok(!man.includes('\x1b[90m[Always Ask]'));
 });
 
 test('light theme swaps badges to bold brighter truecolor', () => {
@@ -457,7 +458,7 @@ test('light theme swaps badges to bold brighter truecolor', () => {
   }));
   assert.ok(light.includes('\x1b[1m\x1b[38;2;21;101;192mK3\x1b[0m'));    // bold primary #1565C0
   assert.ok(light.includes('\x1b[1m\x1b[38;2;21;101;192m[plan]\x1b[0m'));
-  assert.ok(light.includes('\x1b[1m\x1b[38;2;217;119;6m[yolo]\x1b[0m'));  // bold amber #D97706
+  assert.ok(light.includes('\x1b[1m\x1b[38;2;217;119;6m[Ask When Needed]\x1b[0m'));  // bold amber #D97706
   assert.ok(light.includes('\x1b[1m\x1b[38;2;20;184;166m[swarm]\x1b[0m')); // bold teal #14B8A6
   assert.ok(!light.includes('\x1b[38;2;79;168;255m'));                    // no dark leftovers
 
@@ -467,7 +468,7 @@ test('light theme swaps badges to bold brighter truecolor', () => {
     theme: 'light',
     payload: basePayload({ permissionMode: 'auto' }),
   }));
-  assert.ok(lightAuto.includes('\x1b[1;91m[auto]\x1b[0m'));
+  assert.ok(lightAuto.includes('\x1b[1;91m[Never Ask]\x1b[0m'));
 
   // Explicit dark matches the default: no bold, ANSI auto.
   const [dark] = renderHud(baseCtx({
@@ -476,7 +477,7 @@ test('light theme swaps badges to bold brighter truecolor', () => {
     payload: basePayload({ permissionMode: 'yolo', planMode: true, swarmMode: true }),
   }));
   assert.ok(dark.includes('\x1b[38;2;79;168;255m[plan]\x1b[0m'));
-  assert.ok(dark.includes('\x1b[38;2;232;168;56m[yolo]\x1b[0m'));
+  assert.ok(dark.includes('\x1b[38;2;232;168;56m[Ask When Needed]\x1b[0m'));
   assert.ok(dark.includes('\x1b[38;2;91;192;190m[swarm]\x1b[0m'));
 });
 
@@ -526,7 +527,7 @@ test('swarm badge renders in accent cyan when payload exposes swarmMode', () => 
   }));
   assert.ok(line.includes('\x1b[38;2;91;192;190m[swarm]\x1b[0m'));
   const [plain] = renderHud(baseCtx({ payload: basePayload({ swarmMode: true }) }));
-  assert.ok(plain.startsWith('[manual] [swarm] '));
+  assert.ok(plain.startsWith('[Always Ask] [swarm] '));
 });
 
 test('swarm badge renders from wire-derived metrics.swarmMode (payload has no field)', () => {
@@ -536,7 +537,7 @@ test('swarm badge renders from wire-derived metrics.swarmMode (payload has no fi
   }));
   assert.ok(line.includes('\x1b[38;2;91;192;190m[swarm]\x1b[0m'));
   const [plain] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, swarmMode: true } }));
-  assert.ok(plain.startsWith('[manual] [swarm] '));
+  assert.ok(plain.startsWith('[Always Ask] [swarm] '));
   const [off] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, swarmMode: false } }));
   assert.ok(!off.includes('[swarm]'));
 });
@@ -549,13 +550,13 @@ test('goal badge sits between mode badges and model, in every tier', () => {
       metrics: { tps: 47, ttftMs: 1300, goal },
     }));
     assert.ok(
-      line.startsWith('[manual] [goal 7 turns] K3'),
+      line.startsWith('[Always Ask] [goal 7 turns] K3'),
       `${layout}: ${line}`,
     );
   }
   // No goal -> no badge.
   const [plain] = renderHud(baseCtx({ layout: 'normal' }));
-  assert.ok(plain.startsWith('[manual] K3'));
+  assert.ok(plain.startsWith('[Always Ask] K3'));
 });
 
 test('goal badge leaves the full speed segment in place', () => {
@@ -774,7 +775,7 @@ test('swarm with two subagents renders the fleet style verbatim', () => {
   const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
   assert.equal(
     normal,
-    '[manual] [swarm] K3 │ kimi-code-hud git:(main*) │ ⚡ 90 t/s (2 agents @45) · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h',
+    '[Always Ask] [swarm] K3 │ kimi-code-hud git:(main*) │ ⚡ 90 t/s (2 agents @45) · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h',
   );
 });
 

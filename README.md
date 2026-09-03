@@ -85,18 +85,19 @@ node ~/kimi-code-hud/bin/kimi-hud.mjs --uninstall
 
 ## 配置
 
-- `~/.kimi-code-hud/config.json`：`{"layout":"compact"|"normal"}`（默认 `normal`）；`"disabled": true` 是 `--off` 写入的开关旗标（缺省即启用，`--on` 删除该键）
+- `~/.kimi-code-hud/config.json`：`{"layout":"compact"|"normal","permissionNames":"official"|"short"}`（默认 `normal` / `official`）；`"disabled": true` 是 `--off` 写入的开关旗标（缺省即启用，`--on` 删除该键）
 - `KIMI_CODE_HOME`：覆盖 Kimi Code 数据根；本文出现的 `~/.kimi-code` 都是未设置该变量时的默认路径
 - `KIMI_HUD_HOME`：覆盖 HUD 自有配置与缓存根；默认是 `~/.kimi-code-hud`
 - 环境变量 `KIMI_HUD_LAYOUT` 优先于配置文件
+- `KIMI_HUD_PERMISSION_NAMES=official|short`：权限徽标措辞，优先于配置文件。缺省 `official`，跟随宿主 0.40+ 官方称呼（`[Always Ask]` / `[Ask When Needed]` / `[Never Ask]`）；`short` 保留旧短徽标（`[manual]` / `[yolo]` / `[auto]`）。manual 档以褪色蓝渲染（dark `#54658A` / light `#7D92B8`，比默认前景安静，且与 muted 灰色相区分——灰色保留给推断/降级信息），auto 档保持亮红以与 yolo 琥珀区分
 - `NO_COLOR` 或 `KIMI_HUD_NO_COLOR`：禁用全部 ANSI 颜色
-- `KIMI_HUD_THEME=dark|light`：手动固定配色主题。缺省跟随 `tui.toml` 顶层的 `theme` 设置；`"auto"` 经 `COLORFGBG` 判定、回退 dark（状态行无法在 300ms 热路径上执行宿主的 OSC 11 查询）；自定义主题名回退 dark。light 下徽标（模型名、`[plan]`、`[yolo]`、`[swarm]`、`[tower]`、`[auto]`）加粗显示，琥珀/青色比宿主默认更亮（`#D97706`/`#14B8A6`），额度柱体从刺眼的 ANSI 红改为柔和真彩色（`#B91C1C`/`#D97706`/`#0E7A38`）；dark 模式不变，柱体 ANSI 色由终端按自身主题重映射
+- `KIMI_HUD_THEME=dark|light`：手动固定配色主题。缺省跟随 `tui.toml` 顶层的 `theme` 设置；`"auto"` 经 `COLORFGBG` 判定、回退 dark（状态行无法在 300ms 热路径上执行宿主的 OSC 11 查询）；自定义主题名回退 dark。light 下徽标（模型名、`[plan]`、`[Ask When Needed]`、`[swarm]`、`[tower]`、`[Never Ask]`）加粗显示，琥珀/青色比宿主默认更亮（`#D97706`/`#14B8A6`），额度柱体从刺眼的 ANSI 红改为柔和真彩色（`#B91C1C`/`#D97706`/`#0E7A38`）；dark 模式不变，柱体 ANSI 色由终端按自身主题重映射
 
 两档布局：
 
 ```
-compact: [manual] K3 high │ git:(main*) │ ⚡ 47 │ Cache 92% │ 5h 31% ~2h18m
-normal:  [manual] K3 high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ Cache 92% │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h
+compact: [Always Ask] K3 high │ git:(main*) │ ⚡ 47 │ Cache 92% │ 5h 31% ~2h18m
+normal:  [Always Ask] K3 high │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ Cache 92% │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h
 ```
 
 /goal 模式下，模式徽章与模型之间插入 goal 徽章（两档都显示，与宿主默认 footer 的槽位顺序一致）：

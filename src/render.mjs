@@ -19,7 +19,7 @@ const ANSI = {
   red: `${ESC}31m`,
   brightYellow: `${ESC}93m`,
   brightRed: `${ESC}91m`,
-  muted: `${ESC}90m`, // bright black / gray — placeholder badges
+  muted: `${ESC}90m`, // bright black / gray — inferred/provisional values
 };
 
 const DARK = {
@@ -27,6 +27,7 @@ const DARK = {
   warning: rgb(232, 168, 56), // #E8A838 — auto/yolo badges
   primary: rgb(79, 168, 255), // #4FA8FF — plan badge
   accent: rgb(91, 192, 190), //  #5BC0BE — orchestration badges
+  dim: rgb(84, 101, 138), //     #54658A — manual badge (faded primary)
   barRed: ANSI.red,
   barYellow: ANSI.yellow,
   barGreen: ANSI.green,
@@ -42,6 +43,9 @@ const LIGHT = {
   warning: `${ESC}1m${rgb(217, 119, 6)}`, //  bold #D97706 — yolo/goal blocked
   primary: `${ESC}1m${rgb(21, 101, 192)}`, // bold #1565C0 — plan/model
   accent: `${ESC}1m${rgb(20, 184, 166)}`, //  bold #14B8A6 — orchestration
+  dim: rgb(125, 146, 184), //                 #7D92B8 — manual badge (faded
+  //                                           primary; stays non-bold — the
+  //                                           quiet slot)
   barRed: rgb(185, 28, 28), //                #B91C1C — host light error
   barYellow: rgb(217, 119, 6), //             #D97706 — matches the badge amber
   barGreen: rgb(14, 122, 56), //              #0E7A38 — host light success
@@ -50,6 +54,16 @@ const LIGHT = {
 const BAR_WIDTH = 10;
 const MAX_WIDTH = 200;
 const LAYOUT_ORDER = ['normal', 'compact'];
+
+// Permission badge labels. 'official' mirrors the host's 0.40.0+
+// permission-mode.ts display table (manual -> Always Ask, yolo -> Ask When
+// Needed, auto -> Never Ask) and is the default; 'short' keeps the
+// historical compact badges (KIMI_HUD_PERMISSION_NAMES / config.json
+// "permissionNames"). Bracket typography stays HUD's own.
+const PERMISSION_BADGE_LABELS = {
+  official: { manual: '[Always Ask]', yolo: '[Ask When Needed]', auto: '[Never Ask]' },
+  short: { manual: '[manual]', yolo: '[yolo]', auto: '[auto]' },
+};
 
 function skipCsi(input, start) {
   for (let i = start; i < input.length; i++) {
@@ -202,15 +216,17 @@ function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-function badges(payload, color, swarmOn, towerOn, C) {
+function badges(payload, color, swarmOn, towerOn, C, permissionNames = 'official') {
   const out = [];
-  // Host defaults render auto/yolo in warning amber and plan in primary
-  // blue; auto keeps bright red here per user preference to stay distinct.
-  // Manual mode shows a muted [manual] so the line's left edge stays put
-  // when no elevated-permission badge is present.
-  if (payload.permissionMode === 'yolo') out.push(colorize(color, C.warning, '[yolo]'));
-  else if (payload.permissionMode === 'auto') out.push(colorize(color, C.brightRed, '[auto]'));
-  else out.push(colorize(color, C.muted, '[manual]'));
+  // Host renders auto/yolo in warning amber with its own display names;
+  // auto keeps bright red here per user preference to stay distinct from
+  // the yolo amber. The always-present manual badge renders in a faded
+  // primary blue — quieter than the default foreground, hue-separated from
+  // the muted gray that stays reserved for inferred/degraded values.
+  const labels = PERMISSION_BADGE_LABELS[permissionNames === 'short' ? 'short' : 'official'];
+  if (payload.permissionMode === 'yolo') out.push(colorize(color, C.warning, labels.yolo));
+  else if (payload.permissionMode === 'auto') out.push(colorize(color, C.brightRed, labels.auto));
+  else out.push(colorize(color, C.dim, labels.manual));
   if (payload.planMode) out.push(colorize(color, C.primary, '[plan]'));
   // Swarm mode comes from the wire journal's swarm_mode.enter/exit lines,
   // folded into metrics (same derivation path as the goal badge); a future
@@ -557,6 +573,8 @@ function buildSegments(layout, ctx) {
  * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, towerMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs, tasks}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] normal|compact
+ * @param {string} [ctx.permissionNames] official|short — permission badge
+ *   wording (default official)
  * @param {boolean} [ctx.color]
  * @param {string} [ctx.theme] dark|light — badge palette (default dark)
  * @param {number} [ctx.now]
@@ -576,6 +594,7 @@ export function renderHud(ctx) {
       ctx.metrics?.swarmMode === true,
       ctx.metrics?.towerMode === true,
       C,
+      ctx.permissionNames,
     );
     const goal = goalBadge(ctx.metrics?.goal, color, C);
     if (goal) prefix.push(goal);

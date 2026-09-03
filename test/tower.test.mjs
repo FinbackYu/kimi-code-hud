@@ -116,14 +116,14 @@ test('tower badge renders from wire metrics and payload fallback', () => {
   const [light] = renderHud(baseCtx({ color: true, theme: 'light', metrics }));
   assert.ok(light.includes(TOWER_LIGHT));
   const [plain] = renderHud(baseCtx({ metrics }));
-  assert.ok(plain.startsWith('[manual] [tower] '));
+  assert.ok(plain.startsWith('[Always Ask] [tower] '));
 
   const [payloadOnly] = renderHud(baseCtx({ payload: basePayload({ towerMode: true }) }));
-  assert.ok(payloadOnly.startsWith('[manual] [tower] '));
+  assert.ok(payloadOnly.startsWith('[Always Ask] [tower] '));
   const [both] = renderHud(baseCtx({
     payload: basePayload({ swarmMode: true, towerMode: true }),
   }));
-  assert.ok(both.startsWith('[manual] [swarm] [tower] '));
+  assert.ok(both.startsWith('[Always Ask] [swarm] [tower] '));
 });
 
 test('a 0.38 wire without Tower records keeps the existing render and fleet behavior', () => {

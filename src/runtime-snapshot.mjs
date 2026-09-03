@@ -48,6 +48,18 @@ export function layoutFromSnapshot(snapshot, env = process.env) {
     : 'normal';
 }
 
+/** Permission badge wording: 'official' mirrors the host's 0.40.0+
+ * permission-mode display names (Always Ask / Ask When Needed / Never Ask)
+ * and is the default; 'short' keeps the historical compact badges. Env
+ * beats config.json; unknown values fall through to the next source. */
+export function permissionNamesFromSnapshot(snapshot, env = process.env) {
+  const override = env.KIMI_HUD_PERMISSION_NAMES;
+  if (override === 'official' || override === 'short') return override;
+  const configured = snapshot?.hudConfig?.permissionNames;
+  if (configured === 'official' || configured === 'short') return configured;
+  return 'official';
+}
+
 export function colorFromEnv(env = process.env) {
   return !env.KIMI_HUD_NO_COLOR && !env.NO_COLOR;
 }
