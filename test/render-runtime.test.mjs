@@ -491,6 +491,6 @@ test('a normal local render frame completes inside the 220ms internal budget', a
   });
   const elapsed = performance.now() - started;
   assert.equal(result.exitCode, 0);
-  assert.ok(result.line.startsWith('[manual]'));
+  assert.ok(result.line.startsWith('[Always Ask]'));
   assert.ok(elapsed < RUNTIME_BUDGET_MS, `render took ${elapsed.toFixed(1)}ms`);
 });

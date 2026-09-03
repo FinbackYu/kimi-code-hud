@@ -1,10 +1,10 @@
 {
-  "compact-dark-plain": "[manual] K3 high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
-  "compact-dark-ansi": "\u001b[90m[manual]\u001b[0m \u001b[38;2;79;168;255mK3\u001b[0m high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
-  "compact-light-plain": "[manual] K3 high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
-  "compact-light-ansi": "\u001b[90m[manual]\u001b[0m \u001b[1m\u001b[38;2;21;101;192mK3\u001b[0m high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
-  "normal-dark-plain": "[manual] K3 high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h ███░░░░░░░ 31% ~2h17m · 7d ██░░░░░░░░ 25% ~2d11h",
-  "normal-dark-ansi": "\u001b[90m[manual]\u001b[0m \u001b[38;2;79;168;255mK3\u001b[0m high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h \u001b[32m███░░░░░░░\u001b[0m 31% ~2h17m · 7d \u001b[32m██░░░░░░░░\u001b[0m 25% ~2d11h",
-  "normal-light-plain": "[manual] K3 high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h ███░░░░░░░ 31% ~2h17m · 7d ██░░░░░░░░ 25% ~2d11h",
-  "normal-light-ansi": "\u001b[90m[manual]\u001b[0m \u001b[1m\u001b[38;2;21;101;192mK3\u001b[0m high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h \u001b[38;2;14;122;56m███░░░░░░░\u001b[0m 31% ~2h17m · 7d \u001b[38;2;14;122;56m██░░░░░░░░\u001b[0m 25% ~2d11h"
+  "compact-dark-plain": "[Always Ask] K3 high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
+  "compact-dark-ansi": "\u001b[38;2;84;101;138m[Always Ask]\u001b[0m \u001b[38;2;79;168;255mK3\u001b[0m high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
+  "compact-light-plain": "[Always Ask] K3 high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
+  "compact-light-ansi": "\u001b[38;2;125;146;184m[Always Ask]\u001b[0m \u001b[1m\u001b[38;2;21;101;192mK3\u001b[0m high │ git:(main) │ ⚡ 30 gen 59s │ Cache 60% │ 5h 31% ~2h17m",
+  "normal-dark-plain": "[Always Ask] K3 high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h ███░░░░░░░ 31% ~2h17m · 7d ██░░░░░░░░ 25% ~2d11h",
+  "normal-dark-ansi": "\u001b[38;2;84;101;138m[Always Ask]\u001b[0m \u001b[38;2;79;168;255mK3\u001b[0m high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h \u001b[32m███░░░░░░░\u001b[0m 31% ~2h17m · 7d \u001b[32m██░░░░░░░░\u001b[0m 25% ~2d11h",
+  "normal-light-plain": "[Always Ask] K3 high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h ███░░░░░░░ 31% ~2h17m · 7d ██░░░░░░░░ 25% ~2d11h",
+  "normal-light-ansi": "\u001b[38;2;125;146;184m[Always Ask]\u001b[0m \u001b[1m\u001b[38;2;21;101;192mK3\u001b[0m high │ hud git:(main) │ ⚡ 30 t/s · gen 59s │ Cache 60% │ 5h \u001b[38;2;14;122;56m███░░░░░░░\u001b[0m 31% ~2h17m · 7d \u001b[38;2;14;122;56m██░░░░░░░░\u001b[0m 25% ~2d11h"
 }

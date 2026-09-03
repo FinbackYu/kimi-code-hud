@@ -214,8 +214,12 @@ Baseline delta (0.39.1 → 0.40.0):
 - The footer line-1 permission badge wording is now sourced from a new
   `permission-mode.ts` display table (`manual` → "Always Ask", `yolo` →
   "Ask When Needed", `auto` → "Never Ask"). The payload `permissionMode`
-  values are unchanged, so the HUD's short `[manual]` / `[auto]` / `[yolo]`
-  badges stay accurate (variant: host presentation naming only).
+  values are unchanged; the HUD mirrors the official labels by default
+  (`[Always Ask]` / `[Ask When Needed]` / `[Never Ask]`), with the historical
+  short badges available via `KIMI_HUD_PERMISSION_NAMES=short` (covered;
+  `short` is a HUD presentation variant, and the always-present manual badge
+  renders in a faded primary blue (`#54658A` dark / `#7D92B8` light) so muted
+  gray keeps its reserved inferred/degraded meaning).
 - The shared protocol `sessionAgentConfigSchema` gains optional `tower_base`,
   kap-server REST adds workspace/skill/prompt routes, `kimi acp` no longer
   honors `KIMI_CODE_LEGACY_FLAG`, and the `[secondary_model]` subagent pool
@@ -254,7 +258,7 @@ does not need to be redrawn by the command.
 
 | Official line-1 slot or state | Upstream 0.39.0 | HUD v0.8.0 | Status |
 |---|---|---|---|
-| permission mode | `manual` has no badge; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows `[manual]`, and makes `[auto]` red | covered, presentation variant |
+| permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
 | swarm mode | `swarm` in the mode slot | Rebuilds state from main-wire `swarm_mode.enter` / `swarm_mode.exit`; a future `payload.swarmMode` also works | covered since HUD 0.2.7 |
 | tower mode | separate orchestration state | Rebuilds state from main-wire `tower_mode.enter` / `tower_mode.exit`; optional enter `sessionId` is metadata only; a future `payload.towerMode` also works | covered |

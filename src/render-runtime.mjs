@@ -23,6 +23,7 @@ import {
   captureRuntimeSnapshot,
   colorFromEnv,
   layoutFromSnapshot,
+  permissionNamesFromSnapshot,
 } from './runtime-snapshot.mjs';
 import { resolveTheme } from './theme.mjs';
 import { resolveThinkingLevel } from './thinking.mjs';
@@ -173,6 +174,7 @@ export async function renderStatusLine({
     metrics,
     gitDirty,
     layout: layoutFromSnapshot(snapshot, env),
+    permissionNames: permissionNamesFromSnapshot(snapshot, env),
     color: colorFromEnv(env),
     theme: resolveTheme({ env, tuiTomlText: snapshot.tuiTomlText }),
     now,

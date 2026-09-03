@@ -6,6 +6,17 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Permission badges default to the host's official mode naming — `[Always Ask]` /
+  `[Ask When Needed]` / `[Never Ask]`, mirroring Kimi Code 0.40.0's
+  `permission-mode.ts` display table. Set `KIMI_HUD_PERMISSION_NAMES=short` or
+  config.json `"permissionNames": "short"` to keep the compact `[manual]` /
+  `[yolo]` / `[auto]` badges. The manual badge now renders in a faded primary
+  blue (dark `#54658A`, light `#7D92B8`) — quieter than the default
+  foreground, hue-separated from the muted gray that stays reserved for
+  inferred/degraded values — and auto keeps its distinct bright red.
+
 ## [0.8.1] - 2026-08-28
 
 ### Fixed
