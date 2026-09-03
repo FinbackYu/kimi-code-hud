@@ -238,13 +238,14 @@ document.getElementById('version').textContent = cliver;
 /* 展示哪几条改这里（可选 id 见 hud-states.js / render-states.mjs；@yolo/@auto
  * 是 gallery 专用的徽标变体，在 render-states.mjs 的 GALLERY_BADGES 里维护）。
  * 顺序即对齐策略：每行原样呈现 CLI 输出，按「权限徽标 → +短徽标 → +长徽标」、
- * 同级再按速度段长度排序，让段错位逐行渐变，形成平滑阶梯而非随机参差 */
+ * 同级再按速度段长度排序，让段错位逐行渐变，形成平滑阶梯而非随机参差。
+ * 5 行中 yolo / auto 组各有一行用新官方称呼，其余保留旧短徽标（见 GALLERY_BADGES） */
 const GALLERY_IDS = [
-  'gen@yolo',        // [yolo] 琥珀徽标 · 速度段最短（⚡ 52 t/s · gen 45s）· 黄条（5h 72%，仅此一处）
-  'quota-crit@yolo', // [yolo] · 红条仅此一处（5h 93%）
-  'compacted@auto',  // [auto] 亮红徽标 · 速度段最长（⚡ 52 t/s · compacted 8s）· 绿条
-  'swarm@auto',      // [auto] + [swarm] 短徽标，段右移一小步
-  'goal-active@auto',// [auto] + [goal ● …] 长徽标，段右移一大步
+  'gen@yolo',        // [Ask When Needed] 新称呼（组内第一）· gen 计时（⚡ 52 t/s · gen 45s）· 黄条（5h 72%）
+  'quota-crit@yolo', // [yolo] 短徽标 · 红条（5h 93%）
+  'swarm@auto',      // [Never Ask] 新称呼（组内第一）· [swarm] 徽标 + 舰队总速（⚡ 156 t/s (3 agents @52)）
+  'compacted@auto',  // [auto] 短徽标 · compacted 状态（⚡ 52 t/s · compacted 8s）· 绿条
+  'goal-active@auto',// [auto] 短徽标 · [goal ● …] 长徽标
 ];
 const byId = Object.fromEntries((window.HUD_STATES || []).map(s => [s.id, s]));
 document.getElementById('line1').innerHTML = (byId.startup || {}).html || '';

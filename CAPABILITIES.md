@@ -1,6 +1,6 @@
 # HUD capabilities
 
-- Last verified: 2026-09-02
+- Last verified: 2026-09-04
 - HUD behavior baseline: `v0.8.1` (`6b0c5d9`)
 - Kimi Code baseline: `0.40.1` (`0d45dddc57510e6b1306dd12c0b0703c37b8c63a`)
 
@@ -256,7 +256,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.39.0 | HUD v0.8.0 | Status |
+| Official line-1 slot or state | Upstream 0.40.1 | HUD main | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
@@ -287,7 +287,7 @@ commands are documented in [README.md](README.md#安装) and
 | Capability | How to trigger or configure it | What the HUD shows | Availability |
 |---|---|---|---|
 | HUD lifecycle | install as described in the README; plugin installs use `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`, while manual installs use `node <checkout>/bin/kimi-hud.mjs --off` / `--on` | the complete HUD line when enabled | available |
-| permission mode | use `/permission`, `/auto [on\|off]`, or `/yolo [on\|off]` | `[manual]`, `[auto]`, or `[yolo]` | available |
+| permission mode | use `/permission`, `/ask-when-needed` (alias `/yolo`), or `/never-ask` (alias `/auto`) | `[Always Ask]`, `[Ask When Needed]`, or `[Never Ask]` by default (`short` wording: `[manual]`, `[auto]`, `[yolo]`) | available |
 | plan mode | use `/plan`, `/plan on`, or `/plan off` | `[plan]` while plan mode is active | available |
 | swarm mode | use `/swarm`, `/swarm on`, `/swarm off`, or `/swarm <task>` | `[swarm]`; fleet speed appears when multiple agent wires contribute | available |
 | tower mode | start the Tower workflow with `/tower` | `[tower]`; a parked main is excluded and live workers retain fleet-style speed | available behind the upstream experimental flag |
