@@ -276,8 +276,9 @@ Baseline delta (0.40.1 → 0.41.0):
   column below is updated).
 - #3522 lets background question tasks stay running across turns, so a
   pending question can now appear in the HUD's task badge where questions
-  previously vanished at turn end; fixture-level parity recheck is tracked
-  as a follow-up (presentation-layer change, no contract break).
+  previously vanished at turn end — this matches the built-in footer's
+  every-non-agent-kind-is-a-task bucket rule and is locked by wire and
+  sidecar fixture tests (covered, presentation-layer change).
 - Other changes sit outside HUD consumption: turn-level file history
   becomes always-on (#3525), an occasional session rating prompt (#3516),
   tower-mode fixes under the experimental flag (#3461, plus the #3549 web

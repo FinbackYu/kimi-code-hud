@@ -21,6 +21,10 @@ The project follows [Semantic Versioning](https://semver.org/).
   (alias `/yes`) / `/auto` now open the permission selector with the mode
   preselected. CAPABILITIES' trigger column and version anchors, and the
   READMEs' capability pointers, now describe 0.41.0.
+- Lock the 0.41.0 background-question behavior (#3522): a `question` task
+  left running across turns folds into the task badge (never the agent
+  badge) until it terminates, mirroring the built-in footer's bucket rule —
+  now pinned by wire and sidecar fixture tests.
 
 ## [0.8.2] - 2026-09-04
 
