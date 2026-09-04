@@ -28,7 +28,9 @@ Write short, imperative commit subjects. History uses both direct subjects (`Add
 
 ## Issue Workflow
 
-All issue-driven work follows `.agents/skills/upstream-issue-flow/SKILL.md`. Key rules: triage each issue by upstream release status (prep for unreleased changes vs. immediate fix); prep work for unreleased upstream contracts lives on a shared `upstream/<version>-prep` branch and merges to `main` only after the upstream release ships and the issue's verification checklist passes locally; monitor-filed issues (`upstream-watch` label, body owned by the Repo-Overwatch monitor) must never have their title or body edited — progress goes in comments only. Merge to `main` requires the user's explicit go-ahead.
+Issue-driven work rules: triage each issue by upstream release status (prep for unreleased changes vs. immediate fix); prep work for unreleased upstream contracts lives on a shared `upstream/<version>-prep` branch and merges to `main` only after the upstream release ships and the issue's verification checklist passes locally; monitor-filed issues (`upstream-watch` label, body owned by an automation monitor) must never have their title or body edited — progress goes in comments only. Merge to `main` requires the user's explicit go-ahead. Contributor-facing workflow details (branching, issue etiquette, verification gates, release-day acceptance) live in `CONTRIBUTING.md`.
+
+Release-anchored upstream compatibility audits — release facts, contract surfaces, user-visible wording parity, and `CAPABILITIES.md`/`KNOWN_ISSUES.md` baseline advancement — follow `.agents/skills/upstream-release-review/SKILL.md`.
 
 ## Security & Runtime Constraints
 

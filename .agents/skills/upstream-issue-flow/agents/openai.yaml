@@ -1,4 +1,0 @@
-interface:
-  display_name: "Upstream Issue Flow"
-  short_description: "Triage-to-merge flow for upstream-watch issues."
-  default_prompt: "Work through the open upstream-watch issues in kimi-code-hud."
