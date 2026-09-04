@@ -9,6 +9,7 @@ import {
   emptySessionUsageState,
   normalizeSessionUsageState,
 } from './session-usage.mjs';
+import { sessionFileName } from './session-files.mjs';
 import {
   BACKFILL_SCAN_V,
   CACHE_SCAN_V,
@@ -22,8 +23,7 @@ import { median } from './metrics-math.mjs';
 export const MIGRATED = Symbol('metrics-state-migrated');
 
 export function statePathFor(sessionId, stateDir) {
-  const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, '_');
-  return path.join(stateDir, `metrics-${safe}.json`);
+  return path.join(stateDir, sessionFileName('metrics', sessionId));
 }
 
 export function emptyState() {

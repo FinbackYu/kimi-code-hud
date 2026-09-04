@@ -15,12 +15,12 @@ import {
   emptyState,
   loadState,
   saveState,
-  statePathFor,
 } from './metrics-state.mjs';
 import { applyThroughputRow } from './metrics-throughput.mjs';
 import { applyTurnRow } from './metrics-turn.mjs';
 import { summarizeMetrics } from './metrics-summary.mjs';
 import { HUD_DIR, SESSIONS_ROOT } from './paths.mjs';
+import { resolveSessionFilePath } from './session-files.mjs';
 import {
   findSessionDir,
   findWirePath,
@@ -437,6 +437,7 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
   stateDir = HUD_DIR,
+  legacyStateDir = null,
   now = Date.now(),
   deadline = Infinity,
   readBudgetBytes = WIRE_READ_BUDGET_BYTES,
@@ -452,7 +453,7 @@ export function getMetrics(sessionId, {
   };
   try {
     if (!sessionId) return empty;
-    const statePath = statePathFor(sessionId, stateDir);
+    const statePath = resolveSessionFilePath(stateDir, legacyStateDir, 'metrics', sessionId);
     const state = loadState(statePath);
     let stateChanged = state[MIGRATED] === true;
     if (hostVersion !== null && hostVersion !== state.hostVersion) {

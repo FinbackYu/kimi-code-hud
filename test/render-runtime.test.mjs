@@ -28,6 +28,7 @@ function makePaths() {
     gitStatusCachePath: path.join(hudDir, 'git-status-cache.json'),
     quotaLockPath: path.join(hudDir, 'refresh.lock'),
     providerUsageDir: path.join(hudDir, 'provider-usage'),
+    sessionStateDir: path.join(hudDir, 'sessions'),
     tuiTomlPath: path.join(kimiHome, 'tui.toml'),
     configTomlPath: path.join(kimiHome, 'config.toml'),
     credentialsPath: path.join(kimiHome, 'credentials.json'),

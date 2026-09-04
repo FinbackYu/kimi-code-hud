@@ -16,7 +16,13 @@ function setup() {
 
 function runHook(env) {
   execFileSync(process.execPath, [HOOK], {
-    env: { PATH: process.env.PATH, ...env },
+    env: {
+      PATH: process.env.PATH,
+      // The hook also runs housekeeping; keep it away from the real
+      // ~/.kimi-code-hud even when a test forgets to pin the home.
+      KIMI_HUD_HOME: path.join(env.KIMI_CODE_HOME, 'hud-home'),
+      ...env,
+    },
     stdio: 'pipe',
   });
 }
@@ -27,6 +33,29 @@ test('creates tui.toml pointing at the managed copy', () => {
   const out = fs.readFileSync(toml, 'utf8');
   assert.equal(out, `[status_line]\ncommand = "node ${pluginRoot}/bin/kimi-hud.mjs"\n`);
 });
+
+test('session start sweeps stale HUD temporaries and expired session state', () => {
+  const { home, pluginRoot } = setup();
+  const hudHome = path.join(home, 'hud-home');
+  const sessionsDir = path.join(hudHome, 'sessions');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  const staleTmp = write(hudHome, 'refresh.lock.tmp-4242-1788427855383-abc');
+  const expiredState = write(sessionsDir, 'metrics-session_dead.json', '{"v":8}');
+  const stale = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+  for (const p of [staleTmp, expiredState]) fs.utimesSync(p, stale, stale);
+
+  runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot, KIMI_HUD_HOME: hudHome });
+
+  assert.ok(!fs.existsSync(staleTmp));
+  assert.ok(!fs.existsSync(expiredState));
+  assert.ok(fs.existsSync(path.join(sessionsDir, '.housekeeping-stamp')));
+});
+
+function write(dir, name, content = '') {
+  const p = path.join(dir, name);
+  fs.writeFileSync(p, content);
+  return p;
+}
 
 test('rewrites a previous kimi-hud command to the managed copy', () => {
   const { home, pluginRoot, toml } = setup();

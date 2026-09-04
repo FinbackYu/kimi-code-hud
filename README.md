@@ -68,7 +68,7 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 每段的精确口径（样本接纳规则、wire 推导路径、失败关闭边界、持久化文件）见 [CAPABILITIES.md](CAPABILITIES.md)。要点：
 
 - 速度样本只接纳流式 ≥250ms、≤1000 t/s 的 `step.end`，取最近 10 分钟内最多 5 个的中位数；预热与窗口过期以暗灰显示，模型切换重新预热；
-- 模型/thinking 优先取 wire（`profile.bind` 与每次请求的 `llm.request`），无 wire 时按会话快照 `~/.kimi-code-hud/thinking-<sessionId>.json` 固定，最后才回退解析 `config.toml` 并写快照——其他会话执行 `/effort` 改写全局配置不会串台；
+- 模型/thinking 优先取 wire（`profile.bind` 与每次请求的 `llm.request`），无 wire 时按会话快照 `~/.kimi-code-hud/sessions/thinking-<sessionId>.json` 固定，最后才回退解析 `config.toml` 并写快照——其他会话执行 `/effort` 改写全局配置不会串台；
 - goal / swarm / tower 状态从主 agent wire 的 `goal.*` / `swarm_mode.*` / `tower_mode.*` 事件折叠；后台任务徽章从 `task.started` / `task.terminated` 与 `tasks/<taskId>.json` 旁车双源合并（取较新记录），只计 `running`（被标 `lost` 后仍有新写入的续跑子代理除外，上游 issue MoonshotAI/kimi-code#3350）；
 - 配额仅对可归因到 `managed:kimi-code` 的模型显示与刷新；provider 余额/成本在币种未知、自建代理、未知模型或混合 provider ledger 时失败关闭；
 - 会话成本本地计算，价格表以 **2026-08-09** 官方定价核对，不含服务端工具费等修正所以始终带 `≈`；DeepSeek 缓存命中字段在宿主补齐映射前按未命中价保守估算，数值可能偏高；
@@ -78,7 +78,7 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 
 宿主每秒通过 stdin 传一个 JSON 快照（读取上限 1 MiB、150ms 超时），命令 stdout 的**第一行**接管 footer line 1（line 2 固定由宿主绘制，插件无法接管），命令须在 **300ms** 内完成；失败/超时/空输出时宿主渲染内置行或重播上一帧——所以脚本对所有错误静默降级、绝不打印日志（唯一的非零退出是"已禁用/已移除插件的托管副本"自我清除 `tui.toml` 条目，插件开关由此实现）。
 
-数据来自四路：stdin 快照与跨进程缓存的 Git 探针（cwd 只存 SHA-256，TTL 15s）；会话 `wire.jsonl` 增量解析（main + 全部 subagent，无正文，cursor 与计数持久化在 `~/.kimi-code-hud/`）；官方 `/usages` 配额接口（60s 缓存 + 后台刷新，双区域按 oauth host 判定）；provider 官方余额接口与本地定价的成本估算（按 provider + key 指纹隔离缓存）。
+数据来自四路：stdin 快照与跨进程缓存的 Git 探针（cwd 只存 SHA-256，TTL 15s）；会话 `wire.jsonl` 增量解析（main + 全部 subagent，无正文，cursor 与计数持久化在 `~/.kimi-code-hud/sessions/`，旧版根目录文件在会话恢复时自动迁移；超过 30 天未活跃的会话状态与进程被杀残留的 `*.tmp-*` 临时文件由 SessionStart hook 每日清理一次）；官方 `/usages` 配额接口（60s 缓存 + 后台刷新，双区域按 oauth host 判定）；provider 官方余额接口与本地定价的成本估算（按 provider + key 指纹隔离缓存）。
 
 ## 能力与已知问题
 

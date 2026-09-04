@@ -19,12 +19,24 @@ import {
 } from '../src/toml.mjs';
 import { isHudDisabled } from '../src/plugin-state.mjs';
 import { HUD_DIR } from '../src/paths.mjs';
+import { runHousekeeping } from '../src/housekeeping.mjs';
 import { nodeCommand } from '../src/command.mjs';
 import { atomicWriteFile } from '../src/fs-store.mjs';
 
 function main() {
-  // --off switch: honor the flag before touching anything.
   const hudHome = process.env.KIMI_HUD_HOME || HUD_DIR;
+
+  // Opportunistic daily cleanup of orphaned temporaries and expired session
+  // state. Runs before the --off gate: a switched-off HUD stops rendering,
+  // but the state it already wrote still ages out. Silent and fail-open.
+  try {
+    runHousekeeping({
+      hudDir: hudHome,
+      sessionStateDir: path.join(hudHome, 'sessions'),
+    });
+  } catch { /* housekeeping never blocks session start */ }
+
+  // --off switch: honor the flag before touching anything.
   if (isHudDisabled(path.join(hudHome, 'config.json'))) return;
 
   const pluginRoot = process.env.KIMI_PLUGIN_ROOT
