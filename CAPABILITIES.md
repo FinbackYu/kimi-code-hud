@@ -1,8 +1,8 @@
 # HUD capabilities
 
-- Last verified: 2026-09-04
+- Last verified: 2026-09-05
 - HUD behavior baseline: `v0.8.2` (`ae66403`)
-- Kimi Code baseline: `0.40.1` (`0d45dddc57510e6b1306dd12c0b0703c37b8c63a`)
+- Kimi Code baseline: `0.41.0` (`95478e8c7ba248fd2470d5bb151555ec7fedd19d`)
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
@@ -249,6 +249,41 @@ Baseline delta (0.40.0 → 0.40.1):
   migration re-prompt, vscode engine-backed @ suggestions) sit outside HUD
   consumption (not consumed).
 
+Baseline delta (0.40.1 → 0.41.0):
+
+- The `status_line.command` payload/runner contract is unchanged:
+  `status-line-command.ts` does not appear in the release range, so HUD
+  parsing needs no rework. `footer.ts` changes only a header comment
+  (`[ask-when-needed]` → `[Ask When Needed]`), kap-server and the shared
+  protocol are untouched, and `paths.ts` only adds the survey-state file
+  (covered / host-owned).
+- The persisted wire manifest shrinks from 62 to 60 record types:
+  `staleGuard.recorded` / `staleGuard.cleared` are removed (upstream PR
+  #3517, not listed in the changelog), and the agent state manifest drops
+  the `staleGuard` key. The HUD never consumed these records at runtime;
+  its fixture still locks correct folding for pre-0.41.0 sessions that
+  contain them (covered).
+- `turn.ended` gains an optional `stopReason`, and the state manifest adds
+  `fullCompaction.wireRanges`, `toolDedupe.handoffPhase`, and an optional
+  `stopCode` on task entries. HUD folds read fixed field sets, so the
+  additions are ignored (covered; `stopReason` is readable-but-unrendered).
+- #3515 shipped without a changeset entry: `/ask-when-needed` and
+  `/never-ask` are removed, and `/yolo` (alias `/yes`) / `/auto` now open
+  the permission selector with the corresponding mode preselected instead
+  of switching immediately. `PERMISSION_MODE_DISPLAY_NAMES` is unchanged
+  ("Always Ask" / "Ask When Needed" / "Never Ask") and the payload values
+  are unchanged, so the badge mapping stays valid (covered; the trigger
+  column below is updated).
+- #3522 lets background question tasks stay running across turns, so a
+  pending question can now appear in the HUD's task badge where questions
+  previously vanished at turn end; fixture-level parity recheck is tracked
+  as a follow-up (presentation-layer change, no contract break).
+- Other changes sit outside HUD consumption: turn-level file history
+  becomes always-on (#3525), an occasional session rating prompt (#3516),
+  tower-mode fixes under the experimental flag (#3461, plus the #3549 web
+  tower UI), and print-mode session records no longer being lost on error
+  exits (#3531) (host-owned / not consumed).
+
 ## Footer coverage
 
 Legend: **covered** means the state is reconstructed end to end; **variant** is
@@ -256,7 +291,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.40.1 | HUD main | Status |
+| Official line-1 slot or state | Upstream 0.41.0 | HUD main | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
@@ -280,14 +315,14 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 0.40.1. HUD installation, configuration, and lifecycle
+built into Kimi Code 0.41.0. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 
 | Capability | How to trigger or configure it | What the HUD shows | Availability |
 |---|---|---|---|
 | HUD lifecycle | install as described in the README; plugin installs use `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`, while manual installs use `node <checkout>/bin/kimi-hud.mjs --off` / `--on` | the complete HUD line when enabled | available |
-| permission mode | use `/permission`, `/ask-when-needed` (alias `/yolo`), or `/never-ask` (alias `/auto`) | `[Always Ask]`, `[Ask When Needed]`, or `[Never Ask]` by default (`short` wording: `[manual]`, `[auto]`, `[yolo]`) | available |
+| permission mode | use `/permission`, `/yolo` (alias `/yes`), or `/auto` — each opens the permission mode selector, with `/yolo` / `/auto` preselecting a mode (Enter confirms) | `[Always Ask]`, `[Ask When Needed]`, or `[Never Ask]` by default (`short` wording: `[manual]`, `[auto]`, `[yolo]`) | available |
 | plan mode | use `/plan`, `/plan on`, or `/plan off` | `[plan]` while plan mode is active | available |
 | swarm mode | use `/swarm`, `/swarm on`, `/swarm off`, or `/swarm <task>` | `[swarm]`; fleet speed appears when multiple agent wires contribute | available |
 | tower mode | start the Tower workflow with `/tower` | `[tower]`; a parked main is excluded and live workers retain fleet-style speed | available behind the upstream experimental flag |

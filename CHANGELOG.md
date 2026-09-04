@@ -6,6 +6,22 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Advance the audited Kimi Code compatibility baseline from 0.40.1 to 0.41.0:
+  the status-line payload/runner contract, footer rendering, kap-server, and
+  the shared protocol are untouched in the release range. The persisted wire
+  manifest shrinks from 62 to 60 record types — `staleGuard.recorded` /
+  `staleGuard.cleared` were removed upstream (PR #3517, unlisted in the
+  changelog) — which the HUD never consumed at runtime; fixtures still lock
+  correct folding for pre-0.41.0 sessions. `turn.ended` gains an optional
+  `stopReason` (readable-but-unrendered).
+- Documentation parity for upstream #3515 (shipped without a changeset
+  entry): `/ask-when-needed` and `/never-ask` were removed, and `/yolo`
+  (alias `/yes`) / `/auto` now open the permission selector with the mode
+  preselected. CAPABILITIES' trigger column and version anchors, and the
+  READMEs' capability pointers, now describe 0.41.0.
+
 ## [0.8.2] - 2026-09-04
 
 ### Changed
