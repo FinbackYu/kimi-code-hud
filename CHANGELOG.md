@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-09-04
+
 ### Changed
 
 - Permission badges default to the host's official mode naming — `[Always Ask]` /
@@ -16,6 +18,20 @@ The project follows [Semantic Versioning](https://semver.org/).
   blue (dark `#54658A`, light `#7D92B8`) — quieter than the default
   foreground, hue-separated from the muted gray that stays reserved for
   inferred/degraded values — and auto keeps its distinct bright red.
+- Advance the audited Kimi Code compatibility baseline from 0.39.0 through
+  0.40.1: the status-line payload keeps the same fields and the
+  first-stdout-line contract and 300ms host ceiling are untouched in all three
+  release ranges, so HUD parsing needs no rework. The persisted wire manifest
+  grows from 55 to 62 durable record types — `prompt.aborted` /
+  `prompt.completed` / `prompt.steered`, `turn.step.interrupted` /
+  `turn.step.retrying`, and experimental `file_history.checkpoint` /
+  `file_history.tracked` records, which the HUD's known-type-gated reducers
+  safely ignore; 0.40.0's permission wording rename is presentation-only
+  (payload values unchanged), and the remaining protocol / kap-server /
+  agent-state changes are host-owned or outside HUD consumption.
+- Restructure both READMEs around installation and configuration, documenting
+  plugin install as the single installation path; the manual checkout flow
+  still works but is no longer documented.
 
 ## [0.8.1] - 2026-08-28
 
@@ -536,7 +552,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.2
 [0.8.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.1
 [0.8.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.0
 [0.7.8]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.8
