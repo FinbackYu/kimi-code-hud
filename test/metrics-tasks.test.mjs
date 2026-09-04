@@ -104,6 +104,46 @@ test('agent tasks count separately from process tasks', () => {
   assert.deepEqual(taskCountsFromState(state), { bash: 1, agents: 2 });
 });
 
+test('a lingering question task folds into the task badge, not the agent badge', () => {
+  // Upstream 0.41.0 (#3522): background question tasks are no longer
+  // cancelled at turn end, so a `question` kind can stay `running` across
+  // turns. The footer bucket rule counts every non-agent kind as a task.
+  const state = makeState();
+  applyTaskRow(state, {
+    type: 'task.started',
+    info: taskInfo({ taskId: 'question-00000001', kind: 'question' }),
+    time: EVENT_TIME,
+  });
+  applyTaskRow(state, {
+    type: 'task.started',
+    info: taskInfo({ taskId: 'agent-00000001', kind: 'agent' }),
+    time: EVENT_TIME,
+  });
+  assert.deepEqual(taskCountsFromState(state), { bash: 1, agents: 1 });
+
+  // Answering the question terminates the task and it leaves the badge.
+  applyTaskRow(state, {
+    type: 'task.terminated',
+    info: taskInfo({
+      taskId: 'question-00000001',
+      kind: 'question',
+      status: 'completed',
+      endedAt: EVENT_TIME + 1000,
+    }),
+    time: EVENT_TIME + 1000,
+  });
+  assert.deepEqual(taskCountsFromState(state), { bash: 0, agents: 1 });
+});
+
+test('a lingering question task reported only by a sidecar counts the same', () => {
+  const { sessionDir } = makeSession();
+  const state = makeState();
+  writeSidecar(sessionDir, taskInfo({ taskId: 'question-00000001', kind: 'question' }));
+
+  assert.equal(reconcileTaskSidecars(state, sessionDir), true);
+  assert.deepEqual(taskCountsFromState(state), { bash: 1, agents: 0 });
+});
+
 test('the fresher record wins across wire and sidecar projections', () => {
   const state = makeState();
   // Sidecar already settled the task; a lagging wire reader must not
