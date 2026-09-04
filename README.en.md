@@ -82,7 +82,7 @@ Four data sources: the stdin snapshot and a cross-process cached Git probe (cwd 
 
 ## Capabilities & known issues
 
-- [Capabilities](CAPABILITIES.md): coverage of Kimi Code 0.40.1's line-1 slots, data sources, and readable-but-unrendered Cache/token/goal/task/Git information;
+- [Capabilities](CAPABILITIES.md): coverage of Kimi Code 0.41.0's line-1 slots, data sources, and readable-but-unrendered Cache/token/goal/task/Git information;
 - [Known issues](KNOWN_ISSUES.md): open Git, terminal-width, stale-frame, and fullscreen verification gaps with acceptance criteria.
 
 ## Privacy & security
