@@ -1,7 +1,7 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import { atomicWriteFile } from './fs-store.mjs';
 import { HUD_DIR } from './paths.mjs';
+import { resolveSessionFilePath } from './session-files.mjs';
 import {
   CONFIG_TOML_PATH,
   tableText,
@@ -18,29 +18,24 @@ export { CONFIG_TOML_PATH };
  * session's runtime effort is frozen at session start — without a snapshot,
  * a session that never switched effort in-session would follow whatever
  * other sessions later wrote into config.toml. So the first resolved level
- * is pinned per sessionId under ~/.kimi-code-hud/thinking-<sessionId>.json,
+ * is pinned per sessionId under ~/.kimi-code-hud/sessions/thinking-<sessionId>.json,
  * with `confirmed` recording the provenance: true when the level came from
  * the wire journal, false while it is only inferred from config.toml.
  * Snapshots written before the flag existed carry no `confirmed` key and
  * are treated as confirmed, preserving their pre-existing rendering.
  */
-function snapshotPath(snapshotDir, sessionId) {
-  const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, '_');
-  return path.join(snapshotDir, `thinking-${safe}.json`);
-}
-
-function readSnapshot(snapshotDir, sessionId) {
+function readSnapshot(snapshotFile) {
   try {
-    const snap = JSON.parse(fs.readFileSync(snapshotPath(snapshotDir, sessionId), 'utf8'));
+    const snap = JSON.parse(fs.readFileSync(snapshotFile, 'utf8'));
     if (snap && typeof snap.level === 'string' && snap.level.length > 0) return snap;
   } catch { /* no snapshot yet */ }
   return null;
 }
 
-function writeSnapshot(snapshotDir, sessionId, level, model, confirmed) {
+function writeSnapshot(snapshotFile, level, model, confirmed) {
   try {
     atomicWriteFile(
-      snapshotPath(snapshotDir, sessionId),
+      snapshotFile,
       JSON.stringify({ level, model, confirmed }),
     );
   } catch { /* best effort */ }
@@ -118,6 +113,8 @@ function resolveFromConfig(model, configPath, configText = undefined) {
  * @param {string} [opts.configPath]
  * @param {string|null} [opts.sessionId] enables the per-session snapshot
  * @param {string} [opts.snapshotDir]
+ * @param {string|null} [opts.legacySnapshotDir] pre-`sessions/` HUD root; a
+ *   legacy snapshot there is adopted on first touch
  * @returns {{ level: string, confirmed: boolean }}
  */
 export function resolveThinkingLevel({
@@ -126,19 +123,25 @@ export function resolveThinkingLevel({
   configPath = CONFIG_TOML_PATH,
   sessionId = null,
   snapshotDir = HUD_DIR,
+  legacySnapshotDir = null,
   configText = undefined,
   deadline = Infinity,
   clock = Date.now,
 }) {
   const canUseSnapshot = () => !Number.isFinite(deadline) || clock() < deadline;
+  // Resolving the location may adopt a pre-`sessions/` snapshot on first
+  // touch; bounded to one stat once migrated (session-files.mjs).
+  const snapshotFile = sessionId && canUseSnapshot()
+    ? resolveSessionFilePath(snapshotDir, legacySnapshotDir, 'thinking', sessionId)
+    : null;
   if (typeof sessionLevel === 'string' && sessionLevel.length > 0) {
-    if (sessionId && canUseSnapshot()) {
-      writeSnapshot(snapshotDir, sessionId, sessionLevel, model, true);
+    if (snapshotFile && canUseSnapshot()) {
+      writeSnapshot(snapshotFile, sessionLevel, model, true);
     }
     return { level: sessionLevel, confirmed: true };
   }
-  if (sessionId && canUseSnapshot()) {
-    const snap = readSnapshot(snapshotDir, sessionId);
+  if (snapshotFile && canUseSnapshot()) {
+    const snap = readSnapshot(snapshotFile);
     // Snapshots predate the confirmed flag: treat a missing flag as
     // confirmed so long-running sessions keep their previous rendering.
     if (snap && snap.model === model) {
@@ -146,6 +149,6 @@ export function resolveThinkingLevel({
     }
   }
   const level = resolveFromConfig(model, configPath, configText);
-  if (sessionId && canUseSnapshot()) writeSnapshot(snapshotDir, sessionId, level, model, false);
+  if (snapshotFile && canUseSnapshot()) writeSnapshot(snapshotFile, level, model, false);
   return { level, confirmed: false };
 }

@@ -69,7 +69,8 @@ export async function renderStatusLine({
   const getMetricsImpl = dependencies.getMetrics || getMetrics;
   const metrics = getMetricsImpl(payload.sessionId, {
     sessionsRoot: paths.sessionsRoot,
-    stateDir: paths.hudDir,
+    stateDir: paths.sessionStateDir,
+    legacyStateDir: paths.hudDir,
     deadline,
     hostVersion: payload.version || null,
   });
@@ -149,7 +150,8 @@ export async function renderStatusLine({
     sessionId: payload.sessionId,
     configPath: paths.configTomlPath,
     configText: snapshot.configTomlText,
-    snapshotDir: paths.hudDir,
+    snapshotDir: paths.sessionStateDir,
+    legacySnapshotDir: paths.hudDir,
     deadline,
     clock,
   });
