@@ -30,6 +30,7 @@ description: 审查一个新发布或指定的 stable Kimi Code release 对 kimi
 ### 2. 比较精确 range 并收集必审输入
 
 - `git rev-list --count`、`git diff --name-only` / `--stat`，release notes 与实际路径核对。
+- 结论范围不超过证据范围：「X 变了」凭单次命中成立；「未变」「未触及」「零命中」先把 range 文件清单完整落盘，用 `grep -q` 或 API `--jq` 精确查询做机器判定，并留验证命令。
 - 呈现层内容单独成清单：显示名映射表（如权限模式显示表）、footer 文案与 tips、slash 命令注册表（主名与别名）、默认值提示。payload/config 里的 stable id 不变不等于无变化。
 - `gh issue list -R FinbackYu/kimi-code-hud --label upstream-watch` 检查有无沉没的待办（显式 `-R`：在 fork clone 中缺省会查到自己的 fork）；用户另行提供的上游监测 WATCH 条目一并列为必审输入，每条必须有结论（已覆盖 / 转跟进物 / 明确关闭）。
 
