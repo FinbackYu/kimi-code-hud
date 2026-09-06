@@ -92,6 +92,7 @@ async function main() {
         url: endpoints.url,
         cachePath: RUNTIME_PATHS.quotaCachePath,
         lockPath: RUNTIME_PATHS.quotaLockPath,
+        statePath: RUNTIME_PATHS.quotaRefreshStatePath,
         lockToken: process.env.KIMI_HUD_QUOTA_LOCK_TOKEN,
       });
     } catch {

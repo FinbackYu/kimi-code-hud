@@ -14,10 +14,20 @@ import {
   CONFIG_TOML_PATH,
   CREDENTIALS_PATH,
   QUOTA_CACHE_PATH,
+  QUOTA_REFRESH_STATE_PATH,
   REFRESH_LOCK_PATH,
 } from './paths.mjs';
+import {
+  MAX_RESPONSE_BYTES,
+  REQUEST_CATEGORY,
+  clearRefreshState,
+  isRefreshBlocked,
+  recordRefreshFailure,
+  requestJsonWithLimits,
+  shortDigest,
+} from './request-guard.mjs';
 
-export { HUD_DIR, CREDENTIALS_PATH, QUOTA_CACHE_PATH, REFRESH_LOCK_PATH };
+export { HUD_DIR, CREDENTIALS_PATH, QUOTA_CACHE_PATH, QUOTA_REFRESH_STATE_PATH, REFRESH_LOCK_PATH };
 export const USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
 export const GLOBAL_USAGES_URL = 'https://api.kimi.ai/coding/v1/usages';
 export const QUOTA_TTL_MS = 60_000;
@@ -142,11 +152,13 @@ export function isQuotaStale(cache, now = Date.now()) {
  * Atomically write the quota cache (tmp file + rename). Never throws.
  * @param {object} parsed result of parseQuotaPayload
  * @param {string} [cachePath]
+ * @param {object} [opts]
+ * @param {number} [opts.now] fetchedAt stamp; defaults to the real clock
  */
-export function writeQuotaCache(parsed, cachePath = QUOTA_CACHE_PATH) {
+export function writeQuotaCache(parsed, cachePath = QUOTA_CACHE_PATH, { now = Date.now() } = {}) {
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    const body = JSON.stringify({ fetchedAt: Date.now(), ...parsed });
+    const body = JSON.stringify({ fetchedAt: now, ...parsed });
     atomicWriteFile(cachePath, body);
   } catch {
     // stay silent
@@ -222,16 +234,20 @@ export function releaseQuotaLock(lockPath = REFRESH_LOCK_PATH, token = null) {
 }
 
 /**
- * If the cache is stale, spawn a detached background refresh and return
- * immediately. A lock file (pid + timestamp) prevents concurrent refreshes;
- * locks older than LOCK_STALE_MS are treated as stale and overwritten.
- * Never throws, never blocks on the network.
+ * If the cache is stale and no persisted failure backoff forbids it, spawn a
+ * detached background refresh and return immediately. A lock file (pid +
+ * timestamp) prevents concurrent refreshes; locks older than LOCK_STALE_MS
+ * are treated as stale and overwritten. The backoff state file records the
+ * last failure's next-attempt time, so every render process in the same HUD
+ * home shares one retry schedule. Pass no statePath to disable the backoff
+ * gate. Never throws, never blocks on the network.
  * @param {object} [opts]
  * @returns {boolean} true when a refresh was spawned
  */
 export function ensureFreshQuota({
   cachePath = QUOTA_CACHE_PATH,
   lockPath = REFRESH_LOCK_PATH,
+  statePath = null,
   scriptPath,
   now = Date.now(),
   spawnImpl = spawn,
@@ -242,6 +258,7 @@ export function ensureFreshQuota({
   try {
     const cache = cachedQuota === undefined ? readQuotaCache(cachePath) : cachedQuota;
     if (!isQuotaStale(cache, now)) return false;
+    if (isRefreshBlocked(statePath, now)) return false;
     lockToken = acquireQuotaLock({
       lockPath,
       now,
@@ -414,54 +431,29 @@ function officialUsagesUrl(url) {
 
 /**
  * Fetch and classify one quota response without mutating the cache.
- * @returns {Promise<{status: string, parsed?: object}>}
+ * The whole request — headers, body and JSON parse — shares one deadline, and
+ * response bodies are size-capped and always released.
+ * @returns {Promise<{status: string, category: string, parsed?: object,
+ *   retryAfterSeen?: boolean, retryAfterMs?: number|null}>}
  */
 export async function requestQuota({
   token,
   url = USAGES_URL,
   timeoutMs = 8000,
+  maxBytes = MAX_RESPONSE_BYTES,
   fetchImpl = globalThis.fetch,
 } = {}) {
   if (typeof token !== 'string' || !token || !officialUsagesUrl(url)) {
-    return { status: QUOTA_RESULT.INVALID };
+    return { status: QUOTA_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
   }
-  const ctrl = new AbortController();
-  let timer;
-  const timeout = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => {
-      ctrl.abort();
-      reject(new Error('quota request timed out'));
-    }, timeoutMs);
+  return requestJsonWithLimits({
+    url,
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    timeoutMs,
+    maxBytes,
+    fetchImpl,
+    parse: parseQuotaPayload,
   });
-  let res;
-  try {
-    res = await Promise.race([
-      fetchImpl(url, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        signal: ctrl.signal,
-      }),
-      timeout,
-    ]);
-  } catch {
-    return { status: QUOTA_RESULT.TRANSIENT };
-  } finally {
-    clearTimeout(timer);
-  }
-  if (res.status === 401 || res.status === 403) {
-    return { status: QUOTA_RESULT.UNAUTHORIZED };
-  }
-  if (res.status === 429 || res.status >= 500) {
-    return { status: QUOTA_RESULT.TRANSIENT };
-  }
-  if (!res.ok) return { status: QUOTA_RESULT.INVALID };
-  try {
-    const parsed = parseQuotaPayload(await res.json());
-    return parsed
-      ? { status: QUOTA_RESULT.SUCCESS, parsed }
-      : { status: QUOTA_RESULT.INVALID };
-  } catch {
-    return { status: QUOTA_RESULT.INVALID };
-  }
 }
 
 /**
@@ -472,6 +464,17 @@ export async function requestQuota({
  * for a logged-out account. A 401/403 with a refresh_token still present is
  * only an expired access_token — the cache survives until the CLI's lazy
  * refresh lets the next attempt succeed.
+ *
+ * Every failed attempt (timeout, network error, 429, 5xx, auth, unusable
+ * payload) persists a failure record with the error category and the next
+ * allowed attempt time; success clears it. The record is keyed by a
+ * non-reversible digest of the credential path and endpoint, so switching
+ * context restarts the failure count instead of inheriting the previous
+ * account's lockout. Pass no statePath to skip persistence. Note the
+ * scheduler-side gate reads this same file, so after a context switch the
+ * first spawn may still wait out the previously recorded window (bounded by
+ * RETRY_MAX_DELAY_MS); the account/region tagging of the cache itself is
+ * tracked separately by H02.
  *
  * The cache deliberately carries no account, credential-slot, or endpoint
  * tag. After an account or region switch, previous figures may keep rendering:
@@ -487,11 +490,15 @@ export async function refreshQuota({
   credentialsPath = CREDENTIALS_PATH,
   cachePath = QUOTA_CACHE_PATH,
   lockPath = REFRESH_LOCK_PATH,
+  statePath = null,
   url = USAGES_URL,
   timeoutMs = 8000,
   fetchImpl = globalThis.fetch,
   lockToken = null,
+  now = Date.now(),
+  jitter = Math.random,
 } = {}) {
+  const contextKey = shortDigest(credentialsPath, url);
   try {
     let cred = null;
     try {
@@ -516,11 +523,24 @@ export async function refreshQuota({
       if (!canRefresh) {
         try { fs.unlinkSync(cachePath); } catch { /* no cache to drop */ }
       }
+      recordRefreshFailure({ statePath, category: REQUEST_CATEGORY.AUTH, now, jitter, contextKey });
       return false;
     }
-    if (result.status !== QUOTA_RESULT.SUCCESS) return false;
-    writeQuotaCache(result.parsed, cachePath);
-    return true;
+    if (result.status === QUOTA_RESULT.SUCCESS) {
+      writeQuotaCache(result.parsed, cachePath, { now });
+      clearRefreshState(statePath);
+      return true;
+    }
+    recordRefreshFailure({
+      statePath,
+      category: result.category,
+      retryAfterSeen: result.retryAfterSeen === true,
+      retryAfterMs: result.retryAfterMs ?? null,
+      now,
+      jitter,
+      contextKey,
+    });
+    return false;
   } catch {
     return false;
   } finally {
