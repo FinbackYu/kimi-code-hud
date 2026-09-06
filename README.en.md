@@ -10,7 +10,7 @@ A custom status line (HUD) for the [Kimi Code CLI](https://www.kimi.com/) — a 
 
 ## Install
 
-Requires Node.js ≥ 18 (global `fetch`). Zero npm dependencies.
+Requires Node.js ≥ 18 (global `fetch`). Zero npm dependencies. See [Supported environments](#supported-environments) below for the runtime, OS, and host support policy.
 
 In the Kimi Code TUI, run:
 
@@ -22,6 +22,17 @@ In the Kimi Code TUI, run:
 - Toggle: select it in the `/plugins` panel and press `Space`, or run `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`;
 - If you already configured your own `[status_line]` command, the hook leaves it untouched;
 - **Update**: run the install command again — the managed copy is replaced in place and the status line picks up the new version within ~1 second.
+
+## Supported environments
+
+| Tier | Scope | Verification |
+|---|---|---|
+| Recommended runtimes | Node.js LTS lines inside their upstream maintenance window (at the time of writing, 22 / 24) | The target of day-to-day development and release verification |
+| Best-effort runtimes | Every version meeting the **Node.js ≥ 18** minimum (the minimum is unchanged) | Releases past their upstream End-of-Life (e.g. 18 / 20) are not proactively tested; issues there are handled on a best-effort basis |
+| Operating systems | macOS / Linux / Windows | macOS is the maintainer's primary development and dynamic-verification environment; Linux is covered by the automated CI suite (actual matrix: [`.github/workflows/test.yml`](.github/workflows/test.yml)); Windows is best-effort — the Git probe already resolves a trusted executable the Windows way (including `PATHEXT`, see [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)), but dynamic verification on a real Windows host has not been completed (not dynamically verified) |
+| Kimi Code host | Verified baseline **0.41.0** | Per-release contract audits with pinned upstream commits live in [CAPABILITIES.md](CAPABILITIES.md) |
+
+Changes to the CI matrix are changes in test coverage, not in the support contract: adding or removing matrix entries never widens or shrinks the support statements above — this section is the contract. The interactive cross-OS host matrix (real TUI, terminal emulators, plugin lifecycle) is still being filled in (not dynamically verified).
 
 ## Configuration
 
