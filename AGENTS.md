@@ -7,6 +7,7 @@ This is a zero-dependency Node.js ESM CLI. `bin/kimi-hud.mjs` is the executable 
 ## Build, Test, and Development Commands
 
 - `npm test` — run the complete `node:test` suite. There is no build step.
+- `npm run bench` — run the render hot-path benchmark (`scripts/bench-render.mjs`): spawn-to-exit latency percentiles over synthetic sandboxed sessions, cold/warm cache, long wire, multi-agent, oversized unfinished line, and slow-I/O via FIFO; `--json` gives a machine-readable report. Results are machine-specific evidence — record them outside the repo and never turn them into CI gates.
 - `node --test --experimental-test-coverage` — run tests with Node’s built-in coverage report.
 - `node bin/kimi-hud.mjs --help` — verify the CLI entry point and supported options.
 - `printf '' | node bin/kimi-hud.mjs` — smoke-test the empty-input fallback.
