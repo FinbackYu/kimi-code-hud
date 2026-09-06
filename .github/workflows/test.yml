@@ -4,16 +4,41 @@ on:
   push:
   pull_request:
 
+# Read-only CI: no job needs write access to the repository.
 permissions:
   contents: read
 
 jobs:
   node-test:
-    runs-on: ubuntu-latest
+    # Support tiers follow the Node.js release schedule
+    # (https://nodejs.org/en/about/eol):
+    # - Node 24 (Active LTS) is the recommended runtime and the only tier run
+    #   on every supported OS (Linux, macOS, Windows).
+    # - Node 22 (Maintenance LTS, security support through 2027-04) runs on a
+    #   single OS; it catches Node-core regressions without tripling the
+    #   matrix.
+    # - Node 20 (EOL since 2026-04) and Node 18 (EOL since 2025-04) run as
+    #   non-blocking best-effort jobs: package.json still declares ">=18", so
+    #   accidental breakage of the declared floor must stay visible, but EOL
+    #   runtimes must not gate merges. Removing them from CI later would not
+    #   change the support contract either — the engines field and the support
+    #   policy do that.
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental == true }}
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 22]
+        node: [24]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - node: 22
+            os: ubuntu-latest
+          - node: 20
+            os: ubuntu-latest
+            experimental: true
+          - node: 18
+            os: ubuntu-latest
+            experimental: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,11 +50,57 @@ jobs:
       - name: Syntax check
         shell: bash
         run: |
-          for file in bin/*.mjs hooks/*.mjs src/*.mjs; do
+          shopt -s nullglob
+          for file in bin/*.mjs hooks/*.mjs src/*.mjs scripts/*.mjs; do
             node --check "$file"
           done
       - name: Empty-input smoke test
+        shell: bash
         run: printf '' | node bin/kimi-hud.mjs
+      - name: Shell quoting smoke test (spaces, CJK, shell metacharacters)
+        shell: bash
+        # Exercises the generated statusLine command end to end: the CLI is
+        # copied to a path that forces quoteCommandArg quoting, --install
+        # persists it into an isolated tui.toml, and the exact persisted
+        # string is executed through a real POSIX shell. Windows hosts run the
+        # generated command with their own shell, whose semantics remain
+        # unverified for this project (no local Windows), so the execution
+        # half of this step is POSIX-only; the install/render/uninstall half
+        # runs everywhere.
+        run: |
+          set -euo pipefail
+          root="$(pwd)"
+          base="$(mktemp -d)/hud 空格 & 'quote' \$dir"
+          mkdir -p "$base/hud" "$base/kimi-code-home"
+          cp -R "$root/bin" "$root/src" "$root/hooks" "$base/hud/"
+          git init -q "$base"
+          git -C "$base" -c user.name=hud-ci -c user.email=hud-ci@example.com commit -q --allow-empty -m smoke
+          cd "$base"
+          export KIMI_CODE_HOME="$base/kimi-code-home"
+          export KIMI_HUD_HOME="$base/hud-home"
+          script="$base/hud/bin/kimi-hud.mjs"
+
+          node "$script" --install >/dev/null
+          grep -q '^command = ' "$KIMI_CODE_HOME/tui.toml"
+
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            generated="$(node -e '
+              const fs = require("node:fs");
+              const line = fs.readFileSync(process.argv[1], "utf8")
+                .split("\n")
+                .find((entry) => entry.startsWith("command = "));
+              if (!line) process.exit(1);
+              process.stdout.write(JSON.parse(line.slice("command = ".length)));
+            ' "$KIMI_CODE_HOME/tui.toml")"
+            printf '' | bash -c "$generated" >/dev/null
+          fi
+
+          printf '' | node "$script" >/dev/null
+          node "$script" --uninstall >/dev/null
+          if grep -q '^command = ' "$KIMI_CODE_HOME/tui.toml"; then
+            echo "statusLine command survived --uninstall" >&2
+            exit 1
+          fi
       - name: Whitespace check
         shell: bash
         run: |
