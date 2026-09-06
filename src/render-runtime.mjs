@@ -16,7 +16,11 @@ import {
   readProviderUsageCache,
   resolveProviderUsageTarget,
 } from './provider-usage.mjs';
-import { ensureFreshQuota } from './quota.mjs';
+import {
+  ensureFreshQuota,
+  quotaCacheMatchesContext,
+  resolveQuotaContextKey,
+} from './quota.mjs';
 import { renderHud } from './render.mjs';
 import { resolveRuntimePaths } from './paths.mjs';
 import {
@@ -83,7 +87,24 @@ export async function renderStatusLine({
   let quota = null;
   let providerUsage = null;
   if (provider === MANAGED_KIMI_PROVIDER) {
-    quota = snapshot.quota;
+    // The cache is only current quota when its context tag still matches the
+    // credential slot + region the config points at right now. Everything
+    // else — a legacy untagged cache, a cache fetched for a different region
+    // or credential slot — renders nothing and is treated as refresh-needing,
+    // so a same-context refresh rewrites a tagged cache promptly. The
+    // expected context is derived from the config text this frame already
+    // read (no extra file I/O, and only when there is a cache to vet); the
+    // detached refresh resolves the same way.
+    let cached = null;
+    if (snapshot.quota !== null) {
+      const contextKey = resolveQuotaContextKey({
+        env,
+        configText: snapshot.configTomlText,
+        kimiHome: paths.kimiHome,
+      });
+      if (quotaCacheMatchesContext(snapshot.quota, contextKey)) cached = snapshot.quota;
+    }
+    quota = cached;
     if (remainingMs(deadline, clock) >= REFRESH_MIN_REMAINING_MS) {
       const ensureQuota = dependencies.ensureFreshQuota || ensureFreshQuota;
       ensureQuota({
@@ -91,7 +112,7 @@ export async function renderStatusLine({
         cachePath: paths.quotaCachePath,
         lockPath: paths.quotaLockPath,
         statePath: paths.quotaRefreshStatePath,
-        cachedQuota: snapshot.quota,
+        cachedQuota: cached,
         now,
       });
     }

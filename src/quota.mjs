@@ -16,6 +16,7 @@ import {
   QUOTA_CACHE_PATH,
   QUOTA_REFRESH_STATE_PATH,
   REFRESH_LOCK_PATH,
+  resolveRuntimePaths,
 } from './paths.mjs';
 import {
   MAX_RESPONSE_BYTES,
@@ -32,6 +33,47 @@ export const USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
 export const GLOBAL_USAGES_URL = 'https://api.kimi.ai/coding/v1/usages';
 export const QUOTA_TTL_MS = 60_000;
 export const LOCK_STALE_MS = 30_000;
+
+/**
+ * On-disk quota cache schema. Version 2 adds the non-reversible context tag
+ * (`contextKey`, derived from the credential slot + endpoint) that lets the
+ * render data plane tell whether the figures still belong to the account and
+ * region the config currently points at. Version-1 caches (no version, no
+ * contextKey) are deliberately not readable as current quota: they cannot be
+ * attributed to a context, so they render nothing until the next successful
+ * refresh rewrites a tagged cache.
+ */
+export const QUOTA_CACHE_VERSION = 2;
+
+/**
+ * Freshness contract shared by the scheduler and the renderer.
+ *
+ *  - fresh   (age <= QUOTA_TTL_MS): rendered as the current figure;
+ *  - stale   (TTL < age <= QUOTA_STALE_MAX_MS): still usable — shown dimmed
+ *    with an explicit `[stale]` marker so a monochrome terminal can tell it
+ *    apart from fresh data while a background refresh is throttled/offline;
+ *  - expired (age > QUOTA_STALE_MAX_MS, or a fetchedAt so far in the future
+ *    that the clock must have moved): hidden entirely — the figure is never
+ *    presented as current once it can no longer be trusted.
+ *
+ * QUOTA_STALE_MAX_MS is one week, the longest horizon any returned window
+ * (the weekly summary) can legitimately describe before its own reset, so a
+ * cache older than that is always superseded rather than merely unrefreshed.
+ * The future-skew allowance lets a small clock step forward (NTP correction)
+ * not hide a just-written cache, while a large rollback turns the cache into
+ * "needs refresh" instead of pinning it fresh forever.
+ */
+export const QUOTA_STALE_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+export const QUOTA_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/** Shape of every context tag: 16 lowercase hex chars (sha-256 prefix). */
+export const QUOTA_CONTEXT_KEY_RE = /^[0-9a-f]{16}$/;
+
+export const QUOTA_AGE = Object.freeze({
+  FRESH: 'fresh',
+  STALE: 'stale',
+  EXPIRED: 'expired',
+});
 
 export const QUOTA_RESULT = Object.freeze({
   SUCCESS: 'success',
@@ -70,9 +112,25 @@ function toNum(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Values treated as "the field was not reported" instead of a numeric zero.
+ * JSON null and empty/whitespace strings are how an unset counter can arrive
+ * in a tolerant payload; coercing them through Number() would silently turn a
+ * missing `used` into a fabricated zero. Upstream (packages/oauth managed-usage
+ * toUsageRow) documents `used` as an always-present decimal string, so this
+ * branch only ever sees hypothetical/hand-built shapes.
+ */
+function isAbsentLike(v) {
+  return v === null
+    || v === undefined
+    || typeof v === 'boolean'
+    || (typeof v === 'string' && v.trim() === '');
+}
+
 function quotaValues(detail) {
   const limit = toNum(detail.limit);
-  let used = toNum(detail.used);
+  let used = null;
+  if (!isAbsentLike(detail.used)) used = toNum(detail.used);
   if (used === null) {
     const remaining = toNum(detail.remaining);
     // Bonus/overflow quota can report remaining > limit; clamp to zero usage
@@ -124,14 +182,26 @@ export function parseQuotaPayload(json) {
 
 /**
  * Read the quota cache file. Never throws.
+ *
+ * Only schema-version 2 caches — those carrying a `contextKey` tag — are
+ * returned. Anything else (legacy version-1 files, hand-written shapes) is
+ * treated as absent: it cannot be attributed to the current credential slot
+ * and endpoint, so it must never surface as current quota. The first
+ * successful refresh rewrites a tagged cache in place.
  * @param {string} [cachePath]
- * @returns {{fetchedAt: number, weekly: object|null, windows: object[]}|null}
+ * @returns {{fetchedAt: number, contextKey: string, weekly: object|null,
+ *   windows: object[]}|null}
  */
 export function readQuotaCache(cachePath = QUOTA_CACHE_PATH) {
   try {
     const raw = fs.readFileSync(cachePath, 'utf8');
     const data = JSON.parse(raw);
-    if (!data || typeof data !== 'object' || typeof data.fetchedAt !== 'number') return null;
+    if (!data || typeof data !== 'object') return null;
+    if (data.version !== QUOTA_CACHE_VERSION) return null;
+    if (typeof data.contextKey !== 'string' || !QUOTA_CONTEXT_KEY_RE.test(data.contextKey)) {
+      return null;
+    }
+    if (typeof data.fetchedAt !== 'number' || !Number.isFinite(data.fetchedAt)) return null;
     return data;
   } catch {
     return null;
@@ -139,30 +209,126 @@ export function readQuotaCache(cachePath = QUOTA_CACHE_PATH) {
 }
 
 /**
+ * Classify a cache's age into the fresh / stale / expired contract shared by
+ * the renderer and the refresh scheduler. A missing cache or a non-finite
+ * fetchedAt is expired (nothing trustworthy to show); a fetchedAt far in the
+ * future means the clock moved backwards, which is likewise untrusted.
  * @param {object|null} cache
  * @param {number} [now]
- * @returns {boolean} true when missing or older than TTL
+ * @returns {{state: string, ageMs: number|null}}
  */
-export function isQuotaStale(cache, now = Date.now()) {
-  if (!cache) return true;
-  return now - cache.fetchedAt > QUOTA_TTL_MS;
+export function quotaAge(cache, now = Date.now()) {
+  if (!cache || typeof cache.fetchedAt !== 'number' || !Number.isFinite(cache.fetchedAt)) {
+    return { state: QUOTA_AGE.EXPIRED, ageMs: null };
+  }
+  const ageMs = now - cache.fetchedAt;
+  if (ageMs < -QUOTA_CLOCK_SKEW_MS) return { state: QUOTA_AGE.EXPIRED, ageMs };
+  const age = ageMs < 0 ? 0 : ageMs;
+  if (age <= QUOTA_TTL_MS) return { state: QUOTA_AGE.FRESH, ageMs };
+  if (age <= QUOTA_STALE_MAX_MS) return { state: QUOTA_AGE.STALE, ageMs };
+  return { state: QUOTA_AGE.EXPIRED, ageMs };
 }
 
 /**
- * Atomically write the quota cache (tmp file + rename). Never throws.
+ * True when the cache needs a background refresh: missing, older than the
+ * fresh window, or stamped so far in the future that the clock must have
+ * moved backwards. A cache inside the stale-but-usable window is still
+ * refresh-worthy — the scheduler keeps trying while the renderer may keep
+ * showing the dimmed figure until the retry backoff lets it through.
+ * @param {object|null} cache
+ * @param {number} [now]
+ * @returns {boolean}
+ */
+export function isQuotaStale(cache, now = Date.now()) {
+  if (!cache) return true;
+  return quotaAge(cache, now).state !== QUOTA_AGE.FRESH;
+}
+
+/**
+ * Atomically write a schema-version-2, context-tagged quota cache (tmp file +
+ * rename). Refuses to persist an unattributed cache: every on-disk quota file
+ * must be able to answer "which credential slot and endpoint does this belong
+ * to?". Never throws.
  * @param {object} parsed result of parseQuotaPayload
  * @param {string} [cachePath]
  * @param {object} [opts]
  * @param {number} [opts.now] fetchedAt stamp; defaults to the real clock
+ * @param {string} [opts.contextKey] 16-hex digest of the credential slot +
+ *   endpoint this payload was fetched from
+ * @returns {boolean} true when the cache was written
  */
-export function writeQuotaCache(parsed, cachePath = QUOTA_CACHE_PATH, { now = Date.now() } = {}) {
+export function writeQuotaCache(parsed, cachePath = QUOTA_CACHE_PATH, {
+  now = Date.now(),
+  contextKey = null,
+} = {}) {
+  if (typeof contextKey !== 'string' || !QUOTA_CONTEXT_KEY_RE.test(contextKey)) return false;
+  if (!parsed || typeof parsed !== 'object') return false;
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    const body = JSON.stringify({ fetchedAt: now, ...parsed });
+    const body = JSON.stringify({
+      version: QUOTA_CACHE_VERSION,
+      contextKey,
+      fetchedAt: now,
+      ...parsed,
+    });
     atomicWriteFile(cachePath, body);
+    return true;
   } catch {
-    // stay silent
+    return false;
   }
+}
+
+/**
+ * The non-reversible context tag for one credential slot + endpoint pair.
+ * The same digest that keys refresh backoff state (request-guard.mjs) tags
+ * the cache, so backoff isolation and cache attribution always agree.
+ * @param {string} credentialsPath
+ * @param {string} url
+ * @returns {string}
+ */
+export function quotaContextKeyFor(credentialsPath, url) {
+  return shortDigest(credentialsPath, url);
+}
+
+/**
+ * The context tag the current config/env expects, derived without any file
+ * I/O when `configText` is supplied (the render hot path passes the config
+ * text it already read this frame). Uses the same fail-closed resolution as
+ * the detached refresh, so both sides agree on what "the current context" is.
+ * Never throws; returns the 16-hex digest of the resolved credential slot and
+ * endpoint.
+ * @param {object} [opts]
+ * @param {object} [opts.env] same env override source as resolveQuotaEndpoints
+ * @param {string} [opts.configPath] config.toml path read when configText is
+ *   absent (detached refresh only — never called on the hot path)
+ * @param {string} [opts.configText] pre-read config.toml text (hot path)
+ * @param {string} [opts.kimiHome] Kimi home dir holding credentials/
+ * @returns {string}
+ */
+export function resolveQuotaContextKey({
+  env = {},
+  configPath = CONFIG_TOML_PATH,
+  configText = undefined,
+  kimiHome = KIMI_HOME,
+} = {}) {
+  const endpoints = resolveQuotaEndpoints({ env, configPath, configText, kimiHome });
+  return quotaContextKeyFor(endpoints.credentialsPath, endpoints.url);
+}
+
+/**
+ * True when the cache is a schema-version-2 cache tagged for the given
+ * context. The render data plane calls this before presenting quota figures:
+ * a cache from another credential slot or region is never shown as the
+ * current account's numbers.
+ * @param {object|null} cache
+ * @param {string|null} contextKey
+ * @returns {boolean}
+ */
+export function quotaCacheMatchesContext(cache, contextKey) {
+  return !!cache
+    && cache.version === QUOTA_CACHE_VERSION
+    && typeof cache.contextKey === 'string'
+    && cache.contextKey === contextKey;
 }
 
 function readRefreshLock(lockPath) {
@@ -473,16 +639,26 @@ export async function requestQuota({
  * account's lockout. Pass no statePath to skip persistence. Note the
  * scheduler-side gate reads this same file, so after a context switch the
  * first spawn may still wait out the previously recorded window (bounded by
- * RETRY_MAX_DELAY_MS); the account/region tagging of the cache itself is
- * tracked separately by H02.
+ * RETRY_MAX_DELAY_MS).
  *
- * The cache deliberately carries no account, credential-slot, or endpoint
- * tag. After an account or region switch, previous figures may keep rendering:
- * the 60s TTL marks them stale and schedules this refresh, but does not evict
- * them. A successful refresh — which always re-resolves the region — rewrites
- * the cache; repeated 401/403 responses with a remaining refresh_token may
- * preserve it beyond one TTL. A tag would not help the render hot path unless
- * that path also re-parsed config.toml to learn the expected context.
+ * Before this request may mutate the shared cache (write after success, drop
+ * after /logout or missing token) the live config is re-resolved and compared
+ * with the context this request actually used. A refresh that started before
+ * an account, region, or credential-slot switch therefore never overwrites or
+ * deletes the new context's cache with figures belonging to the old one — the
+ * stale result is dropped and the next frame spawns a refresh for the current
+ * context. The successful cache write carries the same context tag
+ * (version 2), which the render data plane compares against the config's
+ * current context before displaying anything; legacy untagged caches are not
+ * treated as current quota until a refresh re-tags them.
+ *
+ * Same-slot account switches remain undetectable by design: upstream keeps one
+ * credential slot per region/env and persists no account identity beside the
+ * tokens, so a fresh login overwrites the same file and the HUD cannot tell a
+ * new account from a rotated token before the next successful refresh. Those
+ * refreshes are rate-limited to one per TTL/failure window; between a switch
+ * and the next success the previous figures may render at most within that
+ * stale window and are always dimmed/hidden past the age contract.
  * @param {object} [opts]
  * @returns {Promise<boolean>} true when the cache was updated
  */
@@ -497,8 +673,33 @@ export async function refreshQuota({
   lockToken = null,
   now = Date.now(),
   jitter = Math.random,
+  env = process.env,
+  configPath = undefined,
+  configText = undefined,
+  kimiHome = undefined,
 } = {}) {
-  const contextKey = shortDigest(credentialsPath, url);
+  const contextKey = quotaContextKeyFor(credentialsPath, url);
+  const runtimePaths = resolveRuntimePaths();
+  const currentConfigPath = configPath ?? runtimePaths.configTomlPath;
+  const currentKimiHome = kimiHome ?? runtimePaths.kimiHome;
+  // Re-resolve the live config and test whether it still points at the
+  // credential slot + endpoint this request used. Memoized per refresh: the
+  // guard runs at most once per cache mutation.
+  let checkedSameContext = false;
+  let sameContext = true;
+  const isStillCurrentContext = () => {
+    if (!checkedSameContext) {
+      const current = resolveQuotaEndpoints({
+        env,
+        configPath: currentConfigPath,
+        configText,
+        kimiHome: currentKimiHome,
+      });
+      sameContext = quotaContextKeyFor(current.credentialsPath, current.url) === contextKey;
+      checkedSameContext = true;
+    }
+    return sameContext;
+  };
   try {
     let cred = null;
     try {
@@ -508,7 +709,9 @@ export async function refreshQuota({
     }
     const token = cred && typeof cred.access_token === 'string' ? cred.access_token : null;
     if (!token) {
-      try { fs.unlinkSync(cachePath); } catch { /* no cache to drop */ }
+      if (isStillCurrentContext()) {
+        try { fs.unlinkSync(cachePath); } catch { /* no cache to drop */ }
+      }
       return false;
     }
     const result = await requestQuota({ token, url, timeoutMs, fetchImpl });
@@ -520,14 +723,17 @@ export async function refreshQuota({
       // account is still logged in; keep the last good cache for that case.
       const canRefresh =
         cred && typeof cred.refresh_token === 'string' && cred.refresh_token.length > 0;
-      if (!canRefresh) {
+      if (!canRefresh && isStillCurrentContext()) {
         try { fs.unlinkSync(cachePath); } catch { /* no cache to drop */ }
       }
       recordRefreshFailure({ statePath, category: REQUEST_CATEGORY.AUTH, now, jitter, contextKey });
       return false;
     }
     if (result.status === QUOTA_RESULT.SUCCESS) {
-      writeQuotaCache(result.parsed, cachePath, { now });
+      // A request that outlived a context switch must not overwrite the new
+      // context's cache (or clear its backoff) with old-context figures.
+      if (!isStillCurrentContext()) return false;
+      writeQuotaCache(result.parsed, cachePath, { now, contextKey });
       clearRefreshState(statePath);
       return true;
     }

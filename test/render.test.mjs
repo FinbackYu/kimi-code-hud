@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderHud, bar, formatCountdown } from '../src/render.mjs';
+import {
+  QUOTA_TTL_MS,
+  QUOTA_STALE_MAX_MS,
+  QUOTA_CLOCK_SKEW_MS,
+} from '../src/quota.mjs';
 import { baseCtx as sharedCtx, basePayload as sharedPayload } from './.helpers.mjs';
 
 const NOW = Date.parse('2026-07-30T10:00:00Z');
@@ -14,6 +19,8 @@ function baseCtx(overrides = {}) {
   return sharedCtx({
     payload: basePayload(),
     quota: {
+      // Fresh: fetched a minute's TTL ago at most.
+      fetchedAt: NOW - 30_000,
       weekly: { used: 25, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
       windows: [{ label: '5h', used: 31, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
     },
@@ -21,6 +28,11 @@ function baseCtx(overrides = {}) {
     now: NOW,
     ...overrides,
   });
+}
+
+/** Fresh quota shaped like the base default but with the caller's windows. */
+function quotaAt(weekly = null, windows = [{ label: '5h', used: 31, limit: 100, resetAt: '2026-07-30T12:18:00Z' }]) {
+  return { fetchedAt: NOW - 30_000, weekly, windows };
 }
 
 test('bar renders 10 cells graded by usage', () => {
@@ -64,10 +76,10 @@ test('normal layout adds project, t/s+TTFT, countdown and weekly', () => {
 test('normal layout shows zero quota usage with its reset countdown', () => {
   const [line] = renderHud(baseCtx({
     layout: 'normal',
-    quota: {
-      weekly: { used: 0, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
-      windows: [{ label: '5h', used: 0, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
-    },
+    quota: quotaAt(
+      { used: 0, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
+      [{ label: '5h', used: 0, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
+    ),
   }));
   assert.ok(line.includes('5h ░░░░░░░░░░ 0% ~2h18m'));
   assert.ok(line.includes('7d ░░░░░░░░░░ 0% ~3d2h'));
@@ -291,6 +303,7 @@ test('dynamic terminal text drops OSC, CSI, ESC, BEL, C0, DEL, and C1 controls',
       balances: [{ currency: `EU${c1Csi}R`, total: 1 }],
     },
     quota: {
+      fetchedAt: NOW - 30_000,
       weekly: null,
       windows: [{ label: `5${osc}h`, used: 31, limit: 100 }],
     },
@@ -482,10 +495,10 @@ test('light theme swaps badges to bold brighter truecolor', () => {
 });
 
 test('light theme tones the quota bar down to calmer truecolor hues', () => {
-  const hotQuota = {
-    weekly: { used: 25, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
-    windows: [{ label: '5h', used: 90, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
-  };
+  const hotQuota = quotaAt(
+    { used: 25, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
+    [{ label: '5h', used: 90, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
+  );
   // Dark (and default) bars keep the terminal-remapped ANSI levels.
   const [dark] = renderHud(baseCtx({ color: true, theme: 'dark', quota: hotQuota }));
   assert.ok(dark.includes('\x1b[31m█████████░\x1b[0m'));
@@ -497,25 +510,25 @@ test('light theme tones the quota bar down to calmer truecolor hues', () => {
 });
 
 test('compact layout colors the quota percentage by level, green stays default', () => {
-  const quotaAt = (used) => ({
-    weekly: null,
-    windows: [{ label: '5h', used, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
-  });
+  const quotaAtLevel = (used) => quotaAt(
+    null,
+    [{ label: '5h', used, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
+  );
   // Green level (<60%): no color — comfortable usage shouldn't stand out.
-  const [green] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAt(31) }));
+  const [green] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAtLevel(31) }));
   assert.ok(green.includes('5h 31% ~2h18m'));
   // Yellow (>=60%) and red (>=85%) paint the bare percentage, taking over
   // the level signal the compact layout's missing bar would carry.
-  const [yellow] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAt(70) }));
+  const [yellow] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAtLevel(70) }));
   assert.ok(yellow.includes('5h \x1b[33m70%\x1b[0m ~2h18m'));
-  const [red] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAt(90) }));
+  const [red] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAtLevel(90) }));
   assert.ok(red.includes('5h \x1b[31m90%\x1b[0m ~2h18m'));
   // Light theme uses its calmer truecolor hues; colors off stays plain.
   const [light] = renderHud(baseCtx({
-    layout: 'compact', color: true, theme: 'light', quota: quotaAt(90),
+    layout: 'compact', color: true, theme: 'light', quota: quotaAtLevel(90),
   }));
   assert.ok(light.includes('5h \x1b[38;2;185;28;28m90%\x1b[0m ~2h18m'));
-  const [plain] = renderHud(baseCtx({ layout: 'compact', quota: quotaAt(90) }));
+  const [plain] = renderHud(baseCtx({ layout: 'compact', quota: quotaAtLevel(90) }));
   assert.ok(plain.includes('5h 90% ~2h18m'));
   assert.ok(!plain.includes('\x1b['));
 });
@@ -874,4 +887,77 @@ test('task badges pluralize, hide at zero and paint primary blue', () => {
     metrics: { tasks: { bash: 1, agents: 0 } },
   }));
   assert.ok(colored.includes('\x1b[38;2;79;168;255m[1 task running]\x1b[0m'));
+});
+
+// --- H02: quota age contract ------------------------------------------------
+
+test('stale quota is dimmed and carries a plain [stale] marker', () => {
+  const staleAt = NOW - QUOTA_TTL_MS - 1;
+  const quota = {
+    fetchedAt: staleAt,
+    weekly: { used: 25, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
+    windows: [{ label: '5h', used: 31, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
+  };
+  // Monochrome: the marker alone tells the reader the figures are old.
+  const [plain] = renderHud(baseCtx({ layout: 'normal', color: false, quota }));
+  assert.ok(plain.includes('5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h [stale]'));
+  // Color: the whole stale segment is dimmed (muted 90 / dim hue).
+  const [ansi] = renderHud(baseCtx({ layout: 'normal', color: true, quota }));
+  assert.ok(ansi.includes('\x1b[90m'));
+  assert.match(ansi, /\x1b\[90m5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h \[stale\]\x1b\[0m/);
+});
+
+test('seven-day-old quota no longer renders identically to fresh quota', () => {
+  // The review repro: identical numbers, fetchedAt moved back seven days.
+  const weekOld = {
+    fetchedAt: NOW - 7 * 24 * 60 * 60 * 1000,
+    weekly: { used: 25, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
+    windows: [{ label: '5h', used: 31, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
+  };
+  const [fresh] = renderHud(baseCtx({ layout: 'compact' }));
+  const [old] = renderHud(baseCtx({ layout: 'compact', quota: weekOld }));
+  assert.notEqual(fresh, old);
+  assert.ok(old.includes('[stale]'));
+  assert.ok(!fresh.includes('[stale]'));
+});
+
+test('quota past the one-week ceiling is hidden entirely', () => {
+  const hardExpired = {
+    fetchedAt: NOW - QUOTA_STALE_MAX_MS - 1,
+    weekly: { used: 25, limit: 100 },
+    windows: [{ label: '5h', used: 31, limit: 100 }],
+  };
+  const [line] = renderHud(baseCtx({ layout: 'normal', quota: hardExpired }));
+  assert.doesNotMatch(line, /5h|7d|█|░/);
+  assert.ok(line.includes('[Always Ask] K3'));
+});
+
+test('quota at exactly the stale ceiling is still usable with the marker', () => {
+  const boundary = {
+    fetchedAt: NOW - QUOTA_STALE_MAX_MS,
+    weekly: null,
+    windows: [{ label: '5h', used: 31, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
+  };
+  const [line] = renderHud(baseCtx({ layout: 'compact', quota: boundary }));
+  assert.ok(line.includes('5h 31% ~2h18m [stale]'));
+});
+
+test('future-stamped quota: small clock skew stays fresh, big rollback hides', () => {
+  const windows = [{ label: '5h', used: 31, limit: 100 }];
+  const nearFuture = { fetchedAt: NOW + 60_000, weekly: null, windows };
+  const [fresh] = renderHud(baseCtx({ layout: 'compact', quota: nearFuture }));
+  assert.ok(fresh.includes('5h 31%'));
+  assert.ok(!fresh.includes('[stale]'));
+
+  const rolledBack = { fetchedAt: NOW + QUOTA_CLOCK_SKEW_MS + 60_000, weekly: null, windows };
+  const [hidden] = renderHud(baseCtx({ layout: 'compact', quota: rolledBack }));
+  assert.doesNotMatch(hidden, /5h/);
+});
+
+test('quota without a usable fetchedAt renders nothing', () => {
+  const [line] = renderHud(baseCtx({
+    layout: 'normal',
+    quota: { weekly: { used: 1, limit: 2 }, windows: [] },
+  }));
+  assert.doesNotMatch(line, /5h|7d/);
 });

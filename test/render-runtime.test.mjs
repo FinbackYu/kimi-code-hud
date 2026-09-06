@@ -7,6 +7,7 @@ import { performance } from 'node:perf_hooks';
 import { PassThrough } from 'node:stream';
 
 import { renderStatusLine, RUNTIME_BUDGET_MS } from '../src/render-runtime.mjs';
+import { resolveQuotaContextKey } from '../src/quota.mjs';
 import {
   resolveProviderUsageTarget,
   writeProviderUsageCache,
@@ -74,6 +75,8 @@ test('runtime snapshot reads and parses the four per-frame sources', () => {
   fs.writeFileSync(paths.configTomlPath, '[models."K3"]\nprovider = "anthropic"\n');
   fs.writeFileSync(paths.tuiTomlPath, 'theme = "light"\n');
   fs.writeFileSync(paths.quotaCachePath, JSON.stringify({
+    version: 2,
+    contextKey: '0123456789abcdef',
     fetchedAt: 1,
     weekly: null,
     windows: [],
@@ -91,6 +94,8 @@ test('runtime snapshot skips the remaining sources once the deadline is spent', 
   fs.writeFileSync(paths.configTomlPath, '[models."K3"]\nprovider = "anthropic"\n');
   fs.writeFileSync(paths.tuiTomlPath, 'theme = "light"\n');
   fs.writeFileSync(paths.quotaCachePath, JSON.stringify({
+    version: 2,
+    contextKey: '0123456789abcdef',
     fetchedAt: 1,
     weekly: null,
     windows: [],
@@ -162,22 +167,34 @@ test('runtime shares one deadline and skips refresh and Git when budget is gone'
   assert.ok(result.line.includes('git:(main)'));
 });
 
-test('runtime passes the captured quota to refresh and uses remaining Git time', async () => {
+test('runtime passes a context-matching quota cache to render and refresh', async () => {
   const paths = makePaths();
-  const cachedQuota = { fetchedAt: 1, weekly: null, windows: [] };
+  const now = 1_000_000;
+  const env = { NO_COLOR: '1' };
+  const configText = '[models."K3"]\nprovider = "managed:kimi-code"\n';
+  const contextKey = resolveQuotaContextKey({ env, configText, kimiHome: paths.kimiHome });
+  const cachedQuota = {
+    version: 2,
+    contextKey,
+    fetchedAt: now - 1_000,
+    weekly: { used: 25, limit: 100 },
+    windows: [{ label: '5h', used: 31, limit: 100 }],
+  };
   let refreshOptions = null;
   let gitTimeout = null;
   let gitCachePath = null;
   const result = await renderStatusLine({
     scriptPath: '/tmp/kimi-hud.mjs',
     paths,
+    now,
+    env,
     clock: () => 0,
     dependencies: {
       managedPluginDisabled: () => false,
       readPayload: async () => payload(),
       captureRuntimeSnapshot: () => ({
         hudConfig: {},
-        configTomlText: '[models."K3"]\nprovider = "managed:kimi-code"\n',
+        configTomlText: configText,
         tuiTomlText: '',
         quota: cachedQuota,
       }),
@@ -195,6 +212,78 @@ test('runtime passes the captured quota to refresh and uses remaining Git time',
   assert.equal(gitTimeout, 218);
   assert.equal(gitCachePath, paths.gitStatusCachePath);
   assert.ok(result.line.includes('git:(main*)'));
+  // The matching cache is shown as current quota.
+  assert.ok(result.line.includes('5h ███░░░░░░░ 31%'));
+  assert.ok(result.line.includes('7d ██░░░░░░░░ 25%'));
+});
+
+test('runtime hides a cache tagged for another context and refreshes with null', async () => {
+  const paths = makePaths();
+  const now = 1_000_000;
+  const env = { NO_COLOR: '1' };
+  const configText = '[models."K3"]\nprovider = "managed:kimi-code"\n';
+  const expectedKey = resolveQuotaContextKey({ env, configText, kimiHome: paths.kimiHome });
+  // A different (e.g. other-region / other-slot) tag: fresh-looking figures
+  // that do not belong to the current context must not render as current.
+  const foreignQuota = {
+    version: 2,
+    contextKey: expectedKey === '0123456789abcdef' ? 'fedcba9876543210' : '0123456789abcdef',
+    fetchedAt: now - 1_000,
+    weekly: { used: 25, limit: 100 },
+    windows: [{ label: '5h', used: 31, limit: 100 }],
+  };
+  let refreshOptions = null;
+  const result = await renderStatusLine({
+    scriptPath: '/tmp/kimi-hud.mjs',
+    paths,
+    now,
+    env,
+    clock: () => 0,
+    dependencies: {
+      managedPluginDisabled: () => false,
+      readPayload: async () => payload(),
+      captureRuntimeSnapshot: () => ({
+        hudConfig: {},
+        configTomlText: configText,
+        tuiTomlText: '',
+        quota: foreignQuota,
+      }),
+      getMetrics: () => metrics(),
+      ensureFreshQuota: (options) => { refreshOptions = options; },
+    },
+  });
+  assert.equal(refreshOptions.cachedQuota, null); // treated as refresh-needing
+  assert.doesNotMatch(result.line, /5h|7d/);
+});
+
+test('runtime treats a legacy untagged quota cache as absent and refreshes with null', async () => {
+  const paths = makePaths();
+  const now = 1_000_000;
+  const env = { NO_COLOR: '1' };
+  const configText = '[models."K3"]\nprovider = "managed:kimi-code"\n';
+  fs.writeFileSync(paths.configTomlPath, configText);
+  // Pre-H02 on-disk schema: no version, no contextKey.
+  fs.writeFileSync(paths.quotaCachePath, JSON.stringify({
+    fetchedAt: now - 1_000,
+    weekly: { used: 25, limit: 100 },
+    windows: [{ label: '5h', used: 31, limit: 100 }],
+  }));
+  let refreshOptions = null;
+  const result = await renderStatusLine({
+    scriptPath: '/tmp/kimi-hud.mjs',
+    paths,
+    now,
+    env,
+    clock: () => 0,
+    dependencies: {
+      managedPluginDisabled: () => false,
+      readPayload: async () => payload(),
+      getMetrics: () => metrics(),
+      ensureFreshQuota: (options) => { refreshOptions = options; },
+    },
+  });
+  assert.equal(refreshOptions.cachedQuota, null);
+  assert.doesNotMatch(result.line, /5h|7d/);
 });
 
 test('runtime fails closed for a null provider without quota or provider refresh', async () => {
