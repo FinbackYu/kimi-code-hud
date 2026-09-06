@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { formatGoalBadge } from './goal.mjs';
+import { QUOTA_AGE, quotaAge } from './quota.mjs';
 
 const ESC = '\x1b[';
 const RESET = `${ESC}0m`;
@@ -431,6 +432,17 @@ function cacheSegment({ metrics }) {
 
 function quotaSegment({ layout, quota, color, now, C }) {
   if (!quota) return null;
+  // The age contract lives in quota.mjs so rendering and the refresh
+  // scheduler share one boundary: fresh figures render normally, stale ones
+  // stay visible but dimmed with a plain-text marker, and anything past the
+  // maximum stale age (or stamped impossibly far in the future) is dropped —
+  // seven-day-old numbers must never be presented the same as fresh ones.
+  const age = quotaAge(quota, now);
+  if (age.state === QUOTA_AGE.EXPIRED) return null;
+  const stale = age.state === QUOTA_AGE.STALE;
+  // Usage-level colors (bar / percentage) only apply to fresh figures; a
+  // stale segment is toned down as a whole so it reads as old, not current.
+  const useLevelColor = color && !stale;
   const parts = [];
   for (const window of quota.windows || []) {
     const fraction = window.used / window.limit;
@@ -441,9 +453,9 @@ function quotaSegment({ layout, quota, color, now, C }) {
     let text;
     if (layout === 'compact') {
       const level = numberLevelColor(fraction, C);
-      text = `${label} ${level ? colorize(color, level, pct) : pct}`;
+      text = `${label} ${level && useLevelColor ? colorize(color, level, pct) : pct}`;
     } else {
-      text = `${label} ${bar(fraction, color, C)} ${pct}`;
+      text = `${label} ${bar(fraction, useLevelColor, C)} ${pct}`;
     }
     const countdown = formatCountdown(window.resetAt, now);
     if (countdown) text += ` ${countdown}`;
@@ -451,12 +463,17 @@ function quotaSegment({ layout, quota, color, now, C }) {
   }
   if (layout !== 'compact' && quota.weekly) {
     const fraction = quota.weekly.used / quota.weekly.limit;
-    let text = `7d ${bar(fraction, color, C)} ${pctOf(quota.weekly.used, quota.weekly.limit)}%`;
+    let text = `7d ${bar(fraction, useLevelColor, C)} ${pctOf(quota.weekly.used, quota.weekly.limit)}%`;
     const countdown = formatCountdown(quota.weekly.resetAt, now);
     if (countdown) text += ` ${countdown}`;
     parts.push(text);
   }
-  return parts.length ? parts.join(' · ') : null;
+  if (parts.length === 0) return null;
+  const text = parts.join(' · ');
+  if (!stale) return text;
+  // Dimmed in color; the literal marker keeps the state readable when colors
+  // are disabled (NO_COLOR / KIMI_HUD_NO_COLOR).
+  return colorize(color, C.muted, `${text} [stale]`);
 }
 
 function providerBalanceText(balance) {
@@ -568,7 +585,8 @@ function buildSegments(layout, ctx) {
  * normal -> compact when the line exceeds MAX_WIDTH visible chars.
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
- * @param {object|null} ctx.quota parsed quota cache (without fetchedAt)
+ * @param {object|null} ctx.quota context-verified schema-v2 quota cache
+ *   (weekly/windows plus the fetchedAt the age contract is checked against)
  * @param {object|object[]|null} ctx.providerUsage normalized provider facts
  * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, towerMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs, tasks}
  * @param {boolean} ctx.gitDirty

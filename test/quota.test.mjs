@@ -5,12 +5,14 @@ import path from 'node:path';
 import os from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
-import { REQUEST_CATEGORY, readRefreshState, recordRefreshFailure } from '../src/request-guard.mjs';
+import { REQUEST_CATEGORY, shortDigest, readRefreshState, recordRefreshFailure } from '../src/request-guard.mjs';
 import {
   parseQuotaPayload,
   deriveWindowLabel,
   readQuotaCache,
   isQuotaStale,
+  quotaAge,
+  QUOTA_AGE,
   writeQuotaCache,
   ensureFreshQuota,
   acquireQuotaLock,
@@ -18,8 +20,14 @@ import {
   requestQuota,
   refreshQuota,
   resolveQuotaEndpoints,
+  resolveQuotaContextKey,
+  quotaContextKeyFor,
+  quotaCacheMatchesContext,
   QUOTA_RESULT,
   QUOTA_TTL_MS,
+  QUOTA_CACHE_VERSION,
+  QUOTA_STALE_MAX_MS,
+  QUOTA_CLOCK_SKEW_MS,
   LOCK_STALE_MS,
   USAGES_URL,
   GLOBAL_USAGES_URL,
@@ -35,6 +43,22 @@ const REAL_RESPONSE = {
     },
   ],
 };
+
+// Any valid 16-hex tag works for shape-level tests.
+const DUMMY_CONTEXT_KEY = '0123456789abcdef';
+
+// The mainland default slot for a temp kimi-home, used so refresh flows and
+// their seeded caches share one attributable context.
+function mainlandContextKey(kimiHome) {
+  return quotaContextKeyFor(path.join(kimiHome, 'credentials', 'kimi-code.json'), USAGES_URL);
+}
+
+/** Seed a schema-v2 cache tagged for the temp kimi-home's mainland slot. */
+function seedCache(kimiHome, cachePath, parsed = parseQuotaPayload(REAL_RESPONSE)) {
+  return writeQuotaCache(parsed, cachePath, {
+    contextKey: mainlandContextKey(kimiHome),
+  });
+}
 
 test('parseQuotaPayload parses the real /usages response (string numbers)', () => {
   const q = parseQuotaPayload(REAL_RESPONSE);
@@ -59,6 +83,44 @@ test('parseQuotaPayload restores zero usage when the API omits default used fiel
   assert.deepEqual(q.windows[0], {
     label: '5h', used: 0, limit: 100, resetAt: '2026-08-01T14:33:39Z',
   });
+});
+
+test('parseQuotaPayload treats a JSON-null used as unset and derives it from remaining', () => {
+  // The review's synthetic shape: used is present-but-null. Number(null)
+  // would coerce it to a fabricated 0; with remaining reported the intended
+  // fallback derives 100 - 20 = 80 instead. Upstream documents used as an
+  // always-present decimal string, so this pins local tolerance, not a
+  // server contract.
+  const q = parseQuotaPayload({
+    usage: { limit: 100, used: null, remaining: 20, resetTime: '2026-08-08T09:33:39Z' },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: { limit: 100, used: null, remaining: 20, resetTime: '2026-08-01T14:33:39Z' },
+      },
+    ],
+  });
+  assert.deepEqual(q.weekly, { used: 80, limit: 100, resetAt: '2026-08-08T09:33:39Z' });
+  assert.deepEqual(q.windows[0], {
+    label: '5h', used: 80, limit: 100, resetAt: '2026-08-01T14:33:39Z',
+  });
+});
+
+test('parseQuotaPayload fails closed when used is null and no remaining is reported', () => {
+  // Without remaining there is no way to recover a real used value; the row
+  // is dropped rather than shown as a fabricated zero.
+  assert.equal(parseQuotaPayload({ usage: { limit: 100, used: null } }), null);
+  assert.equal(
+    parseQuotaPayload({
+      usage: { limit: 100, used: '0' }, // an explicit zero still parses
+    }).weekly.used,
+    0,
+  );
+  // Empty/whitespace string used is likewise "not reported".
+  const q = parseQuotaPayload({
+    usage: { limit: 100, used: '  ', remaining: 25, resetTime: '2026-08-08T09:33:39Z' },
+  });
+  assert.deepEqual(q.weekly, { used: 75, limit: 100, resetAt: '2026-08-08T09:33:39Z' });
 });
 
 test('parseQuotaPayload is lenient about detail placement', () => {
@@ -92,13 +154,109 @@ test('cache round-trip and staleness', () => {
   assert.equal(readQuotaCache(cachePath), null);
   assert.equal(isQuotaStale(null), true);
 
-  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, {
+    contextKey: DUMMY_CONTEXT_KEY,
+  });
   const cache = readQuotaCache(cachePath);
+  assert.equal(cache.version, QUOTA_CACHE_VERSION);
+  assert.equal(cache.contextKey, DUMMY_CONTEXT_KEY);
   assert.equal(cache.weekly.used, 29);
   assert.equal(cache.windows[0].label, '5h');
   assert.equal(typeof cache.fetchedAt, 'number');
   assert.equal(isQuotaStale(cache, cache.fetchedAt + QUOTA_TTL_MS - 1), false);
   assert.equal(isQuotaStale(cache, cache.fetchedAt + QUOTA_TTL_MS + 1), true);
+});
+
+test('quotaAge draws the fresh/stale/expired boundaries exactly', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-age-'));
+  const cachePath = path.join(dir, 'quota.json');
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, {
+    now: 100_000,
+    contextKey: DUMMY_CONTEXT_KEY,
+  });
+  const cache = readQuotaCache(cachePath);
+  // fresh: up to and including the TTL.
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_TTL_MS).state, QUOTA_AGE.FRESH);
+  // stale: past the TTL, up to and including the one-week ceiling.
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_TTL_MS + 1).state, QUOTA_AGE.STALE);
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_STALE_MAX_MS).state, QUOTA_AGE.STALE);
+  // expired: past the ceiling, and for absent/invalid caches.
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_STALE_MAX_MS + 1).state, QUOTA_AGE.EXPIRED);
+  assert.equal(quotaAge(null).state, QUOTA_AGE.EXPIRED);
+  assert.equal(quotaAge({ fetchedAt: 'nope' }).state, QUOTA_AGE.EXPIRED);
+});
+
+test('quotaAge treats near-future stamps as fresh and far-future as expired', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-future-'));
+  const cachePath = path.join(dir, 'quota.json');
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, {
+    now: 100_000,
+    contextKey: DUMMY_CONTEXT_KEY,
+  });
+  const cache = readQuotaCache(cachePath);
+  // A clock step forward inside the skew allowance does not hide the cache.
+  assert.equal(quotaAge(cache, 100_000 - QUOTA_CLOCK_SKEW_MS).state, QUOTA_AGE.FRESH);
+  assert.equal(isQuotaStale(cache, 100_000 - QUOTA_CLOCK_SKEW_MS), false);
+  // A stamp further in the future (clock rolled back) is untrusted: expired
+  // for display and stale for the scheduler so a refresh re-stamps it.
+  assert.equal(quotaAge(cache, 100_000 - QUOTA_CLOCK_SKEW_MS - 1).state, QUOTA_AGE.EXPIRED);
+  assert.equal(isQuotaStale(cache, 100_000 - QUOTA_CLOCK_SKEW_MS - 1), true);
+});
+
+test('readQuotaCache ignores legacy and untagged caches until a refresh re-tags them', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-legacy-'));
+  const cachePath = path.join(dir, 'quota.json');
+  // Pre-H02 schema: fetchedAt only, no version, no contextKey.
+  fs.writeFileSync(cachePath, JSON.stringify({
+    fetchedAt: Date.now(),
+    weekly: parseQuotaPayload(REAL_RESPONSE).weekly,
+    windows: parseQuotaPayload(REAL_RESPONSE).windows,
+  }));
+  assert.equal(readQuotaCache(cachePath), null); // not current quota
+  assert.equal(isQuotaStale(null), true);
+
+  for (const body of [
+    { version: QUOTA_CACHE_VERSION, fetchedAt: 1, weekly: null, windows: [] }, // no tag
+    { version: QUOTA_CACHE_VERSION, contextKey: 'NOT_HEX', fetchedAt: 1 },
+    { version: 1, contextKey: DUMMY_CONTEXT_KEY, fetchedAt: 1 },
+  ]) {
+    fs.writeFileSync(cachePath, JSON.stringify(body));
+    assert.equal(readQuotaCache(cachePath), null, JSON.stringify(body));
+  }
+});
+
+test('writeQuotaCache refuses to persist an unattributed cache', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-tag-'));
+  const cachePath = path.join(dir, 'quota.json');
+  assert.equal(writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath), false);
+  assert.equal(writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, {
+    contextKey: 'xyz',
+  }), false);
+  assert.equal(fs.existsSync(cachePath), false);
+  assert.equal(writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, {
+    contextKey: DUMMY_CONTEXT_KEY,
+  }), true);
+  assert.notEqual(readQuotaCache(cachePath), null);
+});
+
+test('context tag and match helpers isolate credential slot and region', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-ctx-'));
+  const cachePath = path.join(dir, 'quota.json');
+  const mainland = resolveQuotaContextKey({ env: {}, configText: '', kimiHome: dir });
+  assert.match(mainland, /^[0-9a-f]{16}$/);
+  const globalKey = resolveQuotaContextKey({
+    env: {},
+    configText: globalConfigText(scopedOAuthKey(GLOBAL_OAUTH_HOST, GLOBAL_BASE_URL)),
+    kimiHome: dir,
+  });
+  assert.notEqual(globalKey, mainland);
+
+  const cache = parseQuotaPayload(REAL_RESPONSE);
+  writeQuotaCache(cache, cachePath, { contextKey: mainland });
+  const stored = readQuotaCache(cachePath);
+  assert.equal(quotaCacheMatchesContext(stored, mainland), true);
+  assert.equal(quotaCacheMatchesContext(stored, globalKey), false);
+  assert.equal(quotaCacheMatchesContext(null, mainland), false);
 });
 
 test('readQuotaCache tolerates corrupt files', () => {
@@ -112,12 +270,17 @@ test('refreshQuota drops the stale cache when credentials are gone (/logout)', a
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-'));
   const cachePath = path.join(dir, 'quota.json');
   const lockPath = path.join(dir, 'refresh.lock');
-  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+  const kimiHome = makeKimiHome(dir);
+  seedCache(kimiHome, cachePath);
 
   const ok = await refreshQuota({
-    credentialsPath: path.join(dir, 'missing-credentials.json'),
+    credentialsPath: path.join(kimiHome, 'credentials', 'kimi-code.json'),
+    url: USAGES_URL,
     cachePath,
     lockPath,
+    env: {},
+    configText: '',
+    kimiHome,
   });
   assert.equal(ok, false);
   assert.equal(fs.existsSync(cachePath), false);
@@ -128,12 +291,21 @@ test('refreshQuota drops the stale cache when the token is missing or corrupt', 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-'));
   const cachePath = path.join(dir, 'quota.json');
   const lockPath = path.join(dir, 'refresh.lock');
-  const credentialsPath = path.join(dir, 'creds.json');
+  const kimiHome = makeKimiHome(dir);
+  const credentialsPath = path.join(kimiHome, 'credentials', 'kimi-code.json');
 
   for (const body of [JSON.stringify({ refresh_token: 'x' }), '{broken']) {
     fs.writeFileSync(credentialsPath, body);
-    writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
-    const ok = await refreshQuota({ credentialsPath, cachePath, lockPath });
+    seedCache(kimiHome, cachePath);
+    const ok = await refreshQuota({
+      credentialsPath,
+      url: USAGES_URL,
+      cachePath,
+      lockPath,
+      env: {},
+      configText: '',
+      kimiHome,
+    });
     assert.equal(ok, false);
     assert.equal(fs.existsSync(cachePath), false);
   }
@@ -150,19 +322,14 @@ function response(status, body = null) {
 test('refreshQuota clears stale cache on 401 and 403 once the refresh_token is gone', async () => {
   for (const status of [401, 403]) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-auth-'));
-    const credentialsPath = path.join(dir, 'credentials.json');
-    const cachePath = path.join(dir, 'quota.json');
-    // No refresh_token: the /logout shape, so the cache must go too.
-    fs.writeFileSync(credentialsPath, JSON.stringify({ access_token: 'redacted' }));
-    writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+    const env = failureEnv(dir); // access_token only: the /logout shape
+    seedCache(env.kimiHome, env.cachePath);
     const ok = await refreshQuota({
-      credentialsPath,
-      cachePath,
-      lockPath: path.join(dir, 'refresh.lock'),
+      ...env,
       fetchImpl: async () => response(status),
     });
     assert.equal(ok, false);
-    assert.equal(fs.existsSync(cachePath), false);
+    assert.equal(fs.existsSync(env.cachePath), false);
   }
 });
 
@@ -172,21 +339,14 @@ test('refreshQuota keeps the stale cache on 401/403 while a refresh_token remain
   // the account is still logged in, so the last good cache must survive.
   for (const status of [401, 403]) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-expired-'));
-    const credentialsPath = path.join(dir, 'credentials.json');
-    const cachePath = path.join(dir, 'quota.json');
-    fs.writeFileSync(
-      credentialsPath,
-      JSON.stringify({ access_token: 'redacted', refresh_token: 'redacted' }),
-    );
-    writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+    const env = failureEnv(dir, { refreshToken: 'redacted' });
+    seedCache(env.kimiHome, env.cachePath);
     const ok = await refreshQuota({
-      credentialsPath,
-      cachePath,
-      lockPath: path.join(dir, 'refresh.lock'),
+      ...env,
       fetchImpl: async () => response(status),
     });
     assert.equal(ok, false);
-    assert.notEqual(readQuotaCache(cachePath), null);
+    assert.notEqual(readQuotaCache(env.cachePath), null);
   }
 });
 
@@ -198,37 +358,22 @@ test('refreshQuota preserves stale cache for transient failures', async () => {
   ];
   for (const fetchImpl of cases) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-transient-'));
-    const credentialsPath = path.join(dir, 'credentials.json');
-    const cachePath = path.join(dir, 'quota.json');
-    fs.writeFileSync(credentialsPath, JSON.stringify({ access_token: 'redacted' }));
-    writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
-    const ok = await refreshQuota({
-      credentialsPath,
-      cachePath,
-      lockPath: path.join(dir, 'refresh.lock'),
-      fetchImpl,
-    });
+    const env = failureEnv(dir);
+    seedCache(env.kimiHome, env.cachePath);
+    const ok = await refreshQuota({ ...env, fetchImpl });
     assert.equal(ok, false);
-    assert.notEqual(readQuotaCache(cachePath), null);
+    assert.notEqual(readQuotaCache(env.cachePath), null);
   }
 });
 
 test('refreshQuota preserves stale cache when the request times out', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-timeout-'));
-  const credentialsPath = path.join(dir, 'credentials.json');
-  const cachePath = path.join(dir, 'quota.json');
-  fs.writeFileSync(credentialsPath, JSON.stringify({ access_token: 'redacted' }));
-  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+  const env = failureEnv(dir);
+  seedCache(env.kimiHome, env.cachePath);
   const fetchImpl = async () => new Promise(() => {});
-  const ok = await refreshQuota({
-    credentialsPath,
-    cachePath,
-    lockPath: path.join(dir, 'refresh.lock'),
-    timeoutMs: 5,
-    fetchImpl,
-  });
+  const ok = await refreshQuota({ ...env, timeoutMs: 5, fetchImpl });
   assert.equal(ok, false);
-  assert.notEqual(readQuotaCache(cachePath), null);
+  assert.notEqual(readQuotaCache(env.cachePath), null);
 });
 
 test('requestQuota classifies success and refuses non-official credential targets', async () => {
@@ -397,6 +542,9 @@ test('global-region login resolves to api.kimi.ai with its scoped credentials', 
     ...endpoints,
     cachePath,
     lockPath: path.join(dir, 'refresh.lock'),
+    env: {},
+    configText: globalConfigText(key),
+    kimiHome,
     fetchImpl: async (url, init) => {
       calls.push({ url, auth: init.headers.Authorization });
       return response(200, REAL_RESPONSE);
@@ -404,7 +552,9 @@ test('global-region login resolves to api.kimi.ai with its scoped credentials', 
   });
   assert.equal(ok, true);
   assert.deepEqual(calls, [{ url: GLOBAL_USAGES_URL, auth: 'Bearer fake-global-access-token' }]);
-  assert.equal(readQuotaCache(cachePath).weekly.used, 29);
+  const cache = readQuotaCache(cachePath);
+  assert.equal(cache.weekly.used, 29);
+  assert.equal(cache.contextKey, quotaContextKeyFor(scopedPath, GLOBAL_USAGES_URL));
 });
 
 test('a managed provider without an oauth table keeps the mainland default', async () => {
@@ -425,6 +575,9 @@ test('a managed provider without an oauth table keeps the mainland default', asy
     ...endpoints,
     cachePath: path.join(dir, 'quota.json'),
     lockPath: path.join(dir, 'refresh.lock'),
+    env: {},
+    configText,
+    kimiHome,
     fetchImpl: async (url) => { calls.push(url); return response(200, REAL_RESPONSE); },
   });
   assert.equal(ok, true);
@@ -495,16 +648,16 @@ test('an evil base_url never receives a token; the fallback only calls the offic
     path.join(kimiHome, 'credentials', 'kimi-code.json'),
     JSON.stringify({ access_token: 'fake-access-token' }),
   );
-  const endpoints = resolveQuotaEndpoints({
-    env: {},
-    configText: `[providers."managed:kimi-code"]\nbase_url = "https://evil.example.com/coding/v1"\n`,
-    kimiHome,
-  });
+  const configText = `[providers."managed:kimi-code"]\nbase_url = "https://evil.example.com/coding/v1"\n`;
+  const endpoints = resolveQuotaEndpoints({ env: {}, configText, kimiHome });
   const calls = [];
   const ok = await refreshQuota({
     ...endpoints,
     cachePath: path.join(dir, 'quota.json'),
     lockPath: path.join(dir, 'refresh.lock'),
+    env: {},
+    configText,
+    kimiHome,
     fetchImpl: async (url) => { calls.push(url); return response(200, REAL_RESPONSE); },
   });
   assert.equal(ok, true);
@@ -514,17 +667,17 @@ test('an evil base_url never receives a token; the fallback only calls the offic
 test('an evil config without fallback credentials performs no request and writes no cache', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-evil-nocreds-'));
   const kimiHome = makeKimiHome(dir);
-  const endpoints = resolveQuotaEndpoints({
-    env: {},
-    configText: `[providers."managed:kimi-code"]\nbase_url = "https://evil.example.com/coding/v1"\n`,
-    kimiHome,
-  });
+  const configText = `[providers."managed:kimi-code"]\nbase_url = "https://evil.example.com/coding/v1"\n`;
+  const endpoints = resolveQuotaEndpoints({ env: {}, configText, kimiHome });
   let called = false;
   const cachePath = path.join(dir, 'quota.json');
   const ok = await refreshQuota({
     ...endpoints,
     cachePath,
     lockPath: path.join(dir, 'refresh.lock'),
+    env: {},
+    configText,
+    kimiHome,
     fetchImpl: async () => { called = true; return response(200, REAL_RESPONSE); },
   });
   assert.equal(ok, false);
@@ -536,16 +689,22 @@ test('a scoped oauth key whose credential file is missing is treated as logged o
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-scoped-missing-'));
   const kimiHome = makeKimiHome(dir);
   const key = scopedOAuthKey(GLOBAL_OAUTH_HOST, GLOBAL_BASE_URL);
-  const endpoints = resolveQuotaEndpoints({ env: {}, configText: globalConfigText(key), kimiHome });
+  const configText = globalConfigText(key);
+  const endpoints = resolveQuotaEndpoints({ env: {}, configText, kimiHome });
   assert.equal(endpoints.url, GLOBAL_USAGES_URL);
 
   let called = false;
   const cachePath = path.join(dir, 'quota.json');
-  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath);
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, {
+    contextKey: quotaContextKeyFor(endpoints.credentialsPath, endpoints.url),
+  });
   const ok = await refreshQuota({
     ...endpoints,
     cachePath,
     lockPath: path.join(dir, 'refresh.lock'),
+    env: {},
+    configText,
+    kimiHome,
     fetchImpl: async () => { called = true; return response(200, REAL_RESPONSE); },
   });
   assert.equal(ok, false);
@@ -741,11 +900,25 @@ test('requestQuota releases the connection for non-2xx error bodies', async () =
 
 // --- Failure backoff (H04) ---------------------------------------------------
 
-function failureEnv(dir, { token = 'fake-access-token' } = {}) {
-  const credentialsPath = path.join(dir, 'credentials.json');
-  fs.writeFileSync(credentialsPath, JSON.stringify({ access_token: token }));
+/**
+ * A hermetic mainland-default refresh context: a temp kimi-home holding
+ * `credentials/kimi-code.json`, an empty config text (which re-resolves to
+ * that same default slot and `api.kimi.com`), and per-call cache / lock /
+ * backoff-state files. The request context and the write-time revalidation
+ * context therefore always agree.
+ */
+function failureEnv(dir, { token = 'fake-access-token', refreshToken = null } = {}) {
+  const kimiHome = makeKimiHome(dir);
+  const credentialsPath = path.join(kimiHome, 'credentials', 'kimi-code.json');
+  const body = { access_token: token };
+  if (refreshToken !== null) body.refresh_token = refreshToken;
+  fs.writeFileSync(credentialsPath, JSON.stringify(body));
   return {
+    env: {},
+    kimiHome,
+    configText: '',
     credentialsPath,
+    url: USAGES_URL,
     cachePath: path.join(dir, 'quota.json'),
     lockPath: path.join(dir, 'refresh.lock'),
     statePath: path.join(dir, 'quota-refresh-state.json'),
@@ -814,9 +987,19 @@ test('refreshQuota clears the backoff on success and keeps the cache format', as
   assert.equal(ok, true);
   assert.equal(fs.existsSync(env.statePath), false);
   const cache = readQuotaCache(env.cachePath);
+  assert.equal(cache.version, QUOTA_CACHE_VERSION);
   assert.equal(cache.weekly.used, 29);
   assert.equal(cache.fetchedAt, 2_000); // virtual clock honored, not Date.now()
-  assert.deepEqual(Object.keys(cache).sort(), ['fetchedAt', 'weekly', 'windows']);
+  // The cache is tagged with the same non-reversible context key the refresh
+  // backoff used, so attribution and lockout isolation always agree.
+  assert.equal(cache.contextKey, shortDigest(env.credentialsPath, env.url));
+  assert.deepEqual(Object.keys(cache).sort(), [
+    'contextKey', 'fetchedAt', 'version', 'weekly', 'windows',
+  ]);
+  // The cache carries only numbers, a reset time, and the context digest —
+  // never the token the request was authorized with.
+  const rawCache = fs.readFileSync(env.cachePath, 'utf8');
+  assert.doesNotMatch(rawCache, /fake-access-token|Bearer/i);
 });
 
 test('ensureFreshQuota stays quiet inside the backoff window and spawns after it', () => {
@@ -979,18 +1162,8 @@ test('failure refreshes print nothing and persist no token material', async () =
 
 test('auth failures back off while the refresh_token keeps the cache alive', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-auth-backoff-'));
-  const credentialsPath = path.join(dir, 'credentials.json');
-  fs.writeFileSync(credentialsPath, JSON.stringify({
-    access_token: 'fake-access-token',
-    refresh_token: 'fake-refresh-token',
-  }));
-  const env = {
-    credentialsPath,
-    cachePath: path.join(dir, 'quota.json'),
-    lockPath: path.join(dir, 'refresh.lock'),
-    statePath: path.join(dir, 'quota-refresh-state.json'),
-  };
-  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), env.cachePath);
+  const env = failureEnv(dir, { refreshToken: 'fake-refresh-token' });
+  seedCache(env.kimiHome, env.cachePath);
   await refreshQuota({
     ...env,
     now: 1_000,
@@ -1006,7 +1179,7 @@ test('auth failures back off while the refresh_token keeps the cache alive', asy
 test('a /logout-shaped 401 drops the cache and still records the auth backoff', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-logout-'));
   const env = failureEnv(dir);
-  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), env.cachePath);
+  seedCache(env.kimiHome, env.cachePath);
   await refreshQuota({
     ...env,
     now: 1_000,
@@ -1015,4 +1188,112 @@ test('a /logout-shaped 401 drops the cache and still records the auth backoff', 
   });
   assert.equal(fs.existsSync(env.cachePath), false);
   assert.equal(readRefreshState(env.statePath).category, 'auth');
+});
+
+// --- H02: context isolation of cache writes ---------------------------------
+
+test('a refresh begun before a region switch cannot overwrite the new context cache', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-writeguard-'));
+  const kimiHome = makeKimiHome(dir);
+  const key = scopedOAuthKey(GLOBAL_OAUTH_HOST, GLOBAL_BASE_URL);
+  const globalConfig = globalConfigText(key);
+  const scopedPath = path.join(kimiHome, 'credentials', `${key.slice('oauth/'.length)}.json`);
+  const defaultPath = path.join(kimiHome, 'credentials', 'kimi-code.json');
+  // Both accounts exist on disk; the config has just switched to global.
+  fs.writeFileSync(scopedPath, JSON.stringify({ access_token: 'current-global-token' }));
+  fs.writeFileSync(defaultPath, JSON.stringify({ access_token: 'old-mainland-token' }));
+  const cachePath = path.join(dir, 'quota.json');
+  const globalKey = quotaContextKeyFor(scopedPath, GLOBAL_USAGES_URL);
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, { contextKey: globalKey });
+
+  // The stale mainland refresh (spawned before the switch) still completes...
+  let called = false;
+  const stale = await refreshQuota({
+    credentialsPath: defaultPath,
+    url: USAGES_URL,
+    cachePath,
+    lockPath: path.join(dir, 'refresh.lock'),
+    env: {},
+    configText: globalConfig,
+    kimiHome,
+    fetchImpl: async () => { called = true; return response(200, REAL_RESPONSE); },
+  });
+  // ...but its result is dropped: it must not overwrite the current context's
+  // cache, must not clear its backoff, and returns false.
+  assert.equal(called, true);
+  assert.equal(stale, false);
+  const cache = readQuotaCache(cachePath);
+  assert.equal(cache.contextKey, globalKey);
+  assert.equal(cache.weekly.used, 29);
+
+  // A refresh for the current context proceeds normally.
+  const fresh = await refreshQuota({
+    credentialsPath: scopedPath,
+    url: GLOBAL_USAGES_URL,
+    cachePath,
+    lockPath: path.join(dir, 'refresh.lock'),
+    env: {},
+    configText: globalConfig,
+    kimiHome,
+    fetchImpl: async () => response(200, REAL_RESPONSE),
+  });
+  assert.equal(fresh, true);
+  assert.equal(readQuotaCache(cachePath).contextKey, globalKey);
+});
+
+test('a logout-shaped 401 from a stale context does not delete the current cache', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-logoutguard-'));
+  const kimiHome = makeKimiHome(dir);
+  const key = scopedOAuthKey(GLOBAL_OAUTH_HOST, GLOBAL_BASE_URL);
+  const globalConfig = globalConfigText(key);
+  const scopedPath = path.join(kimiHome, 'credentials', `${key.slice('oauth/'.length)}.json`);
+  const defaultPath = path.join(kimiHome, 'credentials', 'kimi-code.json');
+  // Current context (global) is logged in with a refresh token; the stale
+  // mainland slot only carries an expired access_token (a /logout shape when
+  // answered with 401 — but that answer belongs to the old context).
+  fs.writeFileSync(scopedPath, JSON.stringify({
+    access_token: 'current-global-token',
+    refresh_token: 'current-global-refresh',
+  }));
+  fs.writeFileSync(defaultPath, JSON.stringify({ access_token: 'old-mainland-token' }));
+  const cachePath = path.join(dir, 'quota.json');
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, {
+    contextKey: quotaContextKeyFor(scopedPath, GLOBAL_USAGES_URL),
+  });
+
+  const stale = await refreshQuota({
+    credentialsPath: defaultPath,
+    url: USAGES_URL,
+    cachePath,
+    lockPath: path.join(dir, 'refresh.lock'),
+    env: {},
+    configText: globalConfig,
+    kimiHome,
+    fetchImpl: async () => response(401),
+  });
+  assert.equal(stale, false);
+  assert.notEqual(readQuotaCache(cachePath), null); // current cache survives
+});
+
+test('a far-future cache stamp is treated as refresh-needing by the scheduler', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-future-sched-'));
+  const env = failureEnv(dir);
+  const future = 1_000 + QUOTA_CLOCK_SKEW_MS + 60_000;
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), env.cachePath, {
+    now: future,
+    contextKey: shortDigest(env.credentialsPath, env.url),
+  });
+  assert.notEqual(readQuotaCache(env.cachePath), null);
+  assert.equal(isQuotaStale(readQuotaCache(env.cachePath), 1_000), true);
+  let spawns = 0;
+  const ok = ensureFreshQuota({
+    ...env,
+    scriptPath: '/tmp/fake-kimi-hud.mjs',
+    now: 1_000,
+    cachedQuota: readQuotaCache(env.cachePath),
+    spawnImpl: () => { spawns += 1; return { once() {}, unref() {} }; },
+    tokenFactory: () => 'fixed',
+  });
+  assert.equal(ok, true);
+  assert.equal(spawns, 1);
 });

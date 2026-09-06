@@ -330,6 +330,12 @@ Acceptance criteria:
   previous value may remain and is marked stale after the 60s TTL;
 - regression tests cover all of the above (`test/quota.test.mjs`).
 
+Update: the render data plane now compares the cache's schema-v2
+`contextKey` with the config's current credential slot + region before showing
+anything, so region/credential-slot switches hide the other context's figures
+immediately; the remaining same-slot account-switch boundary is tracked in
+[KI-17](#ki-17-same-credential-slot-account-switches-are-indistinguishable-until-the-next-refresh).
+
 ## KI-13: Tracked showcase PNGs had drifted from current rendering behavior
 
 Status: closed (fixed in HUD `v0.7.7`)
@@ -456,3 +462,44 @@ Regression coverage: `test/metrics.test.mjs` replays the tower turn anatomy
 (parked gap, notification turn, settle) and the origin filter;
 `test/render.test.mjs` covers the settled display and its precedence against
 the live timer and `compacted`.
+
+## KI-17: Same-credential-slot account switches are indistinguishable until the next refresh
+
+Status: open
+
+Affected area: quota context attribution
+
+Upstream Kimi Code keeps one credential slot per region/environment
+(`credentials/kimi-code.json` for mainland, a scoped
+`credentials/kimi-code-env-<16 hex>.json` for other host/base pairs —
+`packages/oauth/src/managed-kimi-code.ts`) and persists no account identity
+beside the OAuth tokens. A fresh login in the same region therefore rewrites
+the same file, and a read-only HUD cannot tell "different account, same slot"
+from "same account, rotated token" — hashing or comparing tokens to tell them
+apart is exactly what the HUD must not do.
+
+What is guaranteed instead:
+
+- every quota cache write carries a schema-version-2 `contextKey` (a
+  non-reversible digest of the credential slot + endpoint), so a region or
+  credential-slot switch is detected on the very next render: the cache no
+  longer matches the config's current context and renders nothing until a
+  refresh for the current context succeeds. The refresh that started before
+  the switch re-checks the live config before writing, so it cannot overwrite
+  the new context's cache either;
+- within one slot, an account switch is bounded by the freshness contract:
+  the previous figures may render only until the next successful refresh
+  (scheduled as soon as the 60s TTL passes) and are dimmed with an explicit
+  `[stale]` marker from the TTL onward, hidden entirely after one week;
+- legacy quota caches (no version, no `contextKey`) are not treated as
+  current quota at all: they render nothing until a refresh re-tags them, so
+  the first successful refresh after an upgrade is required before quota bars
+  return. Offline at upgrade time means no quota until back online.
+
+Acceptance criteria:
+
+- region/credential-slot switch hides the other context's figures on the next
+  render and spawns a refresh for the current context;
+- same-slot account switch shows at most the previous context's figures until
+  the next successful refresh, with the age contract applied;
+- no cache, backoff-state, or diagnostics field ever stores a token.

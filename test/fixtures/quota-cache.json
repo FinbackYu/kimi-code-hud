@@ -1,4 +1,6 @@
 {
+  "version": 2,
+  "contextKey": "0123456789abcdef",
   "fetchedAt": 1785456050000,
   "weekly": {
     "used": 25,
