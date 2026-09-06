@@ -16,6 +16,11 @@ import {
   QUOTA_CACHE_PATH,
   REFRESH_LOCK_PATH,
 } from './paths.mjs';
+import {
+  MAX_RESPONSE_BYTES,
+  REQUEST_CATEGORY,
+  requestJsonWithLimits,
+} from './request-guard.mjs';
 
 export { HUD_DIR, CREDENTIALS_PATH, QUOTA_CACHE_PATH, REFRESH_LOCK_PATH };
 export const USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
@@ -414,54 +419,29 @@ function officialUsagesUrl(url) {
 
 /**
  * Fetch and classify one quota response without mutating the cache.
- * @returns {Promise<{status: string, parsed?: object}>}
+ * The whole request — headers, body and JSON parse — shares one deadline, and
+ * response bodies are size-capped and always released.
+ * @returns {Promise<{status: string, category: string, parsed?: object,
+ *   retryAfterSeen?: boolean, retryAfterMs?: number|null}>}
  */
 export async function requestQuota({
   token,
   url = USAGES_URL,
   timeoutMs = 8000,
+  maxBytes = MAX_RESPONSE_BYTES,
   fetchImpl = globalThis.fetch,
 } = {}) {
   if (typeof token !== 'string' || !token || !officialUsagesUrl(url)) {
-    return { status: QUOTA_RESULT.INVALID };
+    return { status: QUOTA_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
   }
-  const ctrl = new AbortController();
-  let timer;
-  const timeout = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => {
-      ctrl.abort();
-      reject(new Error('quota request timed out'));
-    }, timeoutMs);
+  return requestJsonWithLimits({
+    url,
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    timeoutMs,
+    maxBytes,
+    fetchImpl,
+    parse: parseQuotaPayload,
   });
-  let res;
-  try {
-    res = await Promise.race([
-      fetchImpl(url, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        signal: ctrl.signal,
-      }),
-      timeout,
-    ]);
-  } catch {
-    return { status: QUOTA_RESULT.TRANSIENT };
-  } finally {
-    clearTimeout(timer);
-  }
-  if (res.status === 401 || res.status === 403) {
-    return { status: QUOTA_RESULT.UNAUTHORIZED };
-  }
-  if (res.status === 429 || res.status >= 500) {
-    return { status: QUOTA_RESULT.TRANSIENT };
-  }
-  if (!res.ok) return { status: QUOTA_RESULT.INVALID };
-  try {
-    const parsed = parseQuotaPayload(await res.json());
-    return parsed
-      ? { status: QUOTA_RESULT.SUCCESS, parsed }
-      : { status: QUOTA_RESULT.INVALID };
-  } catch {
-    return { status: QUOTA_RESULT.INVALID };
-  }
 }
 
 /**

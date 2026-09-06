@@ -5,6 +5,11 @@ import path from 'node:path';
 
 import { atomicWriteFile } from './fs-store.mjs';
 import { resolveProviderConfig } from './model-config.mjs';
+import {
+  MAX_RESPONSE_BYTES,
+  REQUEST_CATEGORY,
+  requestJsonWithLimits,
+} from './request-guard.mjs';
 import { CONFIG_TOML_PATH, PROVIDER_USAGE_DIR } from './paths.mjs';
 
 export const DEEPSEEK_PROVIDER = 'deepseek';
@@ -355,11 +360,17 @@ export function ensureFreshProviderUsage({
   }
 }
 
-/** Fetch one DeepSeek balance response without mutating any local state. */
+/** Fetch one DeepSeek balance response without mutating any local state.
+ * The whole request — headers, body and JSON parse — shares one deadline, and
+ * response bodies are size-capped and always released.
+ * @returns {Promise<{status: string, category: string, parsed?: object,
+ *   retryAfterSeen?: boolean, retryAfterMs?: number|null}>}
+ */
 export async function requestDeepSeekUsage({
   apiKey,
   url = DEEPSEEK_BALANCE_URL,
   timeoutMs = 8000,
+  maxBytes = MAX_RESPONSE_BYTES,
   fetchImpl = globalThis.fetch,
 } = {}) {
   if (
@@ -367,48 +378,16 @@ export async function requestDeepSeekUsage({
     || apiKey.length === 0
     || !officialDeepSeekBalanceUrl(url)
   ) {
-    return { status: PROVIDER_USAGE_RESULT.INVALID };
+    return { status: PROVIDER_USAGE_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
   }
-  const ctrl = new AbortController();
-  let timer;
-  const timeout = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => {
-      ctrl.abort();
-      reject(new Error('provider usage request timed out'));
-    }, timeoutMs);
+  return requestJsonWithLimits({
+    url,
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    timeoutMs,
+    maxBytes,
+    fetchImpl,
+    parse: parseDeepSeekBalance,
   });
-  let response;
-  try {
-    response = await Promise.race([
-      fetchImpl(url, {
-        headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
-        signal: ctrl.signal,
-      }),
-      timeout,
-    ]);
-  } catch {
-    return { status: PROVIDER_USAGE_RESULT.TRANSIENT };
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!response || typeof response.status !== 'number' || typeof response.ok !== 'boolean') {
-    return { status: PROVIDER_USAGE_RESULT.INVALID };
-  }
-  if (response.status === 401 || response.status === 403) {
-    return { status: PROVIDER_USAGE_RESULT.UNAUTHORIZED };
-  }
-  if (response.status === 429 || response.status >= 500) {
-    return { status: PROVIDER_USAGE_RESULT.TRANSIENT };
-  }
-  if (!response.ok) return { status: PROVIDER_USAGE_RESULT.INVALID };
-  try {
-    const parsed = parseDeepSeekBalance(await response.json());
-    return parsed
-      ? { status: PROVIDER_USAGE_RESULT.SUCCESS, parsed }
-      : { status: PROVIDER_USAGE_RESULT.INVALID };
-  } catch {
-    return { status: PROVIDER_USAGE_RESULT.INVALID };
-  }
 }
 
 function removeFile(filePath) {

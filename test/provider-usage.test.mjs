@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 
+import { REQUEST_CATEGORY } from '../src/request-guard.mjs';
 import {
   PROVIDER_USAGE_RESULT,
   PROVIDER_USAGE_TTL_MS,
@@ -263,4 +265,42 @@ test('detached refresh rejects a credential switch before making a request', asy
   assert.equal(refreshed, false);
   assert.equal(called, false);
   assert.equal(fs.existsSync(oldTarget.cachePath), false);
+});
+
+test('requestDeepSeekUsage keeps the deadline across a body that never resolves', async () => {
+  const started = performance.now();
+  const result = await requestDeepSeekUsage({
+    apiKey: API_KEY,
+    timeoutMs: 20,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise(() => {}),
+    }),
+  });
+  const elapsed = performance.now() - started;
+  assert.equal(result.status, PROVIDER_USAGE_RESULT.TRANSIENT);
+  assert.equal(result.category, REQUEST_CATEGORY.TIMEOUT);
+  assert.ok(elapsed < 2000, `request settled in ${elapsed}ms`);
+});
+
+test('requestDeepSeekUsage cancels a stream beyond the body ceiling', async () => {
+  const cancelMarker = { cancelled: false };
+  const result = await requestDeepSeekUsage({
+    apiKey: API_KEY,
+    maxBytes: 32,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('z'.repeat(1024)));
+        },
+        cancel() { cancelMarker.cancelled = true; },
+      }),
+    }),
+  });
+  assert.equal(result.status, PROVIDER_USAGE_RESULT.INVALID);
+  assert.equal(result.category, REQUEST_CATEGORY.BODY_LIMIT);
+  assert.equal(cancelMarker.cancelled, true);
 });

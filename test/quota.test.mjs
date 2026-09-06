@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
+import { REQUEST_CATEGORY } from '../src/request-guard.mjs';
 import {
   parseQuotaPayload,
   deriveWindowLabel,
@@ -653,4 +655,86 @@ test('env KIMI_CODE_OAUTH_HOST / KIMI_OAUTH_HOST pin the global region without c
     }).url,
     USAGES_URL,
   );
+});
+
+test('requestQuota keeps the deadline across a response body that never resolves', async () => {
+  const started = performance.now();
+  const result = await requestQuota({
+    token: 'fake-access-token',
+    timeoutMs: 20,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise(() => {}),
+    }),
+  });
+  const elapsed = performance.now() - started;
+  assert.equal(result.status, QUOTA_RESULT.TRANSIENT);
+  assert.equal(result.category, REQUEST_CATEGORY.TIMEOUT);
+  assert.ok(elapsed < 2000, `request settled in ${elapsed}ms`);
+});
+
+test('requestQuota cancels a real stream that exceeds the body ceiling', async () => {
+  const cancelMarker = { cancelled: false };
+  const result = await requestQuota({
+    token: 'fake-access-token',
+    maxBytes: 32,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('x'.repeat(1024)));
+        },
+        cancel() { cancelMarker.cancelled = true; },
+      }),
+    }),
+  });
+  assert.equal(result.status, QUOTA_RESULT.INVALID);
+  assert.equal(result.category, REQUEST_CATEGORY.BODY_LIMIT);
+  assert.equal(cancelMarker.cancelled, true);
+});
+
+test('requestQuota surfaces Retry-After facts on 429 responses', async () => {
+  const seconds = await requestQuota({
+    token: 'fake-access-token',
+    fetchImpl: async () => ({
+      ok: false,
+      status: 429,
+      headers: { get: (name) => (name === 'retry-after' ? '120' : null) },
+    }),
+  });
+  assert.equal(seconds.status, QUOTA_RESULT.TRANSIENT);
+  assert.equal(seconds.category, REQUEST_CATEGORY.RATE_LIMITED);
+  assert.equal(seconds.retryAfterSeen, true);
+  assert.equal(seconds.retryAfterMs, 120_000);
+
+  const invalid = await requestQuota({
+    token: 'fake-access-token',
+    fetchImpl: async () => ({
+      ok: false,
+      status: 429,
+      headers: { get: (name) => (name === 'retry-after' ? 'soon' : null) },
+    }),
+  });
+  assert.equal(invalid.retryAfterSeen, true);
+  assert.equal(invalid.retryAfterMs, null);
+});
+
+test('requestQuota releases the connection for non-2xx error bodies', async () => {
+  const cancelMarker = { cancelled: false };
+  const result = await requestQuota({
+    token: 'fake-access-token',
+    fetchImpl: async () => ({
+      ok: false,
+      status: 503,
+      body: new ReadableStream({
+        start(controller) { controller.enqueue(new TextEncoder().encode('busy')); },
+        cancel() { cancelMarker.cancelled = true; },
+      }),
+    }),
+  });
+  assert.equal(result.status, QUOTA_RESULT.TRANSIENT);
+  assert.equal(result.category, REQUEST_CATEGORY.SERVER);
+  assert.equal(cancelMarker.cancelled, true);
 });
