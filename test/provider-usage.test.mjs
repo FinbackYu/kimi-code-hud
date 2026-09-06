@@ -5,8 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
-import { REQUEST_CATEGORY } from '../src/request-guard.mjs';
+import { REQUEST_CATEGORY, readRefreshState } from '../src/request-guard.mjs';
 import {
+  PROVIDER_USAGE_LOCK_STALE_MS,
   PROVIDER_USAGE_RESULT,
   PROVIDER_USAGE_TTL_MS,
   acquireProviderUsageLock,
@@ -303,4 +304,158 @@ test('requestDeepSeekUsage cancels a stream beyond the body ceiling', async () =
   assert.equal(result.status, PROVIDER_USAGE_RESULT.INVALID);
   assert.equal(result.category, REQUEST_CATEGORY.BODY_LIMIT);
   assert.equal(cancelMarker.cancelled, true);
+});
+
+// --- Failure backoff (H04) ---------------------------------------------------
+
+function mockResponse(status, retryAfter = null) {
+  const ok = status >= 200 && status < 300;
+  return {
+    ok,
+    status,
+    ...(ok ? { json: async () => RESPONSE } : {}),
+    ...(retryAfter === null ? {} : {
+      headers: { get: (name) => (name === 'retry-after' ? retryAfter : null) },
+    }),
+  };
+}
+
+test('refreshProviderUsage records 429 backoff with Retry-After honored', async () => {
+  const paths = tempPaths();
+  fs.writeFileSync(paths.configPath, config());
+  const target = targetFor(paths);
+  let spawns = 0;
+  const spawnImpl = () => { spawns += 1; return { once() {}, unref() {} }; };
+
+  const refreshed = await refreshProviderUsage({
+    provider: 'deepseek',
+    configPath: paths.configPath,
+    providerUsageDir: paths.providerUsageDir,
+    now: 10_000,
+    jitter: () => 0,
+    fetchImpl: async () => mockResponse(429, '60'),
+  });
+  assert.equal(refreshed, false);
+  assert.equal(fs.existsSync(target.lockPath), false); // lock released on failure
+
+  const state = readRefreshState(target.statePath);
+  assert.equal(state.category, 'rate_limited');
+  assert.equal(state.failures, 1);
+  assert.equal(state.nextAttemptAt, 70_000); // 10s + honored 60s Retry-After
+  assert.doesNotMatch(JSON.stringify(state), new RegExp(API_KEY));
+
+  // Frames inside the window never spawn; the first past it does.
+  assert.equal(ensureFreshProviderUsage({
+    scriptPath: 'x', target, cachedUsage: null, now: 10_500, spawnImpl, tokenFactory: () => 'one',
+  }), false);
+  assert.equal(ensureFreshProviderUsage({
+    scriptPath: 'x', target, cachedUsage: null, now: 69_999, spawnImpl, tokenFactory: () => 'one',
+  }), false);
+  assert.equal(spawns, 0);
+  assert.equal(ensureFreshProviderUsage({
+    scriptPath: 'x', target, cachedUsage: null, now: 70_000, spawnImpl, tokenFactory: () => 'one',
+  }), true);
+  assert.equal(spawns, 1);
+});
+
+test('provider backoff clears on success and the next cycle refreshes again', async () => {
+  const paths = tempPaths();
+  fs.writeFileSync(paths.configPath, config());
+  const target = targetFor(paths);
+  await refreshProviderUsage({
+    provider: 'deepseek',
+    configPath: paths.configPath,
+    providerUsageDir: paths.providerUsageDir,
+    now: 1_000,
+    jitter: () => 0,
+    fetchImpl: async () => mockResponse(503),
+  });
+  assert.notEqual(readRefreshState(target.statePath), null);
+
+  const ok = await refreshProviderUsage({
+    provider: 'deepseek',
+    configPath: paths.configPath,
+    providerUsageDir: paths.providerUsageDir,
+    now: 2_000,
+    fetchImpl: async () => mockResponse(200),
+  });
+  assert.equal(ok, true);
+  assert.equal(fs.existsSync(target.statePath), false);
+
+  // Cache was rewritten at 2s, so past the TTL it is stale again and, with
+  // the backoff gone, the next frame spawns a refresh.
+  let spawns = 0;
+  const ok2 = ensureFreshProviderUsage({
+    scriptPath: 'x',
+    target,
+    now: 2_000 + PROVIDER_USAGE_TTL_MS + 1,
+    spawnImpl: () => { spawns += 1; return { once() {}, unref() {} }; },
+    tokenFactory: () => 'two',
+  });
+  assert.equal(ok2, true);
+  assert.equal(spawns, 1);
+});
+
+test('provider backoff is isolated per credential fingerprint', async () => {
+  const paths = tempPaths();
+  const configA = config();
+  fs.writeFileSync(paths.configPath, configA);
+  const targetA = targetFor(paths, configA);
+  await refreshProviderUsage({
+    provider: 'deepseek',
+    configPath: paths.configPath,
+    providerUsageDir: paths.providerUsageDir,
+    now: 1_000,
+    jitter: () => 0,
+    fetchImpl: async () => mockResponse(500),
+  });
+  assert.notEqual(readRefreshState(targetA.statePath), null);
+
+  // A different API key resolves to its own cache, lock and backoff state,
+  // so account A's lockout never throttles account B.
+  const configB = config({ apiKey: 'redacted-other-account' });
+  fs.writeFileSync(paths.configPath, configB);
+  const targetB = targetFor(paths, configB);
+  assert.notEqual(targetB.credentialFingerprint, targetA.credentialFingerprint);
+  assert.notEqual(targetB.statePath, targetA.statePath);
+  let spawns = 0;
+  const ok = ensureFreshProviderUsage({
+    scriptPath: 'x',
+    target: targetB,
+    cachedUsage: null,
+    now: 1_500,
+    spawnImpl: () => { spawns += 1; return { once() {}, unref() {} }; },
+    tokenFactory: () => 'b',
+  });
+  assert.equal(ok, true);
+  assert.equal(spawns, 1);
+  assert.equal(readRefreshState(targetB.statePath), null);
+});
+
+test('a credential switch removes the stale account cache and its backoff state', async () => {
+  const paths = tempPaths();
+  fs.writeFileSync(paths.configPath, config());
+  const oldTarget = targetFor(paths);
+  writeProviderUsageCache(parseDeepSeekBalance(RESPONSE), oldTarget);
+  await refreshProviderUsage({
+    provider: 'deepseek',
+    configPath: paths.configPath,
+    providerUsageDir: paths.providerUsageDir,
+    now: 1_000,
+    jitter: () => 0,
+    fetchImpl: async () => mockResponse(500),
+  });
+  assert.notEqual(readRefreshState(oldTarget.statePath), null);
+
+  fs.writeFileSync(paths.configPath, config({ apiKey: 'redacted-new-account' }));
+  const refreshed = await refreshProviderUsage({
+    provider: 'deepseek',
+    expectedFingerprint: oldTarget.credentialFingerprint,
+    configPath: paths.configPath,
+    providerUsageDir: paths.providerUsageDir,
+    fetchImpl: async () => { throw new Error('must not be called'); },
+  });
+  assert.equal(refreshed, false);
+  assert.equal(fs.existsSync(oldTarget.cachePath), false);
+  assert.equal(fs.existsSync(oldTarget.statePath), false);
 });

@@ -6,11 +6,23 @@ import { performance } from 'node:perf_hooks';
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   MAX_RESPONSE_BYTES,
+  REFRESH_STATE_VERSION,
   REQUEST_CATEGORY,
   REQUEST_RESULT,
+  RETRY_BASE_DELAY_MS,
+  RETRY_JITTER_MAX_MS,
+  RETRY_MAX_DELAY_MS,
+  clearRefreshState,
+  isRefreshBlocked,
   parseRetryAfter,
+  recordRefreshFailure,
+  readRefreshState,
+  refreshDelayMs,
   requestJsonWithLimits,
 } from '../src/request-guard.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 function startServer(handler) {
   return new Promise((resolve) => {
@@ -337,4 +349,112 @@ test('parseRetryAfter accepts delay-seconds and HTTP dates only', () => {
   assert.equal(parseRetryAfter('soon', NOW), null);
   assert.equal(parseRetryAfter('not a date at all', NOW), null);
   assert.equal(parseRetryAfter('9'.repeat(400), NOW), null);
+});
+
+test('refreshDelayMs doubles from the fixed base with bounded jitter and cap', () => {
+  const noJitter = { jitter: () => 0 };
+  assert.equal(refreshDelayMs({ failures: 1, ...noJitter }), 2_000);
+  assert.equal(refreshDelayMs({ failures: 2, ...noJitter }), 4_000);
+  assert.equal(refreshDelayMs({ failures: 3, ...noJitter }), 8_000);
+  assert.equal(refreshDelayMs({ failures: 4, ...noJitter }), 16_000);
+  assert.equal(refreshDelayMs({ failures: 30, ...noJitter }), RETRY_MAX_DELAY_MS);
+  assert.equal(refreshDelayMs({ failures: 30, jitter: () => 1 }), RETRY_MAX_DELAY_MS);
+  assert.equal(refreshDelayMs({ failures: 1, jitter: () => 1 }), 3_000);
+  assert.equal(RETRY_JITTER_MAX_MS, 1_000);
+  // Non-numeric or non-positive failure counts restart at the base.
+  assert.equal(refreshDelayMs({ failures: 0, ...noJitter }), RETRY_BASE_DELAY_MS);
+  assert.equal(refreshDelayMs({ failures: NaN, ...noJitter }), RETRY_BASE_DELAY_MS);
+});
+
+test('a seen Retry-After wins over the exponential schedule and is clamped', () => {
+  const noJitter = { jitter: () => 0 };
+  assert.equal(refreshDelayMs({ failures: 5, retryAfterSeen: true, retryAfterMs: 120_000, ...noJitter }), 120_000);
+  assert.equal(refreshDelayMs({ failures: 5, retryAfterSeen: true, retryAfterMs: 0, ...noJitter }), RETRY_BASE_DELAY_MS);
+  assert.equal(refreshDelayMs({ failures: 1, retryAfterSeen: true, retryAfterMs: 500, ...noJitter }), RETRY_BASE_DELAY_MS);
+  assert.equal(refreshDelayMs({ failures: 1, retryAfterSeen: true, retryAfterMs: 10 ** 12, ...noJitter }), RETRY_MAX_DELAY_MS);
+  // Invalid value despite a seen header falls back to the conservative base.
+  assert.equal(refreshDelayMs({ failures: 5, retryAfterSeen: true, retryAfterMs: null, ...noJitter }), RETRY_BASE_DELAY_MS);
+  // Without a seen header the exponential schedule applies.
+  assert.equal(refreshDelayMs({ failures: 5, retryAfterSeen: false, retryAfterMs: 120_000, ...noJitter }), 32_000);
+});
+
+function tempStatePath() {
+  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-guard-state-')), 'state.json');
+}
+
+test('refresh failure state round-trips with only category, counts and times', () => {
+  const statePath = tempStatePath();
+  assert.equal(readRefreshState(statePath), null);
+  assert.equal(isRefreshBlocked(statePath, 1_000), false);
+
+  const recorded = recordRefreshFailure({
+    statePath,
+    category: REQUEST_CATEGORY.RATE_LIMITED,
+    retryAfterSeen: true,
+    retryAfterMs: 120_000,
+    now: 5_000,
+    jitter: () => 0,
+  });
+  assert.equal(recorded.failures, 1);
+  assert.equal(recorded.nextAttemptAt, 125_000);
+  assert.deepEqual(readRefreshState(statePath), {
+    version: REFRESH_STATE_VERSION,
+    category: REQUEST_CATEGORY.RATE_LIMITED,
+    failures: 1,
+    nextAttemptAt: 125_000,
+    updatedAt: 5_000,
+  });
+  assert.equal(isRefreshBlocked(statePath, 124_999), true);
+  assert.equal(isRefreshBlocked(statePath, 125_000), false);
+
+  assert.equal(clearRefreshState(statePath), true);
+  assert.equal(fs.existsSync(statePath), false);
+  assert.equal(isRefreshBlocked(statePath, 1_000), false);
+});
+
+test('corrupt or foreign refresh state fails open instead of blocking forever', () => {
+  for (const body of ['{broken', JSON.stringify({ version: 99, category: 'network', failures: 1, nextAttemptAt: 9e15 }), JSON.stringify({ version: 1, category: 'made-up', failures: 1, nextAttemptAt: 9e15 }), JSON.stringify({ version: 1, category: 'network', failures: -3, nextAttemptAt: 9e15 }), '']) {
+    const statePath = tempStatePath();
+    fs.writeFileSync(statePath, body);
+    assert.equal(readRefreshState(statePath), null, body);
+    assert.equal(isRefreshBlocked(statePath, 0), false, body);
+  }
+  assert.equal(isRefreshBlocked(undefined, 0), false);
+  assert.equal(isRefreshBlocked(null, 0), false);
+});
+
+test('a context switch restarts the failure count instead of inheriting lockout', () => {
+  const statePath = tempStatePath();
+  recordRefreshFailure({
+    statePath,
+    category: REQUEST_CATEGORY.SERVER,
+    now: 1_000,
+    jitter: () => 0,
+    contextKey: 'account-a',
+  });
+  const second = recordRefreshFailure({
+    statePath,
+    category: REQUEST_CATEGORY.SERVER,
+    now: 2_000,
+    jitter: () => 0,
+    contextKey: 'account-a',
+  });
+  assert.equal(second.failures, 2);
+  assert.equal(second.nextAttemptAt, 2_000 + 4_000);
+
+  const switched = recordRefreshFailure({
+    statePath,
+    category: REQUEST_CATEGORY.NETWORK,
+    now: 3_000,
+    jitter: () => 0,
+    contextKey: 'account-b',
+  });
+  assert.equal(switched.failures, 1);
+  assert.equal(switched.nextAttemptAt, 3_000 + 2_000);
+  assert.equal(switched.contextKey, 'account-b');
+});
+
+test('recording failures without a statePath is a no-op', () => {
+  assert.equal(recordRefreshFailure({ statePath: null, now: 1 }), null);
+  assert.equal(clearRefreshState(null), false);
 });

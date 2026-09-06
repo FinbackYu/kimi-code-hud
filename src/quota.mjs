@@ -14,15 +14,20 @@ import {
   CONFIG_TOML_PATH,
   CREDENTIALS_PATH,
   QUOTA_CACHE_PATH,
+  QUOTA_REFRESH_STATE_PATH,
   REFRESH_LOCK_PATH,
 } from './paths.mjs';
 import {
   MAX_RESPONSE_BYTES,
   REQUEST_CATEGORY,
+  clearRefreshState,
+  isRefreshBlocked,
+  recordRefreshFailure,
   requestJsonWithLimits,
+  shortDigest,
 } from './request-guard.mjs';
 
-export { HUD_DIR, CREDENTIALS_PATH, QUOTA_CACHE_PATH, REFRESH_LOCK_PATH };
+export { HUD_DIR, CREDENTIALS_PATH, QUOTA_CACHE_PATH, QUOTA_REFRESH_STATE_PATH, REFRESH_LOCK_PATH };
 export const USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
 export const GLOBAL_USAGES_URL = 'https://api.kimi.ai/coding/v1/usages';
 export const QUOTA_TTL_MS = 60_000;
@@ -147,11 +152,13 @@ export function isQuotaStale(cache, now = Date.now()) {
  * Atomically write the quota cache (tmp file + rename). Never throws.
  * @param {object} parsed result of parseQuotaPayload
  * @param {string} [cachePath]
+ * @param {object} [opts]
+ * @param {number} [opts.now] fetchedAt stamp; defaults to the real clock
  */
-export function writeQuotaCache(parsed, cachePath = QUOTA_CACHE_PATH) {
+export function writeQuotaCache(parsed, cachePath = QUOTA_CACHE_PATH, { now = Date.now() } = {}) {
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    const body = JSON.stringify({ fetchedAt: Date.now(), ...parsed });
+    const body = JSON.stringify({ fetchedAt: now, ...parsed });
     atomicWriteFile(cachePath, body);
   } catch {
     // stay silent
@@ -227,16 +234,20 @@ export function releaseQuotaLock(lockPath = REFRESH_LOCK_PATH, token = null) {
 }
 
 /**
- * If the cache is stale, spawn a detached background refresh and return
- * immediately. A lock file (pid + timestamp) prevents concurrent refreshes;
- * locks older than LOCK_STALE_MS are treated as stale and overwritten.
- * Never throws, never blocks on the network.
+ * If the cache is stale and no persisted failure backoff forbids it, spawn a
+ * detached background refresh and return immediately. A lock file (pid +
+ * timestamp) prevents concurrent refreshes; locks older than LOCK_STALE_MS
+ * are treated as stale and overwritten. The backoff state file records the
+ * last failure's next-attempt time, so every render process in the same HUD
+ * home shares one retry schedule. Pass no statePath to disable the backoff
+ * gate. Never throws, never blocks on the network.
  * @param {object} [opts]
  * @returns {boolean} true when a refresh was spawned
  */
 export function ensureFreshQuota({
   cachePath = QUOTA_CACHE_PATH,
   lockPath = REFRESH_LOCK_PATH,
+  statePath = null,
   scriptPath,
   now = Date.now(),
   spawnImpl = spawn,
@@ -247,6 +258,7 @@ export function ensureFreshQuota({
   try {
     const cache = cachedQuota === undefined ? readQuotaCache(cachePath) : cachedQuota;
     if (!isQuotaStale(cache, now)) return false;
+    if (isRefreshBlocked(statePath, now)) return false;
     lockToken = acquireQuotaLock({
       lockPath,
       now,
@@ -453,6 +465,17 @@ export async function requestQuota({
  * only an expired access_token — the cache survives until the CLI's lazy
  * refresh lets the next attempt succeed.
  *
+ * Every failed attempt (timeout, network error, 429, 5xx, auth, unusable
+ * payload) persists a failure record with the error category and the next
+ * allowed attempt time; success clears it. The record is keyed by a
+ * non-reversible digest of the credential path and endpoint, so switching
+ * context restarts the failure count instead of inheriting the previous
+ * account's lockout. Pass no statePath to skip persistence. Note the
+ * scheduler-side gate reads this same file, so after a context switch the
+ * first spawn may still wait out the previously recorded window (bounded by
+ * RETRY_MAX_DELAY_MS); the account/region tagging of the cache itself is
+ * tracked separately by H02.
+ *
  * The cache deliberately carries no account, credential-slot, or endpoint
  * tag. After an account or region switch, previous figures may keep rendering:
  * the 60s TTL marks them stale and schedules this refresh, but does not evict
@@ -467,11 +490,15 @@ export async function refreshQuota({
   credentialsPath = CREDENTIALS_PATH,
   cachePath = QUOTA_CACHE_PATH,
   lockPath = REFRESH_LOCK_PATH,
+  statePath = null,
   url = USAGES_URL,
   timeoutMs = 8000,
   fetchImpl = globalThis.fetch,
   lockToken = null,
+  now = Date.now(),
+  jitter = Math.random,
 } = {}) {
+  const contextKey = shortDigest(credentialsPath, url);
   try {
     let cred = null;
     try {
@@ -496,11 +523,24 @@ export async function refreshQuota({
       if (!canRefresh) {
         try { fs.unlinkSync(cachePath); } catch { /* no cache to drop */ }
       }
+      recordRefreshFailure({ statePath, category: REQUEST_CATEGORY.AUTH, now, jitter, contextKey });
       return false;
     }
-    if (result.status !== QUOTA_RESULT.SUCCESS) return false;
-    writeQuotaCache(result.parsed, cachePath);
-    return true;
+    if (result.status === QUOTA_RESULT.SUCCESS) {
+      writeQuotaCache(result.parsed, cachePath, { now });
+      clearRefreshState(statePath);
+      return true;
+    }
+    recordRefreshFailure({
+      statePath,
+      category: result.category,
+      retryAfterSeen: result.retryAfterSeen === true,
+      retryAfterMs: result.retryAfterMs ?? null,
+      now,
+      jitter,
+      contextKey,
+    });
+    return false;
   } catch {
     return false;
   } finally {

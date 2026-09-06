@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { atomicWriteFile } from './fs-store.mjs';
 
 export const REQUEST_RESULT = Object.freeze({
@@ -29,6 +33,21 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
 
 /** Hard ceiling for one response body; quota/balance payloads are far smaller. */
 export const MAX_RESPONSE_BYTES = 1_048_576;
+
+/**
+ * Refresh backoff schedule, fixed by contract: the first retry waits
+ * RETRY_BASE_DELAY_MS, each further failure doubles the delay (plus up to
+ * RETRY_JITTER_MAX_MS of jitter), and RETRY_MAX_DELAY_MS bounds every delay —
+ * including honored Retry-After values — so one broken endpoint can never
+ * silence a segment indefinitely.
+ */
+export const RETRY_BASE_DELAY_MS = 2_000;
+export const RETRY_MAX_DELAY_MS = 300_000;
+export const RETRY_JITTER_MAX_MS = 1_000;
+
+export const REFRESH_STATE_VERSION = 1;
+
+const STATE_CATEGORIES = new Set(Object.values(REQUEST_CATEGORY));
 
 function noop() {}
 
@@ -213,5 +232,130 @@ export async function requestJsonWithLimits({
   } finally {
     if (timer !== null) clearTimeout(timer);
     cancelBody(response);
+  }
+}
+
+/**
+ * Backoff for the next retry attempt. A seen Retry-After header wins and is
+ * clamped into [RETRY_BASE_DELAY_MS, RETRY_MAX_DELAY_MS]; invalid values
+ * collapse onto the conservative base delay. Without Retry-After the delay
+ * grows exponentially from the base with bounded jitter.
+ * @param {object} [opts]
+ * @returns {number} milliseconds to wait before the next attempt
+ */
+export function refreshDelayMs({
+  failures,
+  retryAfterSeen = false,
+  retryAfterMs = null,
+  jitter = Math.random,
+} = {}) {
+  const clamp = (ms) => Math.min(RETRY_MAX_DELAY_MS, Math.max(RETRY_BASE_DELAY_MS, ms));
+  if (retryAfterSeen === true) {
+    const value = typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs)
+      ? retryAfterMs
+      : -1;
+    return clamp(value);
+  }
+  const attempt = Number.isFinite(failures) && failures >= 1 ? Math.floor(failures) : 1;
+  const exponential = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+  const extraJitter = Math.floor(jitter() * RETRY_JITTER_MAX_MS);
+  return clamp(exponential + extraJitter);
+}
+
+/** Short, non-reversible digest used as a refresh-state context key. */
+export function shortDigest(...parts) {
+  return createHash('sha256').update(parts.join('\0')).digest('hex').slice(0, 16);
+}
+
+/**
+ * Read one persisted refresh-failure state. Returns null for missing,
+ * corrupt or foreign-version files — the guard then behaves as if no
+ * failure had ever been recorded.
+ * @param {string|null} statePath
+ * @returns {object|null}
+ */
+export function readRefreshState(statePath) {
+  if (typeof statePath !== 'string' || statePath.length === 0) return null;
+  try {
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    if (
+      !state
+      || typeof state !== 'object'
+      || state.version !== REFRESH_STATE_VERSION
+      || !STATE_CATEGORIES.has(state.category)
+      || !Number.isInteger(state.failures)
+      || state.failures < 0
+      || typeof state.nextAttemptAt !== 'number'
+      || !Number.isFinite(state.nextAttemptAt)
+    ) {
+      return null;
+    }
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True while persisted failures forbid starting another refresh. Never
+ * throws; a missing statePath (feature off) never blocks.
+ * @param {string|null} statePath
+ * @param {number} [now]
+ */
+export function isRefreshBlocked(statePath, now = Date.now()) {
+  const state = readRefreshState(statePath);
+  return state !== null && now < state.nextAttemptAt;
+}
+
+/**
+ * Persist one failed refresh. The state carries only the failure count, the
+ * error category, the computed next-attempt time and an optional non-reversible
+ * context digest — never response bodies, tokens or request headers. When the
+ * recorded context digest differs from the current one (account or region
+ * switch), the failure count restarts instead of inheriting the other
+ * account's lockout. Writes are atomic; failures to persist are swallowed.
+ * @param {object} opts
+ * @returns {object|null} the recorded state, or null when nothing was written
+ */
+export function recordRefreshFailure({
+  statePath,
+  category = REQUEST_CATEGORY.NETWORK,
+  retryAfterSeen = false,
+  retryAfterMs = null,
+  now = Date.now(),
+  jitter = Math.random,
+  contextKey = null,
+} = {}) {
+  if (typeof statePath !== 'string' || statePath.length === 0) return null;
+  const previous = readRefreshState(statePath);
+  const switchedContext =
+    previous !== null && contextKey !== null && previous.contextKey !== contextKey;
+  const failures = (switchedContext ? 0 : previous?.failures ?? 0) + 1;
+  const delay = refreshDelayMs({ failures, retryAfterSeen, retryAfterMs, jitter });
+  const state = {
+    version: REFRESH_STATE_VERSION,
+    category,
+    failures,
+    nextAttemptAt: now + delay,
+    updatedAt: now,
+  };
+  if (contextKey !== null) state.contextKey = contextKey;
+  try {
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    atomicWriteFile(statePath, JSON.stringify(state));
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+/** Remove persisted failure state after a successful refresh. */
+export function clearRefreshState(statePath) {
+  if (typeof statePath !== 'string' || statePath.length === 0) return false;
+  try {
+    fs.unlinkSync(statePath);
+    return true;
+  } catch {
+    return false;
   }
 }

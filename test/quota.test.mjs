@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
-import { REQUEST_CATEGORY } from '../src/request-guard.mjs';
+import { REQUEST_CATEGORY, readRefreshState, recordRefreshFailure } from '../src/request-guard.mjs';
 import {
   parseQuotaPayload,
   deriveWindowLabel,
@@ -737,4 +737,282 @@ test('requestQuota releases the connection for non-2xx error bodies', async () =
   assert.equal(result.status, QUOTA_RESULT.TRANSIENT);
   assert.equal(result.category, REQUEST_CATEGORY.SERVER);
   assert.equal(cancelMarker.cancelled, true);
+});
+
+// --- Failure backoff (H04) ---------------------------------------------------
+
+function failureEnv(dir, { token = 'fake-access-token' } = {}) {
+  const credentialsPath = path.join(dir, 'credentials.json');
+  fs.writeFileSync(credentialsPath, JSON.stringify({ access_token: token }));
+  return {
+    credentialsPath,
+    cachePath: path.join(dir, 'quota.json'),
+    lockPath: path.join(dir, 'refresh.lock'),
+    statePath: path.join(dir, 'quota-refresh-state.json'),
+  };
+}
+
+const statusResponse = (status, headers) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  ...(headers ? { headers } : {}),
+});
+
+test('refreshQuota persists 429 backoff with Retry-After honored', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-backoff-'));
+  const env = failureEnv(dir);
+  const ok = await refreshQuota({
+    ...env,
+    now: 50_000,
+    jitter: () => 0,
+    fetchImpl: async () => statusResponse(429, {
+      get: (name) => (name === 'retry-after' ? '120' : null),
+    }),
+  });
+  assert.equal(ok, false);
+  assert.equal(fs.existsSync(env.lockPath), false); // lock released even on failure
+
+  const state = readRefreshState(env.statePath);
+  assert.equal(state.version, 1);
+  assert.equal(state.category, 'rate_limited');
+  assert.equal(state.failures, 1);
+  assert.equal(state.nextAttemptAt, 170_000); // 50s + honored 120s Retry-After
+  assert.deepEqual(Object.keys(state).sort(), [
+    'category', 'contextKey', 'failures', 'nextAttemptAt', 'updatedAt', 'version',
+  ]);
+  assert.match(state.contextKey, /^[0-9a-f]{16}$/);
+});
+
+test('refreshQuota grows the backoff across consecutive network failures', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-backoff-net-'));
+  const env = failureEnv(dir);
+  const offline = async () => { throw new Error('offline'); };
+  await refreshQuota({ ...env, now: 1_000, jitter: () => 0, fetchImpl: offline });
+  await refreshQuota({ ...env, now: 2_000, jitter: () => 0, fetchImpl: offline });
+  const state = readRefreshState(env.statePath);
+  assert.equal(state.failures, 2);
+  assert.equal(state.category, 'network');
+  assert.equal(state.nextAttemptAt, 6_000); // 2s + 4s exponential, jitter-free
+});
+
+test('refreshQuota clears the backoff on success and keeps the cache format', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-backoff-ok-'));
+  const env = failureEnv(dir);
+  await refreshQuota({
+    ...env,
+    now: 1_000,
+    jitter: () => 0,
+    fetchImpl: async () => statusResponse(503),
+  });
+  assert.notEqual(readRefreshState(env.statePath), null);
+
+  const ok = await refreshQuota({
+    ...env,
+    now: 2_000,
+    fetchImpl: async () => response(200, REAL_RESPONSE),
+  });
+  assert.equal(ok, true);
+  assert.equal(fs.existsSync(env.statePath), false);
+  const cache = readQuotaCache(env.cachePath);
+  assert.equal(cache.weekly.used, 29);
+  assert.equal(cache.fetchedAt, 2_000); // virtual clock honored, not Date.now()
+  assert.deepEqual(Object.keys(cache).sort(), ['fetchedAt', 'weekly', 'windows']);
+});
+
+test('ensureFreshQuota stays quiet inside the backoff window and spawns after it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-gate-'));
+  const env = failureEnv(dir);
+  const state = recordRefreshFailure({
+    statePath: env.statePath, category: 'network', now: 1_000, jitter: () => 0,
+  });
+  assert.equal(state.nextAttemptAt, 3_000);
+
+  let spawns = 0;
+  const spawnImpl = () => {
+    spawns += 1;
+    return { once() {}, unref() {} };
+  };
+  const opts = (now) => ({
+    ...env,
+    scriptPath: '/tmp/fake-kimi-hud.mjs',
+    now,
+    spawnImpl,
+    tokenFactory: () => 'fixed',
+  });
+  // Consecutive frames inside the window never spawn.
+  assert.equal(ensureFreshQuota(opts(1_100)), false);
+  assert.equal(ensureFreshQuota(opts(1_500)), false);
+  assert.equal(ensureFreshQuota(opts(2_999)), false);
+  assert.equal(spawns, 0);
+  // The first frame past the window refreshes, later frames hit the lock.
+  assert.equal(ensureFreshQuota(opts(3_000)), true);
+  assert.equal(ensureFreshQuota(opts(3_001)), false);
+  assert.equal(spawns, 1);
+});
+
+test('ensureFreshQuota ignores corrupt backoff state instead of blocking', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-gate-bad-'));
+  const env = failureEnv(dir);
+  fs.writeFileSync(env.statePath, '{broken');
+  let spawns = 0;
+  const ok = ensureFreshQuota({
+    ...env,
+    scriptPath: '/tmp/fake-kimi-hud.mjs',
+    now: 10,
+    spawnImpl: () => { spawns += 1; return { once() {}, unref() {} }; },
+    tokenFactory: () => 'fixed',
+  });
+  assert.equal(ok, true);
+  assert.equal(spawns, 1);
+});
+
+test('concurrent refresh processes share one backoff schedule', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-concurrent-'));
+  const env = failureEnv(dir);
+  let spawns = 0;
+  const spawnImpl = () => {
+    spawns += 1;
+    return { once() {}, unref() {} };
+  };
+
+  // Process A wins the lock and spawns; process B is repelled by the lock.
+  assert.equal(ensureFreshQuota({
+    ...env, scriptPath: 'x', now: 1_000, spawnImpl, tokenFactory: () => 'a',
+  }), true);
+  assert.equal(ensureFreshQuota({
+    ...env, scriptPath: 'x', now: 1_001, spawnImpl, tokenFactory: () => 'b',
+  }), false);
+  assert.equal(spawns, 1);
+
+  // A's child fails with 429 and releases the lock, recording backoff.
+  const lock = JSON.parse(fs.readFileSync(env.lockPath, 'utf8'));
+  const refreshed = await refreshQuota({
+    ...env,
+    lockToken: lock.token,
+    now: 1_002,
+    jitter: () => 0,
+    fetchImpl: async () => statusResponse(429),
+  });
+  assert.equal(refreshed, false);
+  assert.equal(fs.existsSync(env.lockPath), false);
+
+  // B's next frames are now throttled by the shared backoff, not just the lock.
+  assert.equal(ensureFreshQuota({
+    ...env, scriptPath: 'x', now: 1_003, spawnImpl, tokenFactory: () => 'b',
+  }), false);
+  assert.equal(ensureFreshQuota({
+    ...env, scriptPath: 'x', now: 2_900, spawnImpl, tokenFactory: () => 'b',
+  }), false);
+  assert.equal(spawns, 1);
+  assert.equal(readRefreshState(env.statePath).failures, 1);
+});
+
+test('a crashed child is recovered via stale lock once the backoff expires', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-crash-'));
+  const env = failureEnv(dir);
+  // One failed refresh leaves backoff; a then-crashed child leaves its lock.
+  await refreshQuota({ ...env, now: 1_000, jitter: () => 0, fetchImpl: async () => statusResponse(500) });
+  fs.writeFileSync(env.lockPath, JSON.stringify({ pid: 1, at: 1_000, token: 'crashed' }));
+
+  let spawns = 0;
+  const spawnImpl = () => { spawns += 1; return { once() {}, unref() {} }; };
+  // While the lock is fresh the frame declines.
+  assert.equal(ensureFreshQuota({
+    ...env, scriptPath: 'x', now: 1_100, spawnImpl, tokenFactory: () => 'next',
+  }), false);
+  // Once lock and backoff are both expired the refresh proceeds.
+  const recoveredAt = 1_000 + LOCK_STALE_MS + 1;
+  assert.equal(ensureFreshQuota({
+    ...env, scriptPath: 'x', now: recoveredAt, spawnImpl, tokenFactory: () => 'next',
+  }), true);
+  assert.equal(spawns, 1);
+});
+
+test('switching quota context restarts the backoff instead of inheriting it', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-switch-'));
+  const envA = failureEnv(dir);
+  await refreshQuota({ ...envA, now: 1_000, jitter: () => 0, fetchImpl: async () => statusResponse(500) });
+  await refreshQuota({ ...envA, now: 2_000, jitter: () => 0, fetchImpl: async () => statusResponse(500) });
+  const stateA = readRefreshState(envA.statePath);
+  assert.equal(stateA.failures, 2);
+  assert.match(stateA.contextKey, /^[0-9a-f]{16}$/);
+
+  const credentialsB = path.join(dir, 'other-account.json');
+  fs.writeFileSync(credentialsB, JSON.stringify({ access_token: 'fake-access-token-b' }));
+  await refreshQuota({
+    ...envA,
+    credentialsPath: credentialsB,
+    now: 3_000,
+    jitter: () => 0,
+    fetchImpl: async () => statusResponse(500),
+  });
+  const stateB = readRefreshState(envA.statePath);
+  assert.equal(stateB.failures, 1); // reset instead of inheriting 2 failures
+  assert.equal(stateB.nextAttemptAt, 5_000);
+  assert.notEqual(stateB.contextKey, stateA.contextKey);
+});
+
+test('failure refreshes print nothing and persist no token material', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-silent-'));
+  const env = failureEnv(dir, { token: 'fake-access-token-SECRET-9f8e7d6c' });
+  const chunks = [];
+  const origOut = process.stdout.write.bind(process.stdout);
+  const origErr = process.stderr.write.bind(process.stderr);
+  process.stdout.write = (chunk) => { chunks.push(String(chunk)); return true; };
+  process.stderr.write = (chunk) => { chunks.push(String(chunk)); return true; };
+  try {
+    await refreshQuota({
+      ...env,
+      now: 1_000,
+      jitter: () => 0,
+      fetchImpl: async () => statusResponse(503),
+    });
+  } finally {
+    process.stdout.write = origOut;
+    process.stderr.write = origErr;
+  }
+  assert.deepEqual(chunks, []);
+  const raw = fs.readFileSync(env.statePath, 'utf8');
+  assert.doesNotMatch(raw, /SECRET-9f8e7d6c/);
+  assert.doesNotMatch(raw, /Bearer/i);
+});
+
+test('auth failures back off while the refresh_token keeps the cache alive', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-auth-backoff-'));
+  const credentialsPath = path.join(dir, 'credentials.json');
+  fs.writeFileSync(credentialsPath, JSON.stringify({
+    access_token: 'fake-access-token',
+    refresh_token: 'fake-refresh-token',
+  }));
+  const env = {
+    credentialsPath,
+    cachePath: path.join(dir, 'quota.json'),
+    lockPath: path.join(dir, 'refresh.lock'),
+    statePath: path.join(dir, 'quota-refresh-state.json'),
+  };
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), env.cachePath);
+  await refreshQuota({
+    ...env,
+    now: 1_000,
+    jitter: () => 0,
+    fetchImpl: async () => statusResponse(401),
+  });
+  assert.notEqual(readQuotaCache(env.cachePath), null);
+  const state = readRefreshState(env.statePath);
+  assert.equal(state.category, 'auth');
+  assert.equal(state.failures, 1);
+});
+
+test('a /logout-shaped 401 drops the cache and still records the auth backoff', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-logout-'));
+  const env = failureEnv(dir);
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), env.cachePath);
+  await refreshQuota({
+    ...env,
+    now: 1_000,
+    jitter: () => 0,
+    fetchImpl: async () => statusResponse(401),
+  });
+  assert.equal(fs.existsSync(env.cachePath), false);
+  assert.equal(readRefreshState(env.statePath).category, 'auth');
 });
