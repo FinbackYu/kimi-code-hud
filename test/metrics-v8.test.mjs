@@ -29,44 +29,71 @@ function readState(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
-test('v8 reader preserves a UTF-8 code point split across frames', () => {
+test('a record the host is still writing parks the cursor and persists no content', () => {
+  const fx = makeSession();
+  const alias = '模型😀';
+  const row = `${JSON.stringify({ type: 'config.update', modelAlias: alias, time: 1 })}\n`;
+  const bytes = Buffer.from(row);
+  // The host's write ends inside the multibyte emoji: no record boundary yet.
+  const emojiAt = bytes.indexOf(Buffer.from('😀'));
+  fs.writeFileSync(fx.wires.main, bytes.subarray(0, emojiAt + 1));
+
+  const metrics = getMetrics(fx.id, {
+    sessionsRoot: fx.sessionsRoot,
+    stateDir: fx.stateDir,
+  });
+  assert.equal(metrics.modelAlias, null);
+  const state = readState(fx.statePath);
+  assert.equal(state.v, 9);
+  // The cursor parks at the record's start; nothing partial is persisted.
+  assert.equal(state.agents.main.offset, 0);
+  assert.equal('pendingBase64' in state.agents.main, false);
+  assert.equal(state.agents.main.tailDigest, null);
+
+  // The rest of the record lands; the parked cursor re-reads it from the
+  // source and folds the row exactly once.
+  fs.appendFileSync(fx.wires.main, bytes.subarray(emojiAt + 1));
+  let settled = metrics;
+  for (let i = 0; i < 5 && settled.modelAlias !== alias; i++) {
+    settled = getMetrics(fx.id, {
+      sessionsRoot: fx.sessionsRoot,
+      stateDir: fx.stateDir,
+    });
+  }
+  assert.equal(settled.modelAlias, alias);
+  const done = readState(fx.statePath);
+  assert.equal(done.agents.main.offset, bytes.length);
+});
+
+test('a read budget sliced inside a multibyte record still folds the whole record', () => {
   const fx = makeSession();
   const alias = '模型😀';
   const row = `${JSON.stringify({ type: 'config.update', modelAlias: alias, time: 1 })}\n`;
   const bytes = Buffer.from(row);
   fs.writeFileSync(fx.wires.main, bytes);
   const emojiAt = bytes.indexOf(Buffer.from('😀'));
-  const firstBudget = emojiAt + 1;
 
-  let metrics = getMetrics(fx.id, {
+  // The budget ends mid-code-point, but the record is complete on disk: the
+  // bounded in-frame scan finishes it instead of splitting it across frames.
+  const metrics = getMetrics(fx.id, {
     sessionsRoot: fx.sessionsRoot,
     stateDir: fx.stateDir,
-    readBudgetBytes: firstBudget,
+    readBudgetBytes: emojiAt + 1,
   });
-  assert.equal(metrics.modelAlias, null);
-  let state = readState(fx.statePath);
-  assert.equal(state.v, 8);
-  assert.equal(state.agents.main.offset, firstBudget);
-  assert.notEqual(state.agents.main.pendingBase64, '');
-
-  for (let i = 0; i < 10 && metrics.modelAlias !== alias; i++) {
-    metrics = getMetrics(fx.id, {
-      sessionsRoot: fx.sessionsRoot,
-      stateDir: fx.stateDir,
-      readBudgetBytes: 7,
-    });
-  }
-  state = readState(fx.statePath);
   assert.equal(metrics.modelAlias, alias);
+  const state = readState(fx.statePath);
   assert.equal(state.agents.main.offset, bytes.length);
-  assert.equal(state.agents.main.pendingBase64, '');
+  assert.equal('pendingBase64' in state.agents.main, false);
 });
 
-test('v8 enforces one shared wire budget and rotates subagent priority', () => {
+test('budget shares committed records across subagents and rotates priority', () => {
   const agents = ['main', ...Array.from({ length: 10 }, (_, i) => `agent-${String(i).padStart(2, '0')}`)];
   const fx = makeSession(agents);
+  // Each subagent wire carries two newline-terminated records, each exactly
+  // one 128 KiB slice: one committed record per visit.
+  const row = Buffer.concat([Buffer.alloc(128 * 1024 - 1, 0x78), Buffer.from('\n')]);
   for (const agent of agents.slice(1)) {
-    fs.writeFileSync(fx.wires[agent], Buffer.alloc(200 * 1024, 0x78));
+    fs.writeFileSync(fx.wires[agent], Buffer.concat([row, row]));
   }
 
   getMetrics(fx.id, {
@@ -89,6 +116,20 @@ test('v8 enforces one shared wire budget and rotates subagent priority', () => {
   state = readState(fx.statePath);
   assert.equal(state.agents['agent-08'].offset, 128 * 1024);
   assert.equal(state.agents['agent-09'].offset, 128 * 1024);
+
+  // The rotation keeps going until every agent's records are committed.
+  for (let frame = 0; frame < 10; frame++) {
+    getMetrics(fx.id, {
+      sessionsRoot: fx.sessionsRoot,
+      stateDir: fx.stateDir,
+      readBudgetBytes: WIRE_READ_BUDGET_BYTES,
+    });
+    state = readState(fx.statePath);
+    if (agents.slice(1).every((agent) => state.agents[agent].offset === 256 * 1024)) break;
+  }
+  for (const agent of agents.slice(1)) {
+    assert.equal(state.agents[agent].offset, 256 * 1024);
+  }
 });
 
 test('v7 projection backfill persists its cursor, retries, then swaps atomically', () => {
@@ -116,7 +157,7 @@ test('v7 projection backfill persists its cursor, retries, then swaps atomically
   });
   let state = readState(fx.statePath);
   assert.equal(metrics.modelAlias, 'old-model');
-  assert.equal(state.v, 8);
+  assert.equal(state.v, 9);
   assert.equal(state.backfill.reader.offset, 0);
   assert.equal(state.backfillScanV, 7);
 
@@ -268,14 +309,16 @@ test('50 MiB damaged history catches up across frames without duplicate cache or
     });
     const state = readState(fx.statePath);
     const offset = state.agents.main.offset;
-    assert.ok(offset - previousOffset <= WIRE_READ_BUDGET_BYTES);
+    // A frame commits at most its slice plus one bounded record completion
+    // (the in-frame replacement for the former cross-frame pending buffer).
+    assert.ok(offset - previousOffset <= MAIN_WIRE_SLICE_BYTES + MAX_PARTIAL_LINE_BYTES);
     previousOffset = offset;
     if (offset === fs.statSync(fx.wires.main).size) break;
   }
 
   const state = readState(fx.statePath);
   assert.equal(state.agents.main.offset, fs.statSync(fx.wires.main).size);
-  assert.equal(state.agents.main.pendingBase64, '');
+  assert.equal('pendingBase64' in state.agents.main, false);
   assert.equal(state.agents.main.discardingLine, false);
   assert.equal(metrics.modelAlias, 'caught-up');
   assert.deepEqual(state.agents.main.samples.map((sample) => sample.v), [10, 20, 30]);

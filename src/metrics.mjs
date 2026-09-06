@@ -32,7 +32,7 @@ import {
   MAIN_WIRE_SLICE_BYTES,
   WIRE_READ_BUDGET_BYTES,
   readBoundedWire,
-  wireTailMarker,
+  wireTailDigest,
   wireTailMatches,
 } from './wire-reader.mjs';
 import { applyGoalOp } from './goal.mjs';
@@ -291,9 +291,15 @@ function advanceBackfill(wirePath, state, fileId, targetOffset, maxBytes) {
     maxBytes,
   );
   if (result.text) foldBackfillChunk(backfill.shadow, result.text);
+  // targetOffset is a committed record boundary, so a discard state at or past
+  // it cannot be hiding a real record; clear it (corrupt-legacy recovery) or a
+  // reader parked exactly at the target could never install its projection.
+  if (backfill.reader.offset >= backfill.targetOffset) {
+    backfill.reader.discardingLine = false;
+  }
   const caughtUp =
     backfill.reader.offset >= backfill.targetOffset &&
-    backfill.reader.pendingBase64 === '';
+    !backfill.reader.discardingLine;
   if (caughtUp) {
     installBackfillProjection(state, backfill.shadow);
     state.backfillScanV = BACKFILL_SCAN_V;
@@ -359,8 +365,8 @@ function prepareWire(state, descriptor) {
       bucket.fileId = fileId;
       changed = true;
     }
-    if (bucket.offset > 0 && bucket.tailMarker === null) {
-      bucket.tailMarker = wireTailMarker(descriptor.path, bucket.offset);
+    if (bucket.offset > 0 && bucket.tailDigest === null) {
+      bucket.tailDigest = wireTailDigest(descriptor.path, bucket.offset);
       changed = true;
     }
     return { ...descriptor, stat, fileId, bucket, changed };

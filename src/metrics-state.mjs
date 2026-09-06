@@ -154,6 +154,42 @@ function migrateV7State(raw) {
     : 0;
   state.backfill = null;
   state.hostVersion = typeof raw.hostVersion === 'string' ? raw.hostVersion : null;
+  return state;
+}
+
+/**
+ * Validate and upgrade a current-shape state in place. Reader cursors pass
+ * through normAgent/normalizeReader/normalizeBackfill, which also scrub the
+ * legacy content-bearing pendingBase64/tailMarker fields, so any state that
+ * reaches saveState carries digest-and-offset cursors only.
+ */
+function normalizeCurrentState(state) {
+  for (const name of Object.keys(state.agents)) {
+    state.agents[name] = normAgent(state.agents[name]);
+  }
+  if (typeof state.swarmMode !== 'boolean') state.swarmMode = false;
+  if (typeof state.towerMode !== 'boolean') state.towerMode = false;
+  if (typeof state.sessionDir !== 'string') state.sessionDir = null;
+  if (!Number.isInteger(state.agentCursor) || state.agentCursor < 0) {
+    state.agentCursor = 0;
+  }
+  state.backfill = normalizeBackfill(state.backfill);
+  state.tasks = normalizeTasks(state.tasks);
+  state.sessionUsage = normalizeSessionUsageState(state.sessionUsage);
+  if (typeof state.hostVersion !== 'string') state.hostVersion = null;
+  delete state.cacheTurn;
+  delete state.cacheNeedsPrompt;
+  return state;
+}
+
+/**
+ * v8 -> v9: replace content-bearing reader cursors (pendingBase64 tail
+ * buffers, raw tailMarker bytes) with content-free digests and rewound
+ * offsets. The rewind lands on the pending record's start, so the next read
+ * recovers the record from the source wire — no wire event is lost.
+ */
+function migrateV8State(raw) {
+  const state = normalizeCurrentState({ ...raw, v: METRICS_STATE_V });
   state[MIGRATED] = true;
   return state;
 }
@@ -167,30 +203,24 @@ export function loadState(statePath) {
         state.agents &&
         typeof state.agents === 'object'
       ) {
-        for (const name of Object.keys(state.agents)) {
-          state.agents[name] = normAgent(state.agents[name]);
-        }
-        if (typeof state.swarmMode !== 'boolean') state.swarmMode = false;
-        if (typeof state.towerMode !== 'boolean') state.towerMode = false;
-        if (typeof state.sessionDir !== 'string') state.sessionDir = null;
-        if (!Number.isInteger(state.agentCursor) || state.agentCursor < 0) {
-          state.agentCursor = 0;
-        }
-        state.backfill = normalizeBackfill(state.backfill);
-        state.tasks = normalizeTasks(state.tasks);
-        state.sessionUsage = normalizeSessionUsageState(state.sessionUsage);
-        if (typeof state.hostVersion !== 'string') state.hostVersion = null;
-        delete state.cacheTurn;
-        delete state.cacheNeedsPrompt;
-        return state;
+        return normalizeCurrentState(state);
+      }
+      if (
+        state.v === METRICS_STATE_V - 1 &&
+        state.agents &&
+        typeof state.agents === 'object'
+      ) {
+        return migrateV8State(state);
       }
       if (state.v === 7 && state.agents && typeof state.agents === 'object') {
-        return migrateV7State(state);
+        return normalizeCurrentState(migrateV7State(state));
       }
       if (state.v === 6 && state.agents && typeof state.agents === 'object') {
-        return migrateV7State(migrateV6State(state));
+        return migrateV8State(migrateV7State(migrateV6State(state)));
       }
-      if (typeof state.offset === 'number') return migrateFlatState(state);
+      if (typeof state.offset === 'number') {
+        return normalizeCurrentState(migrateFlatState(state));
+      }
     }
   } catch {
     // Missing or corrupt state starts clean.

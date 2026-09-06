@@ -53,12 +53,12 @@ function stripCursors(state) {
   for (const bucket of Object.values(clone.agents || {})) {
     delete bucket.fileId;
     delete bucket.offset;
-    delete bucket.tailMarker;
+    delete bucket.tailDigest;
   }
   for (const agentUsage of Object.values(clone.sessionUsage?.agents || {})) {
     delete agentUsage.reader?.fileId;
     delete agentUsage.reader?.offset;
-    delete agentUsage.reader?.tailMarker;
+    delete agentUsage.reader?.tailDigest;
   }
   return clone;
 }
