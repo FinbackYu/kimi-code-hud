@@ -1,0 +1,10 @@
+# Keeps the SHA-pinned GitHub Actions current. Dependabot resolves the
+# version comment next to each pin and opens PRs that move the pinned
+# commit SHA to the new release. There is no npm ecosystem entry on
+# purpose: the project is zero-dependency.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
