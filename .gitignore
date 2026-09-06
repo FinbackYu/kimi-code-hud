@@ -4,6 +4,7 @@ node_modules/
 docs/*
 !docs/media/
 !docs/showcase/
+!docs/capabilities-archive.md
 docs/showcase/*
 !docs/showcase/README.md
 !docs/showcase/export-assets.py
