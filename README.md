@@ -6,11 +6,11 @@
 
 ![HUD 状态示例（堆叠展示，实际使用只渲染第一行）](docs/media/hud-states.png)
 
-Kimi Code CLI 的自定义底部状态栏（HUD）——零依赖 Node.js 脚本，在终端 TUI 底部显示模型与思考强度、Git 分支、生成速度（TPS / TTFT）、压缩计时、缓存命中率、Kimi 托管订阅额度，以及受支持第三方 provider 的余额或会话成本估算。每次渲染 300ms 内完成，所有错误静默降级，绝不阻塞 TUI。
+Kimi Code CLI 的自定义底部状态栏（HUD）——零依赖 Node.js 脚本，在终端 TUI 底部显示模型与思考强度、Git 分支、生成速度（TPS / TTFT）、压缩计时、缓存命中率、Kimi 托管订阅额度，以及受支持第三方 provider 的余额或会话成本估算。渲染受宿主的 300ms 截止时间约束，HUD 自身再以 220ms 的内部每帧预算自律（边界见[工作原理](#工作原理)）；所有错误静默降级，即使单帧超时也由宿主兜底回退，不会卡住 TUI。
 
 ## 安装
 
-要求 Node.js ≥ 18（用到全局 `fetch`），无 npm 依赖。
+要求 Node.js ≥ 18（用到全局 `fetch`），无 npm 依赖；运行时、操作系统与宿主的支持范围见下方[支持环境](#支持环境)。
 
 在 Kimi Code TUI 中运行：
 
@@ -22,6 +22,17 @@ Kimi Code CLI 的自定义底部状态栏（HUD）——零依赖 Node.js 脚本
 - 开关：`/plugins` 面板选中按 `Space`，或 `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`；
 - 如果你已在 `[status_line]` 配置了自己的命令，hook 不会覆盖它；
 - **更新**：重跑一遍安装命令即原地更新，约 1 秒自动生效。
+
+## 支持环境
+
+| 层级 | 范围 | 验证程度 |
+|---|---|---|
+| 推荐运行时 | 处于上游维护窗口内的 Node.js LTS（撰写本文时为 22 / 24） | 日常开发与发布验证以此为准 |
+| 尽力兼容运行时 | 满足最低要求 **Node.js ≥ 18** 的所有版本（最低要求不变） | 已结束上游官方维护（EOL）的版本（如 18 / 20）不做主动测试；相关问题按尽力兼容处理 |
+| 操作系统 | macOS / Linux / Windows | macOS 是维护者的主要开发与动态验证环境；Linux 由 CI 自动化测试覆盖（实际矩阵以 [`.github/workflows/test.yml`](.github/workflows/test.yml) 为准）；Windows 为尽力兼容——Git 探针已按 Windows 约定做可信可执行解析（含 `PATHEXT`，见 [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)），但真实 Windows 宿主上的动态验证尚未完成（未验证） |
+| Kimi Code 宿主 | 已验证基线 **0.41.0** | 逐版本契约审计与固定的上游提交见 [CAPABILITIES.md](CAPABILITIES.md) |
+
+CI 矩阵的增删是测试覆盖的变化，不构成支持契约的扩张或收缩；支持范围以本节为准。跨操作系统的交互式宿主矩阵（真实 TUI、终端模拟器、插件生命周期）仍在补齐（未验证）。
 
 ## 配置
 
@@ -76,7 +87,7 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 
 ## 工作原理
 
-宿主每秒通过 stdin 传一个 JSON 快照（读取上限 1 MiB、150ms 超时），命令 stdout 的**第一行**接管 footer line 1（line 2 固定由宿主绘制，插件无法接管），命令须在 **300ms** 内完成；失败/超时/空输出时宿主渲染内置行或重播上一帧——所以脚本对所有错误静默降级、绝不打印日志（唯一的非零退出是"已禁用/已移除插件的托管副本"自我清除 `tui.toml` 条目，插件开关由此实现）。
+宿主每秒通过 stdin 传一个 JSON 快照（读取上限 1 MiB、150ms 超时），命令 stdout 的**第一行**接管 footer line 1（line 2 固定由宿主绘制，插件无法接管）。**300ms** 是宿主截止时间（host deadline）：它约束包括 Node 进程启动在内的整个子进程生命周期，超时后进程树由宿主终止。HUD 自身在此之下把每帧工作限制在 **220ms** 的内部预算内（从脚本逻辑入口计时，不含 Node 启动），给宿主的调度与兜底留出余量。预算是协作式的：HUD 在步骤之间检查剩余时间、提前收手，但已在进行中的同步 I/O 无法被中途打断——单次慢读取最坏会越过内部预算，由宿主 300ms 截止兜底。失败/超时/空输出时宿主渲染内置行或重播上一帧，所以超时后旧帧可能继续显示一段时间（见 [KI-4](KNOWN_ISSUES.md#ki-4-a-failed-command-can-leave-a-stale-frame)）——脚本对所有错误静默降级、绝不打印日志（唯一的非零退出是"已禁用/已移除插件的托管副本"自我清除 `tui.toml` 条目，插件开关由此实现）。
 
 数据来自四路：stdin 快照与跨进程缓存的 Git 探针（cwd 只存 SHA-256，TTL 15s）；会话 `wire.jsonl` 增量解析（main + 全部 subagent，无正文，cursor 与计数持久化在 `~/.kimi-code-hud/sessions/`，旧版根目录文件在会话恢复时自动迁移；超过 30 天未活跃的会话状态与进程被杀残留的 `*.tmp-*` 临时文件由 SessionStart hook 每日清理一次）；官方 `/usages` 配额接口（60s 缓存 + 后台刷新，双区域按 oauth host 判定）；provider 官方余额接口与本地定价的成本估算（按 provider + key 指纹隔离缓存）。
 

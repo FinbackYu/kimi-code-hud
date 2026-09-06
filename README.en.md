@@ -6,11 +6,11 @@
 
 ![HUD state gallery (stacked for showcase; only the first line renders in real use)](docs/media/hud-states.png)
 
-A custom status line (HUD) for the [Kimi Code CLI](https://www.kimi.com/) — a zero-dependency Node.js script that shows model & thinking effort, git branch, generation speed (TPS / TTFT), compaction timers, session cache hit rate, Kimi managed-subscription usage, and supported third-party provider balances or session-cost estimates in the TUI footer. Every render finishes within 300ms and all errors degrade silently — the TUI is never blocked.
+A custom status line (HUD) for the [Kimi Code CLI](https://www.kimi.com/) — a zero-dependency Node.js script that shows model & thinking effort, git branch, generation speed (TPS / TTFT), compaction timers, session cache hit rate, Kimi managed-subscription usage, and supported third-party provider balances or session-cost estimates in the TUI footer. Rendering is bounded by the host's 300ms deadline, with the HUD holding itself to a tighter 220ms internal per-frame budget (boundaries in [How it works](#how-it-works)); all errors degrade silently, and even a timed-out frame falls back host-side, so the TUI is never blocked.
 
 ## Install
 
-Requires Node.js ≥ 18 (global `fetch`). Zero npm dependencies.
+Requires Node.js ≥ 18 (global `fetch`). Zero npm dependencies. See [Supported environments](#supported-environments) below for the runtime, OS, and host support policy.
 
 In the Kimi Code TUI, run:
 
@@ -22,6 +22,17 @@ In the Kimi Code TUI, run:
 - Toggle: select it in the `/plugins` panel and press `Space`, or run `/plugins disable kimi-code-hud` / `/plugins enable kimi-code-hud`;
 - If you already configured your own `[status_line]` command, the hook leaves it untouched;
 - **Update**: run the install command again — the managed copy is replaced in place and the status line picks up the new version within ~1 second.
+
+## Supported environments
+
+| Tier | Scope | Verification |
+|---|---|---|
+| Recommended runtimes | Node.js LTS lines inside their upstream maintenance window (at the time of writing, 22 / 24) | The target of day-to-day development and release verification |
+| Best-effort runtimes | Every version meeting the **Node.js ≥ 18** minimum (the minimum is unchanged) | Releases past their upstream End-of-Life (e.g. 18 / 20) are not proactively tested; issues there are handled on a best-effort basis |
+| Operating systems | macOS / Linux / Windows | macOS is the maintainer's primary development and dynamic-verification environment; Linux is covered by the automated CI suite (actual matrix: [`.github/workflows/test.yml`](.github/workflows/test.yml)); Windows is best-effort — the Git probe already resolves a trusted executable the Windows way (including `PATHEXT`, see [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)), but dynamic verification on a real Windows host has not been completed (not dynamically verified) |
+| Kimi Code host | Verified baseline **0.41.0** | Per-release contract audits with pinned upstream commits live in [CAPABILITIES.md](CAPABILITIES.md) |
+
+Changes to the CI matrix are changes in test coverage, not in the support contract: adding or removing matrix entries never widens or shrinks the support statements above — this section is the contract. The interactive cross-OS host matrix (real TUI, terminal emulators, plugin lifecycle) is still being filled in (not dynamically verified).
 
 ## Configuration
 
@@ -76,7 +87,7 @@ The precise rules per segment (sample acceptance, wire derivation paths, fail-cl
 
 ## How it works
 
-Once per second the host pipes a JSON snapshot to stdin (capped at 1 MiB with a 150ms timeout), the **first line** of the command's stdout takes over footer line 1 (line 2 is always drawn by the host and cannot be taken over), and the command must finish within **300ms**; on failure/timeout/empty output the host renders the built-in line or replays the last good frame — so the script degrades silently on every error path and never logs anything (the single deliberate non-zero exit is the managed copy of a disabled/removed plugin stripping its own `tui.toml` entry, which is how the on/off switch works).
+Once per second the host pipes a JSON snapshot to stdin (capped at 1 MiB with a 150ms timeout) and the **first line** of the command's stdout takes over footer line 1 (line 2 is always drawn by the host and cannot be taken over). **300ms** is the host deadline: it bounds the whole child-process lifetime, Node.js startup included, and the host kills the process tree on timeout. Under that ceiling the HUD holds every frame's work to a **220ms** internal budget (timed from the script's logic entry, excluding Node startup), leaving headroom for the host's scheduling and fallback handling. The budget is cooperative: the HUD checks remaining time between steps and stops early, but synchronous I/O already in flight cannot be interrupted — a single slow read can at worst overrun the internal budget, caught by the host's 300ms deadline. On failure/timeout/empty output the host renders the built-in line or replays the last good frame, so a stale frame may stay visible for a while after a timeout (see [KI-4](KNOWN_ISSUES.md#ki-4-a-failed-command-can-leave-a-stale-frame)) — the script degrades silently on every error path and never logs anything (the single deliberate non-zero exit is the managed copy of a disabled/removed plugin stripping its own `tui.toml` entry, which is how the on/off switch works).
 
 Four data sources: the stdin snapshot and a cross-process cached Git probe (cwd stored only as a SHA-256, 15s TTL); incremental parsing of the session's `wire.jsonl` files (main + every subagent, content-free, cursors and counters persisted under `~/.kimi-code-hud/sessions/`, where files written by earlier versions migrate automatically the next time their session is touched; session state idle for over 30 days and orphaned `*.tmp-*` temporaries from killed processes are swept once a day by the SessionStart hook); the official `/usages` quota API (60s cache plus detached background refresh, dual-region via the oauth host); and provider official balance APIs with locally priced cost estimates (cached isolated by provider + key fingerprint).
 
