@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/FinbackYu/kimi-code-hud/blob/main/SECURITY.md
+    about: Do not open a public issue — report privately per SECURITY.md.
+  - name: Kimi Code CLI (host) issues
+    url: https://github.com/MoonshotAI/kimi-code/issues
+    about: Bugs in the Kimi Code host itself, not the HUD status line.

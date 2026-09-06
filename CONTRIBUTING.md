@@ -93,3 +93,7 @@ The steps below require write access to the upstream repository (`FinbackYu/kimi
 - Do not commit while tests are red.
 - Do not close a prep issue that still has unchecked checklist items (unless explicitly deferred).
 - Do not share one prep branch across upstream versions.
+
+## Security issues
+
+Do not open a public issue for a suspected vulnerability — see [SECURITY.md](SECURITY.md) for the private reporting channel, what to include (sanitized), and the disclosure process. The public bug report template enforces a sanitization checklist; keep it that way.
