@@ -7,7 +7,9 @@
  */
 export function quoteCommandArg(value) {
   const text = String(value);
-  if (/^[A-Za-z0-9_@%+=:,./\\-]+$/.test(text)) return text;
+  // A backslash must never reach the unquoted fast path: unquoted, a POSIX
+  // shell consumes it as an escape and node receives a corrupted path.
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(text)) return text;
   return `"${text.replace(/["\\$`]/g, '\\$&')}"`;
 }
 
