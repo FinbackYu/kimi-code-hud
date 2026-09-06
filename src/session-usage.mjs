@@ -1,5 +1,6 @@
 import {
   readBoundedWire,
+  upgradeReaderCursor,
   wireTailMatches,
 } from './wire-reader.mjs';
 
@@ -35,9 +36,8 @@ function emptyReader(fileId = null) {
   return {
     offset: 0,
     fileId,
-    pendingBase64: '',
     discardingLine: false,
-    tailMarker: null,
+    tailDigest: null,
   };
 }
 
@@ -45,10 +45,8 @@ function normalizeReader(value) {
   const reader = value && typeof value === 'object' ? value : emptyReader();
   if (!Number.isSafeInteger(reader.offset) || reader.offset < 0) reader.offset = 0;
   if (typeof reader.fileId !== 'string') reader.fileId = null;
-  if (typeof reader.pendingBase64 !== 'string') reader.pendingBase64 = '';
   if (typeof reader.discardingLine !== 'boolean') reader.discardingLine = false;
-  if (typeof reader.tailMarker !== 'string') reader.tailMarker = null;
-  return reader;
+  return upgradeReaderCursor(reader);
 }
 
 function emptyAgentUsage(fileId = null) {
@@ -168,7 +166,6 @@ export function advanceSessionUsageAgent({
     changed: existing === undefined || replaced || adoptedFileId || result.bytesRead > 0,
     complete:
       agentUsage.reader.offset >= fileSize
-      && agentUsage.reader.pendingBase64 === ''
       && agentUsage.reader.discardingLine === false,
   };
 }

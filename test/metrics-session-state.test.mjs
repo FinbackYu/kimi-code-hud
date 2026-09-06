@@ -382,7 +382,7 @@ test('getMetrics drops legacy samples that lack freshness and model metadata', (
   assert.equal(m.tps, null);
   assert.equal(m.ttftMs, null);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.v, 8);
+  assert.equal(state.v, 9);
   assert.deepEqual(state.agents.main.samples, []);
   assert.equal(state.sampleStateV, undefined); // legacy marker not carried over
 });
@@ -420,7 +420,7 @@ test('getMetrics migrates flat states into buckets, preserving window and badges
   assert.deepEqual(m.goal, { status: 'active', turnsUsed: 1 });
   assert.equal(m.swarmMode, true);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.v, 8);
+  assert.equal(state.v, 9);
   assert.equal(state.agents.main.offset, size);
   assert.deepEqual(
     state.agents.main.samples,
@@ -454,7 +454,7 @@ test('getMetrics migrates v6 global median into per-agent buckets without cross-
   );
   getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME });
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
-  assert.equal(state.v, 8);
+  assert.equal(state.v, 9);
   assert.equal(state.agents.main.lastMedian, 10);
   assert.equal(state.agents['agent-0'].lastMedian, 100);
   assert.equal(state.lastMedian, undefined);
