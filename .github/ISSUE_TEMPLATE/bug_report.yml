@@ -1,0 +1,97 @@
+name: Bug report
+description: Something in the HUD renders wrong, hangs, or breaks a documented promise
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Before you start:
+
+        - This issue tracker is **public**. Strip credentials and session content before submitting; do not rely on editing after the fact.
+        - For **security vulnerabilities** (credential leaks, session content persisted where it must not be, terminal injection), do **not** use this public form — see [SECURITY.md](https://github.com/FinbackYu/kimi-code-hud/blob/main/SECURITY.md).
+        - If the HUD simply shows nothing, check the FAQ in [README.md](https://github.com/FinbackYu/kimi-code-hud#faq) first.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you see instead? When did it start (after a plugin update, a Kimi Code upgrade, a config change)?
+    validations:
+      required: true
+  - type: input
+    id: hud-version
+    attributes:
+      label: HUD version
+      description: Version of the installed plugin.
+      placeholder: e.g. 0.8.2 — grep '"version"' ~/.kimi-code/plugins/managed/kimi-code-hud/kimi.plugin.json
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: Output of `node --version` (the Node the HUD runs under).
+      placeholder: e.g. v22.14.0
+    validations:
+      required: true
+  - type: textarea
+    id: os-terminal
+    attributes:
+      label: OS and terminal
+      description: OS version and terminal emulator, plus anything unusual (SSH, tmux/screen, non-default TERM).
+      placeholder: |
+        e.g. macOS 15.5, iTerm2 3.5, TERM=xterm-256color
+        e.g. Windows 11 24H2, Windows Terminal 1.21
+    validations:
+      required: true
+  - type: input
+    id: host-version
+    attributes:
+      label: Kimi Code CLI version
+      description: Output of `kimi --version`.
+      placeholder: e.g. 0.41.0
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction steps
+      description: Numbered steps from a fresh state, using synthetic content only (fake prompts, fake file names). Include the exact commands you ran.
+      placeholder: |
+        1. Start `kimi` in a repo with a git branch `demo`
+        2. Run one prompt asking for `...` (synthetic example)
+        3. Observe the status line: `...` instead of `...`
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostic output
+      description: |
+        Optional, but usually the fastest path to a fix. Capture what the HUD renders with:
+
+        ```
+        echo '{}' | node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs
+        ```
+
+        Redact tokens and any real session text before pasting. If a cache file is relevant, paste only the relevant keys with values replaced by placeholders — not the full file.
+    validations:
+      required: false
+  - type: checkboxes
+    id: sanitization
+    attributes:
+      label: Sanitization checklist
+      description: Hard requirements — issues containing real credentials or session content are handled as leaks.
+      options:
+        - label: This issue contains no API keys, access/refresh tokens, or other credentials, including in screenshots, logs, and attachments.
+          required: true
+        - label: No raw `wire.jsonl`, no full `config.toml` or `~/.kimi-code-hud/config.json`, and no real session content (prompts, replies, tool output) — synthetic or redacted examples only.
+          required: true
+        - label: Screenshots and terminal output show no real prompts, replies, or personal data, and I understand this issue becomes public once submitted.
+          required: true
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else?
+      description: Sanitized screenshots, related issues, whether disabling the plugin makes the problem go away.
+    validations:
+      required: false
