@@ -6,6 +6,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  collectDoctorReport,
+  doctorExitCode,
+  formatDoctorReport,
+} from '../src/doctor.mjs';
+import {
   disableHud,
   enableHud,
   installHud,
@@ -42,7 +47,12 @@ Usage:
   kimi-code-hud --refresh-quota  refresh the quota cache (internal, silent)
   kimi-code-hud --refresh-provider-usage <provider> [fingerprint]
                                 refresh provider usage (internal, silent)
-  kimi-code-hud --help           show this help
+  kimi-code-hud --doctor        read-only diagnostics: paths, install state,
+                                caches, refresh backoff (no network, no fixes)
+  kimi-code-hud --doctor --share
+                                same report with personal paths masked for
+                                pasting into issues
+  kimi-code-hud --help          show this help
 
 Config: ~/.kimi-code-hud/config.json  {"layout":"compact|normal"}
 Env:    KIMI_CODE_HOME overrides ~/.kimi-code; KIMI_HUD_HOME overrides ~/.kimi-code-hud.
@@ -77,6 +87,17 @@ async function main() {
   if (args.includes('--help') || args.includes('-h')) {
     process.stdout.write(HELP);
     return 0;
+  }
+  if (args.includes('--doctor')) {
+    // Read-only by contract: collects facts, prints the report, never fixes,
+    // refreshes or touches the network. Exit 0 = healthy, 1 = attention.
+    const report = collectDoctorReport({
+      paths: RUNTIME_PATHS,
+      env: process.env,
+      scriptPath: SCRIPT_PATH,
+    });
+    process.stdout.write(formatDoctorReport(report, { shareable: args.includes('--share') }));
+    return doctorExitCode(report);
   }
   if (args.includes('--refresh-quota')) {
     try {
