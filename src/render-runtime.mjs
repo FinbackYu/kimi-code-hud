@@ -90,6 +90,7 @@ export async function renderStatusLine({
         scriptPath,
         cachePath: paths.quotaCachePath,
         lockPath: paths.quotaLockPath,
+        statePath: paths.quotaRefreshStatePath,
         cachedQuota: snapshot.quota,
         now,
       });

@@ -5,6 +5,14 @@ import path from 'node:path';
 
 import { atomicWriteFile } from './fs-store.mjs';
 import { resolveProviderConfig } from './model-config.mjs';
+import {
+  MAX_RESPONSE_BYTES,
+  REQUEST_CATEGORY,
+  clearRefreshState,
+  isRefreshBlocked,
+  recordRefreshFailure,
+  requestJsonWithLimits,
+} from './request-guard.mjs';
 import { CONFIG_TOML_PATH, PROVIDER_USAGE_DIR } from './paths.mjs';
 
 export const DEEPSEEK_PROVIDER = 'deepseek';
@@ -110,7 +118,7 @@ function credentialFingerprint(provider, apiKey) {
     .slice(0, 16);
 }
 
-/** Resolve deterministic, secret-free cache paths for one provider account. */
+/** Resolve deterministic, secret-free cache, lock and backoff-state paths for one provider account. */
 export function providerUsagePaths({
   provider,
   credentialFingerprint: fingerprint,
@@ -127,6 +135,7 @@ export function providerUsagePaths({
   return {
     cachePath: path.join(providerUsageDir, `${stem}.json`),
     lockPath: path.join(providerUsageDir, `${stem}.lock`),
+    statePath: path.join(providerUsageDir, `${stem}.state.json`),
   };
 }
 
@@ -233,6 +242,7 @@ export function writeProviderUsageCache(usage, target, {
     || !Number.isFinite(now)
     || expectedPaths.cachePath !== target.cachePath
     || expectedPaths.lockPath !== target.lockPath
+    || expectedPaths.statePath !== target.statePath
   ) {
     return false;
   }
@@ -314,7 +324,11 @@ export function releaseProviderUsageLock(lockPath, token = null) {
   }
 }
 
-/** Spawn a detached provider refresh when its account-scoped cache is stale. */
+/** Spawn a detached provider refresh when its account-scoped cache is stale
+ * and no persisted failure backoff forbids it. Backoff state lives next to
+ * the cache under the same account fingerprint, so concurrent processes share
+ * one retry schedule per credential.
+ */
 export function ensureFreshProviderUsage({
   scriptPath,
   target,
@@ -328,6 +342,7 @@ export function ensureFreshProviderUsage({
     if (!target) return false;
     const cache = cachedUsage === undefined ? readProviderUsageCache(target) : cachedUsage;
     if (!isProviderUsageStale(cache, now)) return false;
+    if (isRefreshBlocked(target.statePath, now)) return false;
     lockToken = acquireProviderUsageLock({
       lockPath: target.lockPath,
       now,
@@ -355,11 +370,17 @@ export function ensureFreshProviderUsage({
   }
 }
 
-/** Fetch one DeepSeek balance response without mutating any local state. */
+/** Fetch one DeepSeek balance response without mutating any local state.
+ * The whole request — headers, body and JSON parse — shares one deadline, and
+ * response bodies are size-capped and always released.
+ * @returns {Promise<{status: string, category: string, parsed?: object,
+ *   retryAfterSeen?: boolean, retryAfterMs?: number|null}>}
+ */
 export async function requestDeepSeekUsage({
   apiKey,
   url = DEEPSEEK_BALANCE_URL,
   timeoutMs = 8000,
+  maxBytes = MAX_RESPONSE_BYTES,
   fetchImpl = globalThis.fetch,
 } = {}) {
   if (
@@ -367,48 +388,16 @@ export async function requestDeepSeekUsage({
     || apiKey.length === 0
     || !officialDeepSeekBalanceUrl(url)
   ) {
-    return { status: PROVIDER_USAGE_RESULT.INVALID };
+    return { status: PROVIDER_USAGE_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
   }
-  const ctrl = new AbortController();
-  let timer;
-  const timeout = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => {
-      ctrl.abort();
-      reject(new Error('provider usage request timed out'));
-    }, timeoutMs);
+  return requestJsonWithLimits({
+    url,
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    timeoutMs,
+    maxBytes,
+    fetchImpl,
+    parse: parseDeepSeekBalance,
   });
-  let response;
-  try {
-    response = await Promise.race([
-      fetchImpl(url, {
-        headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
-        signal: ctrl.signal,
-      }),
-      timeout,
-    ]);
-  } catch {
-    return { status: PROVIDER_USAGE_RESULT.TRANSIENT };
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!response || typeof response.status !== 'number' || typeof response.ok !== 'boolean') {
-    return { status: PROVIDER_USAGE_RESULT.INVALID };
-  }
-  if (response.status === 401 || response.status === 403) {
-    return { status: PROVIDER_USAGE_RESULT.UNAUTHORIZED };
-  }
-  if (response.status === 429 || response.status >= 500) {
-    return { status: PROVIDER_USAGE_RESULT.TRANSIENT };
-  }
-  if (!response.ok) return { status: PROVIDER_USAGE_RESULT.INVALID };
-  try {
-    const parsed = parseDeepSeekBalance(await response.json());
-    return parsed
-      ? { status: PROVIDER_USAGE_RESULT.SUCCESS, parsed }
-      : { status: PROVIDER_USAGE_RESULT.INVALID };
-  } catch {
-    return { status: PROVIDER_USAGE_RESULT.INVALID };
-  }
 }
 
 function removeFile(filePath) {
@@ -418,7 +407,10 @@ function removeFile(filePath) {
 /**
  * Refresh a supported provider cache. The current config is re-resolved in
  * the child, and the expected fingerprint prevents a key switch from writing
- * old-account data into the new account's cache.
+ * old-account data into the new account's cache. Failed attempts persist a
+ * failure record (category + next attempt time) beside the cache; success
+ * clears it. The per-fingerprint state file keeps accounts isolated — one
+ * key's failures never throttle another key's refresh.
  */
 export async function refreshProviderUsage({
   provider,
@@ -428,6 +420,8 @@ export async function refreshProviderUsage({
   timeoutMs = 8000,
   fetchImpl = globalThis.fetch,
   lockToken = null,
+  now = Date.now(),
+  jitter = Math.random,
 } = {}) {
   const expectedPaths = providerUsagePaths({
     provider,
@@ -440,7 +434,10 @@ export async function refreshProviderUsage({
     try { configText = fs.readFileSync(configPath, 'utf8'); } catch { /* missing config */ }
     const context = resolveProviderUsageContext({ provider, configText, providerUsageDir });
     if (!context || (expectedFingerprint && context.target.credentialFingerprint !== expectedFingerprint)) {
-      if (expectedPaths) removeFile(expectedPaths.cachePath);
+      if (expectedPaths) {
+        removeFile(expectedPaths.cachePath);
+        removeFile(expectedPaths.statePath);
+      }
       return false;
     }
     lockPath = context.target.lockPath;
@@ -450,8 +447,18 @@ export async function refreshProviderUsage({
       fetchImpl,
     });
     if (result.status === PROVIDER_USAGE_RESULT.SUCCESS) {
-      return writeProviderUsageCache(result.parsed, context.target);
+      const written = writeProviderUsageCache(result.parsed, context.target, { now });
+      if (written) clearRefreshState(context.target.statePath);
+      return written;
     }
+    recordRefreshFailure({
+      statePath: context.target.statePath,
+      category: result.category,
+      retryAfterSeen: result.retryAfterSeen === true,
+      retryAfterMs: result.retryAfterMs ?? null,
+      now,
+      jitter,
+    });
     if (result.status !== PROVIDER_USAGE_RESULT.TRANSIENT) {
       removeFile(context.target.cachePath);
     }
