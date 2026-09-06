@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "check-release": "node scripts/check-release.mjs"
+    "check-release": "node scripts/check-release.mjs",
+    "bench": "node scripts/bench-render.mjs"
   },
   "engines": {
     "node": ">=18"
