@@ -547,6 +547,175 @@ test('share mode hides custom roots like /Volumes/PrivateCustomer; local keeps t
   assert.match(share, /path: <absolute-path-hidden>/);
 });
 
+test('share mode labels a UNC kimi home (user repro); local keeps it verbatim', () => {
+  const uncRoot = '\\\\private-server\\PrivateCustomer\\Project\\Kimi';
+  const paths = resolveRuntimePaths({
+    env: {
+      KIMI_CODE_HOME: uncRoot,
+      KIMI_HUD_HOME: `${uncRoot}\\.kimi-code-hud`,
+      KIMI_HUD_TUI_TOML: `${uncRoot}\\tui.toml`,
+      KIMI_HUD_CONFIG_TOML: `${uncRoot}\\config.toml`,
+    },
+  });
+  const report = collectDoctorReport({ paths, env: {}, scriptPath: SCRIPT, now: NOW });
+  const local = formatDoctorReport(report);
+  const share = formatDoctorReport(report, { shareable: true });
+  assert.equal(local.includes(uncRoot), true, 'local output must stay byte-for-byte');
+  for (const secret of [uncRoot, 'private-server', 'PrivateCustomer']) {
+    assert.equal(share.includes(secret), false, `shareable output leaked: ${secret}`);
+  }
+  assert.match(share, /path: \$KIMI_CODE_HOME/);
+  assert.match(share, /path: \$KIMI_HUD_HOME\//);
+});
+
+test('bin --doctor --share masks a UNC kimi home (user repro)', () => {
+  const uncRoot = '\\\\private-server\\PrivateCustomer\\Project\\Kimi';
+  const result = spawnSync(process.execPath, [BIN, '--doctor', '--share'], {
+    input: '',
+    env: {
+      ...process.env,
+      KIMI_CODE_HOME: uncRoot,
+      KIMI_HUD_HOME: `${uncRoot}\\.kimi-code-hud`,
+      KIMI_HUD_TUI_TOML: `${uncRoot}\\tui.toml`,
+      KIMI_HUD_CONFIG_TOML: `${uncRoot}\\config.toml`,
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.includes('private-server'), false);
+  assert.equal(result.stdout.includes('PrivateCustomer'), false);
+  assert.match(result.stdout, /path: \$KIMI_CODE_HOME/);
+  assert.match(result.stdout, /path: \$KIMI_HUD_HOME\//);
+});
+
+test('share mode hides unknown UNC and extended-length path fields', () => {
+  const onePath = (p) => ({
+    now: NOW,
+    paths: null,
+    checks: [{
+      section: 'environment',
+      level: 'ok',
+      label: 'kimi home',
+      detail: 'present',
+      path: p,
+    }],
+  });
+  for (const p of [
+    '\\\\nas\\Private\\Share\\sub',
+    '\\\\?\\C:\\Private\\secret\\hud',
+    '\\\\?\\UNC\\nas\\Private\\Share\\sub',
+  ]) {
+    const local = formatDoctorReport(onePath(p));
+    const share = formatDoctorReport(onePath(p), { shareable: true });
+    assert.equal(local.includes(p), true, `local must pass through ${p} byte-for-byte`);
+    assert.equal(share.includes(p), false, `shareable output leaked: ${p}`);
+    assert.match(share, /path: <absolute-path-hidden>/);
+  }
+});
+
+test('share mode labels extended-length forms of known roots', () => {
+  const onePath = (paths, p) => ({
+    now: NOW,
+    paths,
+    checks: [{
+      section: 'environment',
+      level: 'ok',
+      label: 'kimi home',
+      detail: 'present',
+      path: p,
+    }],
+  });
+  // \\?\UNC\... value under a plain UNC kimi home.
+  const uncShare = formatDoctorReport(
+    onePath({ kimiHome: '\\\\private-server\\PrivateCustomer\\Project\\Kimi' },
+      '\\\\?\\UNC\\private-server\\PrivateCustomer\\Project\\Kimi\\credentials\\kimi-code.json'),
+    { shareable: true },
+  );
+  assert.equal(uncShare.includes('private-server'), false);
+  assert.match(uncShare, /path: \$KIMI_CODE_HOME\\credentials\\kimi-code\.json/);
+  // \\?\C:\... value under a drive-letter kimi home.
+  const driveShare = formatDoctorReport(
+    onePath({ kimiHome: 'C:\\Private\\Kimi' }, '\\\\?\\C:\\Private\\Kimi\\hud\\quota.json'),
+    { shareable: true },
+  );
+  assert.equal(driveShare.includes('C:\\Private'), false);
+  assert.match(driveShare, /path: \$KIMI_CODE_HOME\\hud\\quota\.json/);
+  // A plain value under an extended-length UNC kimi home.
+  const extRootShare = formatDoctorReport(
+    onePath({ kimiHome: '\\\\?\\UNC\\nas\\Share\\Kimi' }, '\\\\nas\\Share\\Kimi\\quota.json'),
+    { shareable: true },
+  );
+  assert.match(extRootShare, /path: \$KIMI_CODE_HOME\\quota\.json/);
+  // Windows paths fold case when matching a known root.
+  const ciShare = formatDoctorReport(
+    onePath({ kimiHome: '\\\\nas\\Share\\Kimi' }, '\\\\NAS\\SHARE\\KIMI\\x.json'),
+    { shareable: true },
+  );
+  assert.match(ciShare, /path: \$KIMI_CODE_HOME\\x\.json/);
+});
+
+test('share mode redacts UNC paths in free text without touching prose or URLs', () => {
+  const report = {
+    now: NOW,
+    paths: null,
+    checks: [{
+      section: 'install',
+      level: 'warn',
+      label: 'status line',
+      detail: 'scan skipped for \\\\nas\\Private\\Share\\v1.2\\cache.log, retry tomorrow.',
+      hint: 'logs live at \\\\private-server\\PrivateCustomer\\hud.log and https://example.com/docs/setup',
+    }],
+  };
+  const local = formatDoctorReport(report);
+  const share = formatDoctorReport(report, { shareable: true });
+  assert.match(local, /\\\\nas\\Private\\Share\\/);
+  for (const secret of ['private-server', 'PrivateCustomer', '\\\\nas']) {
+    assert.equal(share.includes(secret), false, `shareable output leaked: ${secret}`);
+  }
+  assert.match(share, /scan skipped for <absolute-path-hidden>, retry tomorrow\./);
+  assert.match(share, /logs live at <absolute-path-hidden> and https:\/\/example\.com\/docs\/setup/);
+
+  // Extended-length forms inside free text are consumed whole, colon included.
+  const extended = (detail) => ({
+    now: NOW,
+    paths: null,
+    checks: [{ section: 'environment', level: 'note', label: 'sessions', detail }],
+  });
+  const extShare = formatDoctorReport(
+    extended('ignored \\\\?\\C:\\Windows\\secret and \\\\?\\UNC\\nas\\Private\\Share\\x now'),
+    { shareable: true },
+  );
+  for (const secret of ['C:\\Windows', 'nas', 'Private', 'Share']) {
+    assert.equal(extShare.includes(secret), false, `shareable output leaked: ${secret}`);
+  }
+  assert.match(extShare, /ignored <absolute-path-hidden> and <absolute-path-hidden> now/);
+});
+
+test('share mode leaves look-alike prose untouched: escapes, single backslashes, mixed separators', () => {
+  const plain = (detail) => ({
+    now: NOW,
+    paths: null,
+    checks: [{ section: 'quota', level: 'note', label: 'context', detail }],
+  });
+  // Regex-style escapes and a single-backslash relative hint are not UNC paths.
+  const proseShare = formatDoctorReport(
+    plain('pattern \\\\? and \\\\d stay visible; so does folder\\sub'),
+    { shareable: true },
+  );
+  assert.equal(
+    proseShare.includes('pattern \\\\? and \\\\d stay visible; so does folder\\sub'),
+    true,
+    proseShare,
+  );
+  // A UNC-shaped token with mixed separators is redacted as a whole.
+  const mixedShare = formatDoctorReport(
+    plain('stuck on \\\\nas\\Private\\Share/mixed\\child, see docs'),
+    { shareable: true },
+  );
+  assert.equal(mixedShare.includes('Private'), false, mixedShare);
+  assert.match(mixedShare, /stuck on <absolute-path-hidden>, see docs/);
+});
+
 test('share mode redacts absolute paths in free text; local keeps them', () => {
   const report = {
     now: NOW,
