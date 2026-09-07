@@ -8,6 +8,8 @@ import path from 'node:path';
 
 import {
   HOUSEKEEPING_MAX_UNLINKS,
+  SCRUB_CURSOR_NAME,
+  SCRUB_MAX_FILES,
   SESSION_FILE_TTL_MS,
   TMP_FILE_MAX_AGE_MS,
   runHousekeeping,
@@ -191,6 +193,156 @@ test('the cleanup entry tolerates missing directories', () => {
   assert.deepEqual(
     scrubLegacySessionCaches({ hudDir, sessionStateDir: path.join(hudDir, 'sessions') }),
     { scanned: 0, cleaned: 0, removed: 0 },
+  );
+});
+
+test('repeated bounded passes drive 201 legacy caches to zero instead of stalling at one', () => {
+  const { hudDir, sessionStateDir } = makeHudHome();
+  const caches = [];
+  for (let i = 0; i < 201; i++) {
+    caches.push(
+      write(path.join(sessionStateDir, `metrics-old${String(i).padStart(3, '0')}.json`), legacyCache(i)),
+    );
+  }
+  const legacyLeft = () =>
+    caches.filter((p) => fs.readFileSync(p, 'utf8').includes('pendingBase64')).length;
+
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir }),
+    { scanned: 200, cleaned: 200, removed: 0 },
+    'the first pass spends the full budget on legacy caches',
+  );
+  assert.equal(legacyLeft(), 1, 'the per-run cap leaves exactly one behind');
+
+  const second = scrubLegacySessionCaches({ hudDir, sessionStateDir });
+  assert.equal(second.cleaned, 1, 'the next run reaches the file the first pass left');
+  assert.equal(second.scanned, 1, 'migrated caches are not re-counted as workload');
+  assert.equal(legacyLeft(), 0);
+
+  const third = scrubLegacySessionCaches({ hudDir, sessionStateDir });
+  assert.equal(third.cleaned + third.removed, 0, 'nothing is left to do');
+  assert.ok(third.scanned <= SCRUB_MAX_FILES, 'the repeat stays bounded');
+  assert.equal(legacyLeft(), 0);
+});
+
+test('a capped pass keeps a cursor and the next pass resumes after it, not from the start', () => {
+  const { hudDir, sessionStateDir } = makeHudHome();
+  const caches = [];
+  for (let i = 0; i < 5; i++) {
+    caches.push(write(path.join(sessionStateDir, `metrics-s${i}.json`), legacyCache(i)));
+  }
+  const cursorPath = path.join(hudDir, SCRUB_CURSOR_NAME);
+
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir, maxFiles: 2 }),
+    { scanned: 2, cleaned: 2, removed: 0 },
+  );
+  const cursor = JSON.parse(fs.readFileSync(cursorPath, 'utf8'));
+  assert.match(cursor.anchors.sessions, /^metrics-s[01]\.json$/, 'the cursor stores a bare file name');
+  assert.equal(cursor.anchors.sessions.includes('/'), false, 'the cursor never stores paths');
+  assert.equal(fs.readFileSync(cursorPath, 'utf8').includes('pendingBase64'), false, 'the cursor never stores cache content');
+
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir, maxFiles: 2 }),
+    { scanned: 2, cleaned: 2, removed: 0 },
+    'the resumed pass continues after the cursor instead of re-inspecting migrated caches',
+  );
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir, maxFiles: 2 }),
+    { scanned: 1, cleaned: 1, removed: 0 },
+  );
+  assert.equal(fs.existsSync(cursorPath), false, 'a completed pass clears the cursor');
+  assert.equal(
+    caches.filter((p) => fs.readFileSync(p, 'utf8').includes('pendingBase64')).length,
+    0,
+  );
+});
+
+test('a packed hudDir root cannot starve the sessions directory', () => {
+  const { hudDir, sessionStateDir } = makeHudHome();
+  const rootCaches = [];
+  const sessionCaches = [];
+  for (let i = 0; i < 300; i++) {
+    rootCaches.push(
+      write(path.join(hudDir, `metrics-root${String(i).padStart(3, '0')}.json`), legacyCache(i)),
+    );
+  }
+  for (let i = 0; i < 50; i++) {
+    sessionCaches.push(
+      write(path.join(sessionStateDir, `metrics-sess${String(i).padStart(3, '0')}.json`), legacyCache(i)),
+    );
+  }
+  const legacyLeftIn = (caches) =>
+    caches.filter((p) => fs.readFileSync(p, 'utf8').includes('pendingBase64')).length;
+
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir }),
+    { scanned: 150, cleaned: 150, removed: 0 },
+    'each directory spends at most its fair share of the run budget',
+  );
+  assert.equal(legacyLeftIn(rootCaches), 200);
+  assert.equal(legacyLeftIn(sessionCaches), 0, 'the smaller directory still finishes its work');
+
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir }),
+    { scanned: 150, cleaned: 100, removed: 0 },
+  );
+  assert.equal(legacyLeftIn(rootCaches), 100);
+
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir }),
+    { scanned: 150, cleaned: 100, removed: 0 },
+  );
+  assert.equal(legacyLeftIn(rootCaches) + legacyLeftIn(sessionCaches), 0);
+
+  const fourth = scrubLegacySessionCaches({ hudDir, sessionStateDir });
+  assert.equal(fourth.cleaned + fourth.removed, 0);
+});
+
+test('a lost, corrupt, or stale cursor falls back to a safe full re-scan', () => {
+  const { hudDir, sessionStateDir } = makeHudHome();
+  const caches = [];
+  for (let i = 0; i < 4; i++) {
+    caches.push(write(path.join(sessionStateDir, `metrics-s${i}.json`), legacyCache(i)));
+  }
+  const cursorPath = path.join(hudDir, SCRUB_CURSOR_NAME);
+
+  // A crash left a cursor whose anchor file has since been swept away.
+  fs.writeFileSync(cursorPath, JSON.stringify({ v: 1, anchors: { sessions: 'metrics-gone.json' } }));
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir }),
+    { scanned: 4, cleaned: 4, removed: 0 },
+    'a vanished anchor restarts the directory from the beginning',
+  );
+  assert.equal(fs.existsSync(cursorPath), false, 'the completed pass clears the stale cursor');
+
+  // A cursor truncated by a crash is ignored the same way.
+  for (const cache of caches) write(cache, legacyCache(1));
+  fs.writeFileSync(cursorPath, '{"v":1,"anchors":{"sessio');
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir }),
+    { scanned: 4, cleaned: 4, removed: 0 },
+  );
+
+  // A cursor from a newer HUD version is not interpreted, and the pass
+  // replaces it with its own once it has work left over.
+  for (const cache of caches) write(cache, legacyCache(2));
+  fs.writeFileSync(cursorPath, JSON.stringify({ v: 99, anchors: { sessions: 'metrics-s1.json' } }));
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir, maxFiles: 2 }),
+    { scanned: 2, cleaned: 2, removed: 0 },
+    'an unknown cursor version restarts the directory from the beginning',
+  );
+  assert.match(fs.readFileSync(cursorPath, 'utf8'), /"v":1/, 'the pass writes its own cursor');
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir }),
+    { scanned: 2, cleaned: 2, removed: 0 },
+    'the replacement cursor resumes instead of re-inspecting migrated caches',
+  );
+  assert.equal(fs.existsSync(cursorPath), false, 'the completed pass clears the cursor');
+  assert.equal(
+    caches.filter((p) => fs.readFileSync(p, 'utf8').includes('pendingBase64')).length,
+    0,
   );
 });
 
