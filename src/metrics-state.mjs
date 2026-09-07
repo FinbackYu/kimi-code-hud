@@ -158,10 +158,8 @@ function migrateV7State(raw) {
 }
 
 /**
- * Validate and upgrade a current-shape state in place. Reader cursors pass
- * through normAgent/normalizeReader/normalizeBackfill, which also scrub the
- * legacy content-bearing pendingBase64/tailMarker fields, so any state that
- * reaches saveState carries digest-and-offset cursors only.
+ * Validate and upgrade a current-shape state in place, scrubbing any
+ * legacy content-bearing cursor fields on the way (see migrateParsedState).
  */
 function normalizeCurrentState(state) {
   for (const name of Object.keys(state.agents)) {
@@ -194,34 +192,47 @@ function migrateV8State(raw) {
   return state;
 }
 
+/**
+ * Upgrade any recognized persisted state shape to the current content-free
+ * form. Reader cursors pass through normAgent/normalizeReader/
+ * normalizeBackfill, which also scrub the legacy content-bearing
+ * pendingBase64/tailMarker fields, so any state returned here serializes to
+ * digest-and-offset cursors only. Returns null for shapes this version does
+ * not recognize, so callers that rewrite cache files in place can leave
+ * foreign formats (corrupt JSON, a newer HUD's files) untouched.
+ */
+export function migrateParsedState(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (
+    raw.v === METRICS_STATE_V &&
+    raw.agents &&
+    typeof raw.agents === 'object'
+  ) {
+    return normalizeCurrentState(raw);
+  }
+  if (
+    raw.v === METRICS_STATE_V - 1 &&
+    raw.agents &&
+    typeof raw.agents === 'object'
+  ) {
+    return migrateV8State(raw);
+  }
+  if (raw.v === 7 && raw.agents && typeof raw.agents === 'object') {
+    return normalizeCurrentState(migrateV7State(raw));
+  }
+  if (raw.v === 6 && raw.agents && typeof raw.agents === 'object') {
+    return migrateV8State(migrateV7State(migrateV6State(raw)));
+  }
+  if (typeof raw.offset === 'number') {
+    return normalizeCurrentState(migrateFlatState(raw));
+  }
+  return null;
+}
+
 export function loadState(statePath) {
   try {
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-    if (state && typeof state === 'object') {
-      if (
-        state.v === METRICS_STATE_V &&
-        state.agents &&
-        typeof state.agents === 'object'
-      ) {
-        return normalizeCurrentState(state);
-      }
-      if (
-        state.v === METRICS_STATE_V - 1 &&
-        state.agents &&
-        typeof state.agents === 'object'
-      ) {
-        return migrateV8State(state);
-      }
-      if (state.v === 7 && state.agents && typeof state.agents === 'object') {
-        return normalizeCurrentState(migrateV7State(state));
-      }
-      if (state.v === 6 && state.agents && typeof state.agents === 'object') {
-        return migrateV8State(migrateV7State(migrateV6State(state)));
-      }
-      if (typeof state.offset === 'number') {
-        return normalizeCurrentState(migrateFlatState(state));
-      }
-    }
+    const state = migrateParsedState(JSON.parse(fs.readFileSync(statePath, 'utf8')));
+    if (state) return state;
   } catch {
     // Missing or corrupt state starts clean.
   }

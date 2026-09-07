@@ -16,6 +16,7 @@ import {
   installHud,
   uninstallHud,
 } from '../src/management-service.mjs';
+import { scrubLegacySessionCaches } from '../src/housekeeping.mjs';
 import { resolveRuntimePaths } from '../src/paths.mjs';
 import { refreshProviderUsage } from '../src/provider-usage.mjs';
 import { refreshQuota, resolveQuotaEndpoints } from '../src/quota.mjs';
@@ -52,6 +53,10 @@ Usage:
   kimi-code-hud --doctor --share
                                 same report with personal paths masked for
                                 pasting into issues
+  kimi-code-hud --clean-legacy-caches
+                                rewrite legacy session caches that may still
+                                hold wire content into the content-free
+                                format (HUD caches only, bounded)
   kimi-code-hud --help          show this help
 
 Config: ~/.kimi-code-hud/config.json  {"layout":"compact|normal"}
@@ -98,6 +103,25 @@ async function main() {
     });
     process.stdout.write(formatDoctorReport(report, { shareable: args.includes('--share') }));
     return doctorExitCode(report);
+  }
+  if (args.includes('--clean-legacy-caches')) {
+    // Explicit cleanup entry, separate from the read-only doctor: migrates
+    // every recognized session cache to the content-free shape without
+    // waiting for its session to reopen or for the retention window.
+    // Touches HUD-owned caches only; never reads or writes host files.
+    try {
+      const counts = scrubLegacySessionCaches({
+        hudDir: RUNTIME_PATHS.hudDir,
+        sessionStateDir: RUNTIME_PATHS.sessionStateDir,
+      });
+      process.stdout.write(
+        `kimi-code-hud: legacy cache cleanup: ${counts.scanned} scanned, `
+        + `${counts.cleaned} migrated, ${counts.removed} corrupt removed\n`,
+      );
+    } catch (err) {
+      return adminFailure('legacy cache cleanup', err);
+    }
+    return 0;
   }
   if (args.includes('--refresh-quota')) {
     try {
