@@ -19,7 +19,10 @@ function setup(installedJson) {
   fs.writeFileSync(path.join(home, 'plugins', 'installed.json'), installedJson);
   const toml = path.join(home, 'tui.toml');
   const script = path.join(managed, 'bin', 'kimi-hud.mjs');
-  fs.writeFileSync(toml, `[status_line]\ncommand = "node ${script}"\n`);
+  // Mirror tomlEscape: a backslash path written raw into a TOML basic string
+  // is invalid TOML, and the HUD fails closed on syntax it cannot parse.
+  const command = `node ${script}`.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  fs.writeFileSync(toml, `[status_line]\ncommand = "${command}"\n`);
   return { home, toml, script };
 }
 

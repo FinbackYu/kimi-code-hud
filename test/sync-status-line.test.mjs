@@ -27,11 +27,32 @@ function runHook(env) {
   });
 }
 
+// Byte-exact expectation for the written [status_line] command line, derived
+// from the documented contract rather than by calling src/command.mjs: the
+// script path stays unquoted unless the platform shell requires quoting, and
+// the command is stored as a TOML basic string with backslashes and inner
+// quotes escaped. POSIX additionally escapes `\`, `"`, `$` and backtick
+// inside the quotes (none of which occur in these fixture paths); the
+// Windows shell knows no `\` escapes and a `"` cannot occur in a real
+// Windows path, so the quotes wrap the path unescaped there.
+function expectedStatusLine(pluginRoot) {
+  const script = path.join(pluginRoot, 'bin', 'kimi-hud.mjs');
+  // Mirrors src/command.mjs's per-platform unquoted fast path: the Windows
+  // set adds the native separator and 8.3 short names' `~`.
+  const safe = /^[A-Za-z0-9_@%+=:,./\\~-]+$/;
+  const posixSafe = /^[A-Za-z0-9_@%+=:,./-]+$/;
+  const needsQuotes = process.platform === 'win32'
+    ? !safe.test(script)
+    : !posixSafe.test(script);
+  const command = needsQuotes ? `"${script}"` : script;
+  return `command = "node ${command.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
 test('creates tui.toml pointing at the managed copy', () => {
   const { home, pluginRoot, toml } = setup();
   runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
   const out = fs.readFileSync(toml, 'utf8');
-  assert.equal(out, `[status_line]\ncommand = "node ${pluginRoot}/bin/kimi-hud.mjs"\n`);
+  assert.equal(out, `[status_line]\n${expectedStatusLine(pluginRoot)}\n`);
 });
 
 test('session start sweeps stale HUD temporaries and expired session state', () => {
@@ -62,7 +83,7 @@ test('rewrites a previous kimi-hud command to the managed copy', () => {
   fs.writeFileSync(toml, '[status_line]\ncommand = "node /Users/test/kimi-code-hud/bin/kimi-hud.mjs"\n');
   runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
   const out = fs.readFileSync(toml, 'utf8');
-  assert.equal(out, `[status_line]\ncommand = "node ${pluginRoot}/bin/kimi-hud.mjs"\n`);
+  assert.equal(out, `[status_line]\n${expectedStatusLine(pluginRoot)}\n`);
 });
 
 test('installs even when another section has its own command key', () => {
@@ -74,7 +95,7 @@ test('installs even when another section has its own command key', () => {
   const out = fs.readFileSync(toml, 'utf8');
   assert.equal(
     out,
-    `[editor]\ncommand = "" # Empty uses $VISUAL / $EDITOR\n\n[status_line]\ncommand = "node ${pluginRoot}/bin/kimi-hud.mjs"\n`,
+    `[editor]\ncommand = "" # Empty uses $VISUAL / $EDITOR\n\n[status_line]\n${expectedStatusLine(pluginRoot)}\n`,
   );
 });
 
@@ -83,7 +104,7 @@ test('rewrites a previous kimi-hud command that carries trailing arguments', () 
   fs.writeFileSync(toml, '[status_line]\ncommand = "node /a/bin/kimi-hud.mjs --layout compact"\n');
   runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
   const out = fs.readFileSync(toml, 'utf8');
-  assert.equal(out, `[status_line]\ncommand = "node ${pluginRoot}/bin/kimi-hud.mjs"\n`);
+  assert.equal(out, `[status_line]\n${expectedStatusLine(pluginRoot)}\n`);
 });
 
 test('leaves a foreign command with trailing arguments untouched', () => {
@@ -132,7 +153,7 @@ test('quotes a managed-copy path containing spaces', () => {
   runHook({ KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot });
   assert.equal(
     fs.readFileSync(toml, 'utf8'),
-    `[status_line]\ncommand = "node \\"${pluginRoot}/bin/kimi-hud.mjs\\""\n`,
+    `[status_line]\n${expectedStatusLine(pluginRoot)}\n`,
   );
 });
 
@@ -143,7 +164,7 @@ test('preserves other sections and status_line keys', () => {
   const out = fs.readFileSync(toml, 'utf8');
   assert.equal(
     out,
-    `[theme]\nname = "dark"\n\n[status_line]\ncommand = "node ${pluginRoot}/bin/kimi-hud.mjs"\nitems = ["model"]\n`,
+    `[theme]\nname = "dark"\n\n[status_line]\n${expectedStatusLine(pluginRoot)}\nitems = ["model"]\n`,
   );
 });
 
