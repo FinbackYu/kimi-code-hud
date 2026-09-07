@@ -339,6 +339,12 @@ hide the other context's figures immediately; the remaining conservative
 trade-offs are tracked in
 [KI-17](#ki-17-same-slot-credential-changes-invalidate-quota-conservatively).
 
+Update: the stale state also tiers for display now — figures past the 60s
+TTL dim immediately, but the literal `[stale]` marker only joins once the
+cache is more than an hour old, so the first frame after a short
+away-from-keyboard gap no longer reads as a staleness warning. The
+scheduler-side meaning of the 60s TTL (refresh-worthy) is unchanged.
+
 ## KI-13: Tracked showcase PNGs had drifted from current rendering behavior
 
 Status: closed (fixed in HUD `v0.7.7`)

@@ -434,14 +434,21 @@ function quotaSegment({ layout, quota, color, now, C }) {
   if (!quota) return null;
   // The age contract lives in quota.mjs so rendering and the refresh
   // scheduler share one boundary: fresh figures render normally, stale ones
-  // stay visible but dimmed with a plain-text marker, and anything past the
-  // maximum stale age (or stamped impossibly far in the future) is dropped —
-  // seven-day-old numbers must never be presented the same as fresh ones.
+  // stay visible but dimmed, and anything past the maximum stale age (or
+  // stamped impossibly far in the future) is dropped — seven-day-old numbers
+  // must never be presented the same as fresh ones. The stale state itself
+  // tiers: within QUOTA_STALE_MARK_MS ("aging" — the first hour, which is
+  // also the background refresh cadence, so returning after a few minutes
+  // lands here) the dim alone signals age because window figures that young
+  // are almost certainly still valid; past it the literal `[stale]` marker
+  // joins the dim for figures old enough to be genuinely doubted.
   const age = quotaAge(quota, now);
   if (age.state === QUOTA_AGE.EXPIRED) return null;
   const stale = age.state === QUOTA_AGE.STALE;
-  // Usage-level colors (bar / percentage) only apply to fresh figures; a
-  // stale segment is toned down as a whole so it reads as old, not current.
+  const markStale = stale && age.markStale === true;
+  // Usage-level colors (bar / percentage) only apply to fresh figures; an
+  // aging or stale segment is toned down as a whole so it reads as old, not
+  // current.
   const useLevelColor = color && !stale;
   const parts = [];
   for (const window of quota.windows || []) {
@@ -471,9 +478,13 @@ function quotaSegment({ layout, quota, color, now, C }) {
   if (parts.length === 0) return null;
   const text = parts.join(' · ');
   if (!stale) return text;
-  // Dimmed in color; the literal marker keeps the state readable when colors
-  // are disabled (NO_COLOR / KIMI_HUD_NO_COLOR).
-  return colorize(color, C.muted, `${text} [stale]`);
+  // Dimmed in color either way. The literal marker only joins past the mark
+  // age, and keeps the genuinely-stale state readable when colors are
+  // disabled (NO_COLOR / KIMI_HUD_NO_COLOR); the aging tier deliberately
+  // carries no text marker — the dim alone reads as "old, not current".
+  return markStale
+    ? colorize(color, C.muted, `${text} [stale]`)
+    : colorize(color, C.muted, text);
 }
 
 function providerBalanceText(balance) {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { renderHud, bar, formatCountdown } from '../src/render.mjs';
 import {
   QUOTA_TTL_MS,
+  QUOTA_STALE_MARK_MS,
   QUOTA_STALE_MAX_MS,
   QUOTA_CLOCK_SKEW_MS,
 } from '../src/quota.mjs';
@@ -891,20 +892,60 @@ test('task badges pluralize, hide at zero and paint primary blue', () => {
 
 // --- H02: quota age contract ------------------------------------------------
 
-test('stale quota is dimmed and carries a plain [stale] marker', () => {
-  const staleAt = NOW - QUOTA_TTL_MS - 1;
-  const quota = {
-    fetchedAt: staleAt,
+test('quota one tick past the TTL dims without the [stale] marker (aging tier)', () => {
+  const aging = {
+    fetchedAt: NOW - QUOTA_TTL_MS - 1,
+    weekly: { used: 25, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
+    windows: [{ label: '5h', used: 31, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
+  };
+  // Monochrome: the text reads unchanged — the aging tier deliberately has
+  // no text marker, because the first frame after a few minutes away would
+  // otherwise always cry wolf.
+  const [plain] = renderHud(baseCtx({ layout: 'normal', color: false, quota: aging }));
+  assert.ok(plain.includes('5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h'));
+  assert.ok(!plain.includes('[stale]'));
+  // Color: the whole segment is dimmed (muted 90) but unmarked.
+  const [ansi] = renderHud(baseCtx({ layout: 'normal', color: true, quota: aging }));
+  assert.match(ansi, /\x1b\[90m5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h\x1b\[0m/);
+  assert.ok(!ansi.includes('[stale]'));
+});
+
+test('quota past the one-hour mark gains the plain [stale] marker', () => {
+  const marked = {
+    fetchedAt: NOW - QUOTA_STALE_MARK_MS - 1,
     weekly: { used: 25, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
     windows: [{ label: '5h', used: 31, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
   };
   // Monochrome: the marker alone tells the reader the figures are old.
-  const [plain] = renderHud(baseCtx({ layout: 'normal', color: false, quota }));
+  const [plain] = renderHud(baseCtx({ layout: 'normal', color: false, quota: marked }));
   assert.ok(plain.includes('5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h [stale]'));
   // Color: the whole stale segment is dimmed (muted 90 / dim hue).
-  const [ansi] = renderHud(baseCtx({ layout: 'normal', color: true, quota }));
-  assert.ok(ansi.includes('\x1b[90m'));
+  const [ansi] = renderHud(baseCtx({ layout: 'normal', color: true, quota: marked }));
   assert.match(ansi, /\x1b\[90m5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h \[stale\]\x1b\[0m/);
+});
+
+test('quota age tiers hold at the exact boundaries', () => {
+  const windows = [{ label: '5h', used: 31, limit: 100 }];
+  const at = (age) => renderHud(baseCtx({
+    layout: 'compact',
+    quota: { fetchedAt: NOW - age, weekly: null, windows },
+  }))[0];
+  // =TTL: fresh — normal brightness, no marker, no dim.
+  const fresh = at(QUOTA_TTL_MS);
+  assert.ok(fresh.includes('5h 31%'));
+  assert.ok(!fresh.includes('[stale]'));
+  assert.ok(!fresh.includes('\x1b[90m5h'));
+  // TTL+1 and =1h: aging — dimmed without the marker.
+  assert.ok(!at(QUOTA_TTL_MS + 1).includes('[stale]'));
+  const hourOld = at(QUOTA_STALE_MARK_MS);
+  assert.ok(hourOld.includes('5h 31%'));
+  assert.ok(!hourOld.includes('[stale]'));
+  // 1h+1: marked stale.
+  assert.ok(at(QUOTA_STALE_MARK_MS + 1).includes('5h 31% [stale]'));
+  // =7d: still usable, with the marker (detailed in the tests below).
+  assert.ok(at(QUOTA_STALE_MAX_MS).includes('5h 31% [stale]'));
+  // 7d+1: hidden entirely (detailed in the tests below).
+  assert.ok(!at(QUOTA_STALE_MAX_MS + 1).includes('5h'));
 });
 
 test('seven-day-old quota no longer renders identically to fresh quota', () => {

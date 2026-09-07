@@ -28,6 +28,7 @@ import {
   QUOTA_RESULT,
   QUOTA_TTL_MS,
   QUOTA_CACHE_VERSION,
+  QUOTA_STALE_MARK_MS,
   QUOTA_STALE_MAX_MS,
   QUOTA_CLOCK_SKEW_MS,
   LOCK_STALE_MS,
@@ -186,13 +187,35 @@ test('quotaAge draws the fresh/stale/expired boundaries exactly', () => {
   const cache = readQuotaCache(cachePath);
   // fresh: up to and including the TTL.
   assert.equal(quotaAge(cache, 100_000 + QUOTA_TTL_MS).state, QUOTA_AGE.FRESH);
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_TTL_MS).markStale, false);
   // stale: past the TTL, up to and including the one-week ceiling.
   assert.equal(quotaAge(cache, 100_000 + QUOTA_TTL_MS + 1).state, QUOTA_AGE.STALE);
   assert.equal(quotaAge(cache, 100_000 + QUOTA_STALE_MAX_MS).state, QUOTA_AGE.STALE);
   // expired: past the ceiling, and for absent/invalid caches.
   assert.equal(quotaAge(cache, 100_000 + QUOTA_STALE_MAX_MS + 1).state, QUOTA_AGE.EXPIRED);
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_STALE_MAX_MS + 1).markStale, false);
   assert.equal(quotaAge(null).state, QUOTA_AGE.EXPIRED);
   assert.equal(quotaAge({ fetchedAt: 'nope' }).state, QUOTA_AGE.EXPIRED);
+});
+
+test('quotaAge marks the [stale] marker tier only past the one-hour mark', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-mark-'));
+  const cachePath = path.join(dir, 'quota.json');
+  writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, {
+    now: 100_000,
+    contextKey: DUMMY_CONTEXT_KEY,
+  });
+  const cache = readQuotaCache(cachePath);
+  // =TTL: fresh, never marked.
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_TTL_MS).markStale, false);
+  // TTL+1 .. =1h: aging tier — dimmed only, no marker.
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_TTL_MS + 1).markStale, false);
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_STALE_MARK_MS).markStale, false);
+  // 1h+1 .. =7d: marked stale.
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_STALE_MARK_MS + 1).markStale, true);
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_STALE_MAX_MS).markStale, true);
+  // 7d+1: expired — hidden, marker moot.
+  assert.equal(quotaAge(cache, 100_000 + QUOTA_STALE_MAX_MS + 1).markStale, false);
 });
 
 test('quotaAge treats near-future stamps as fresh and far-future as expired', () => {
