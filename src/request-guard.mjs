@@ -304,15 +304,17 @@ export function readRefreshState(statePath) {
 /**
  * True while persisted failures forbid starting another refresh. When the
  * caller passes its `contextKey` (the non-reversible digest of the credential
- * slot + endpoint it would refresh for), a lockout recorded by a different
- * context never blocks it — switching accounts or regions no longer inherits
- * the previous context's failure window. States without a usable context tag
- * (legacy files) stay in force for every caller, since they cannot be proven
- * foreign. Never throws; a missing statePath (feature off) never blocks.
+ * slot + endpoint + credential content it would refresh for), a lockout
+ * recorded by a different context never blocks it — switching accounts or
+ * regions no longer inherits the previous context's failure window, and a
+ * token rotation escapes the rotated-away token's window. States without a
+ * usable context tag (legacy files) stay in force for every caller, since
+ * they cannot be proven foreign. Never throws; a missing statePath (feature
+ * off) never blocks.
  * @param {string|null} statePath
  * @param {number} [now]
  * @param {string|null} [contextKey] digest of the caller's credential slot +
- *   endpoint; omit for the legacy shared-window gate
+ *   endpoint + credential content; omit for the legacy shared-window gate
  */
 export function isRefreshBlocked(statePath, now = Date.now(), contextKey = null) {
   const state = readRefreshState(statePath);

@@ -331,10 +331,13 @@ Acceptance criteria:
 - regression tests cover all of the above (`test/quota.test.mjs`).
 
 Update: the render data plane now compares the cache's schema-v2
-`contextKey` with the config's current credential slot + region before showing
-anything, so region/credential-slot switches hide the other context's figures
-immediately; the remaining same-slot account-switch boundary is tracked in
-[KI-17](#ki-17-same-credential-slot-account-switches-are-indistinguishable-until-the-next-refresh).
+`contextKey` — covering the credential slot, the region endpoint, and the
+credential file's content fingerprint — with the config's current context
+before showing anything, so region switches, credential-slot switches, and
+same-slot credential changes (account switches and token rotations alike)
+hide the other context's figures immediately; the remaining conservative
+trade-offs are tracked in
+[KI-17](#ki-17-same-slot-credential-changes-invalidate-quota-conservatively).
 
 ## KI-13: Tracked showcase PNGs had drifted from current rendering behavior
 
@@ -463,9 +466,10 @@ Regression coverage: `test/metrics.test.mjs` replays the tower turn anatomy
 `test/render.test.mjs` covers the settled display and its precedence against
 the live timer and `compacted`.
 
-## KI-17: Same-credential-slot account switches are indistinguishable until the next refresh
+## KI-17: Same-slot credential changes invalidate quota conservatively
 
-Status: open
+Status: open (conservative invalidation shipped; this entry tracks the
+deliberate trade-offs that remain)
 
 Affected area: quota context attribution
 
@@ -478,28 +482,55 @@ the same file, and a read-only HUD cannot tell "different account, same slot"
 from "same account, rotated token" — hashing or comparing tokens to tell them
 apart is exactly what the HUD must not do.
 
-What is guaranteed instead:
+The HUD therefore attributes quota by the credential file's content itself:
+the schema-version-2 `contextKey` that tags the cache and keys the refresh
+backoff is a non-reversible digest of the credential slot path, the endpoint,
+and the credential file's content fingerprint. Any content change — another
+account signing into the same slot, a routine token rotation, a logout, even
+a corrupting partial write — produces a different tag; a rewrite with
+identical content does not.
 
-- every quota cache write carries a schema-version-2 `contextKey` (a
-  non-reversible digest of the credential slot + endpoint), so a region or
-  credential-slot switch is detected on the very next render: the cache no
-  longer matches the config's current context and renders nothing until a
-  refresh for the current context succeeds. The refresh that started before
-  the switch re-checks the live config before writing, so it cannot overwrite
-  the new context's cache either;
-- within one slot, an account switch is bounded by the freshness contract:
-  the previous figures may render only until the next successful refresh
-  (scheduled as soon as the 60s TTL passes) and are dimmed with an explicit
-  `[stale]` marker from the TTL onward, hidden entirely after one week;
+What this guarantees:
+
+- a cache whose tag no longer matches the current credential content is never
+  shown: the figures render as absent until a refresh for the current content
+  succeeds (normally within one 60s TTL);
+- a refresh that started before the change discards its result: the write-path
+  guard re-reads the live credential file and refuses to write, delete, or
+  record backoff once the content fingerprint differs from the one the
+  request was made with, so a mid-flight account swap cannot land the old
+  account's figures in the cache;
+- backoff is scoped to the same tag, so an auth lockout recorded for a
+  rotated-away token does not delay the fresh token's first attempt;
+- the fingerprint is one-way and never persisted or printed on its own — no
+  token, and no standalone credential digest, is ever stored; only the
+  combined 16-hex context tag exists on disk, the same class of digest the
+  cache already carried;
 - legacy quota caches (no version, no `contextKey`) are not treated as
   current quota at all: they render nothing until a refresh re-tags them, so
   the first successful refresh after an upgrade is required before quota bars
   return. Offline at upgrade time means no quota until back online.
 
+Residual limits (deliberate trade-offs, kept honest):
+
+- token rotation is treated exactly like an account switch: both change the
+  credential content, so both hide the previous figures until the next
+  successful refresh — longer while offline or inside a backoff window. The
+  HUD chooses over-invalidation over rendering attribution-uncertain data;
+- the content check needs one small read of the credential file per managed-
+  provider frame. It is budget-guarded; a frame that cannot afford the read
+  hides quota for that frame instead of showing unverified figures;
+- byte-identical credential files are by construction the same credential —
+  there is nothing to detect, and none is needed.
+
 Acceptance criteria:
 
 - region/credential-slot switch hides the other context's figures on the next
   render and spawns a refresh for the current context;
-- same-slot account switch shows at most the previous context's figures until
-  the next successful refresh, with the age contract applied;
+- a same-slot account swap mid-refresh drops the in-flight result and never
+  writes the old account's figures;
+- a same-slot token rotation hides the previous figures and schedules a
+  refresh that is not blocked by the rotated-away token's backoff;
+- a frame without budget for the credential read shows no quota rather than
+  unverified quota;
 - no cache, backoff-state, or diagnostics field ever stores a token.

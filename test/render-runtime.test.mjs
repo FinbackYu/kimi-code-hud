@@ -208,6 +208,7 @@ test('runtime passes a context-matching quota cache to render and refresh', asyn
     },
   });
   assert.equal(refreshOptions.cachedQuota, cachedQuota);
+  assert.equal(refreshOptions.contextKey, contextKey);
   assert.equal(refreshOptions.cachePath, paths.quotaCachePath);
   assert.equal(gitTimeout, 218);
   assert.equal(gitCachePath, paths.gitStatusCachePath);
@@ -253,7 +254,67 @@ test('runtime hides a cache tagged for another context and refreshes with null',
     },
   });
   assert.equal(refreshOptions.cachedQuota, null); // treated as refresh-needing
+  // The expected context is resolved even without a usable cache, so the
+  // scheduler's ownership comparison is in force from the first frame.
+  assert.equal(refreshOptions.contextKey, expectedKey);
   assert.doesNotMatch(result.line, /5h|7d/);
+});
+
+test('a same-slot credential swap hides the cache and reschedules under the new context', async () => {
+  const paths = makePaths();
+  const now = 1_000_000;
+  const env = { NO_COLOR: '1' };
+  const configText = '[models."K3"]\nprovider = "managed:kimi-code"\n';
+  const credDir = path.join(paths.kimiHome, 'credentials');
+  const credPath = path.join(credDir, 'kimi-code.json');
+  fs.mkdirSync(credDir, { recursive: true });
+  fs.writeFileSync(credPath, JSON.stringify({ access_token: 'account-a-access' }));
+  const keyA = resolveQuotaContextKey({ env, configText, kimiHome: paths.kimiHome });
+  const cacheA = {
+    version: 2,
+    contextKey: keyA,
+    fetchedAt: now - 1_000,
+    weekly: { used: 25, limit: 100 },
+    windows: [{ label: '5h', used: 31, limit: 100 }],
+  };
+  const runFrame = async () => {
+    let refreshOptions = null;
+    const result = await renderStatusLine({
+      scriptPath: '/tmp/kimi-hud.mjs',
+      paths,
+      now,
+      env,
+      clock: () => 0,
+      dependencies: {
+        managedPluginDisabled: () => false,
+        readPayload: async () => payload(),
+        captureRuntimeSnapshot: () => ({
+          hudConfig: {},
+          configTomlText: configText,
+          tuiTomlText: '',
+          quota: cacheA,
+        }),
+        getMetrics: () => metrics(),
+        ensureFreshQuota: (options) => { refreshOptions = options; },
+      },
+    });
+    return { result, refreshOptions };
+  };
+  const before = await runFrame();
+  assert.ok(before.result.line.includes('5h ███░░░░░░░ 31%'));
+  assert.equal(before.refreshOptions.contextKey, keyA);
+  assert.equal(before.refreshOptions.cachedQuota, cacheA);
+
+  // Account B signs in over the same slot: same path, same endpoint, new
+  // content. The old figures must not render and the refresh must be
+  // scheduled under B's context, not A's.
+  fs.writeFileSync(credPath, JSON.stringify({ access_token: 'account-b-access' }));
+  const keyB = resolveQuotaContextKey({ env, configText, kimiHome: paths.kimiHome });
+  assert.notEqual(keyB, keyA);
+  const after = await runFrame();
+  assert.doesNotMatch(after.result.line, /5h|7d/);
+  assert.equal(after.refreshOptions.contextKey, keyB);
+  assert.equal(after.refreshOptions.cachedQuota, null);
 });
 
 test('runtime treats a legacy untagged quota cache as absent and refreshes with null', async () => {
