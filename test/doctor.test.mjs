@@ -518,7 +518,7 @@ test('shareable output masks personal paths; local output shows them', () => {
   assert.match(local, new RegExp(`path: ${env.paths.quotaCachePath}`));
   assert.equal(share.includes(env.root), false, 'shareable output must not contain the tmp root');
   // Paths under the known roots are rewritten to logical labels.
-  assert.match(share, /path: \$KIMI_HUD_HOME\/quota\.json/);
+  assert.match(share, /path: \$KIMI_HUD_HOME[\\/]quota\.json/);
   assert.match(share, /path: \$KIMI_CODE_HOME/);
   // The context digest is a non-reversible summary and stays visible.
   assert.match(share, new RegExp(`context ${currentContextKey(env.kimiHome)}`));
@@ -565,7 +565,7 @@ test('share mode labels a UNC kimi home (user repro); local keeps it verbatim', 
     assert.equal(share.includes(secret), false, `shareable output leaked: ${secret}`);
   }
   assert.match(share, /path: \$KIMI_CODE_HOME/);
-  assert.match(share, /path: \$KIMI_HUD_HOME\//);
+  assert.match(share, /path: \$KIMI_HUD_HOME[\\/]/);
 });
 
 test('bin --doctor --share masks a UNC kimi home (user repro)', () => {
@@ -585,7 +585,7 @@ test('bin --doctor --share masks a UNC kimi home (user repro)', () => {
   assert.equal(result.stdout.includes('private-server'), false);
   assert.equal(result.stdout.includes('PrivateCustomer'), false);
   assert.match(result.stdout, /path: \$KIMI_CODE_HOME/);
-  assert.match(result.stdout, /path: \$KIMI_HUD_HOME\//);
+  assert.match(result.stdout, /path: \$KIMI_HUD_HOME[\\/]/);
 });
 
 test('share mode hides unknown UNC and extended-length path fields', () => {
@@ -854,7 +854,7 @@ test('bin --doctor --share masks personal paths', () => {
   });
   assert.equal(result.status, 0);
   assert.equal(result.stdout.includes(env.root), false);
-  assert.match(result.stdout, /path: \$KIMI_HUD_HOME\//);
+  assert.match(result.stdout, /path: \$KIMI_HUD_HOME[\\/]/);
   assert.match(result.stdout, /path: \$KIMI_CODE_HOME/);
 });
 
