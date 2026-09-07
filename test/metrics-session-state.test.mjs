@@ -412,9 +412,12 @@ test('getMetrics migrates flat states into buckets, preserving window and badges
   // The migrated samples were stamped with lastSampleAt, so the window is
   // still fresh and keeps describing the same session — but the migrated
   // swarmMode flag marks main as parked (no request in flight), so the
-  // reading now surfaces through the dimmed stale-median fallback.
+  // reading now surfaces through the stale-median fallback. The last turn
+  // end sits exactly SETTLE_LINGER_MS back (end_turn step.end at EVENT_TIME,
+  // now = EVENT_TIME + 60s), so the settle grace still holds and the
+  // reading keeps the normal color instead of the muted dim.
   assert.equal(m.tps, 200);
-  assert.equal(m.tpsStale, true);
+  assert.equal(m.tpsStale, false);
   assert.equal(m.modelAlias, 'kimi-code/k3');
   assert.equal(m.thinkingLevel, 'high');
   assert.deepEqual(m.goal, { status: 'active', turnsUsed: 1 });
@@ -740,6 +743,7 @@ test('getMetrics returns nulls for unknown sessions', () => {
     cache: null, modelUsage: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
     turnStartedAt: null, compactingSince: null, compactionMs: null, genSettledMs: null,
+    genSettledAt: null, compactedAt: null,
     tasks: { bash: 0, agents: 0 },
   });
 });

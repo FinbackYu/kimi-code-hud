@@ -107,7 +107,7 @@ Four data sources: the stdin snapshot and a cross-process cached Git probe (cwd 
 
 **Nothing changed?** Make sure you ran `/reload-tui` or restarted; check `echo '{}' | node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs` prints a line.
 
-**No TPS segment?** Only one state hides TPS entirely: no valid `step.end` sample yet (a brand-new session mid-first-step — TTFT shows on its own meanwhile). Warmup with fewer than 3 samples, an expired window, and a model change all render a muted provisional reading or the last median; normal brightness resumes at 3 valid samples. If TTFT is also absent, this session has not completed a `step.end` yet.
+**No TPS segment?** Only one state hides TPS entirely: no valid `step.end` sample yet (a brand-new session mid-first-step — TTFT shows on its own meanwhile). Warmup with fewer than 3 samples, an expired window, and a model change all render a muted provisional reading or the last median; normal brightness resumes at 3 valid samples. A task that just settled is the exception — the last median and the `gen`/`compacted` timers keep their normal brightness for a one-minute settle grace before fading to muted. If TTFT is also absent, this session has not completed a `step.end` yet.
 
 **No Cache segment?** It stays omitted only while the session has no complete `step.end` usage yet. Once the first valid usage lands, the segment appears and stays on permanently. After upgrades, a bounded restoration (at most 1 MiB of the wire tail) rebuilds the cumulative counters once.
 

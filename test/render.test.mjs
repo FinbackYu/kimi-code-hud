@@ -703,8 +703,9 @@ test('gen ticker carries the head count for fleets without speed samples', () =>
 });
 
 test('settled gen total holds the slot until the next live timer', () => {
-  // After the cascade settles, the dimmed total span since the user's prompt
-  // stays on display (the tower-run answer to "how long did that take").
+  // After the cascade settles, the total span since the user's prompt stays
+  // on display (the tower-run answer to "how long did that take"). Without
+  // a settle instant (legacy shape, or past the grace) it renders dimmed.
   const metrics = { tps: 47, ttftMs: 1300, genSettledMs: 83 * 60_000 };
   const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
   assert.ok(normal.includes('⚡ 47 t/s · gen 1h23m'));
@@ -733,6 +734,87 @@ test('settled gen total holds the slot until the next live timer', () => {
   }));
   assert.ok(compacted.includes('compacted 30s'));
   assert.ok(!compacted.includes('1h23m'));
+});
+
+test('settle grace keeps just-settled gen and compaction figures bright', () => {
+  // v0.8.1 dimmed the frozen figures the instant the cascade settled; the
+  // settle grace holds the normal color for SETTLE_LINGER_MS past the
+  // settle instant before the muted dim takes over.
+  // =60s past the settle instant: normal color, both segments.
+  const [hot] = renderHud(baseCtx({
+    layout: 'normal', color: true,
+    metrics: { tps: 47, ttftMs: 1300, genSettledMs: 83 * 60_000, genSettledAt: NOW - 60_000 },
+  }));
+  assert.ok(hot.includes('⚡ 47 t/s · gen 1h23m'));
+  assert.ok(!hot.includes('\x1b[90m'));
+
+  // 60s+1: the TPS dim and the muted gen suffix both come back (two muted
+  // spans — base then suffix).
+  const [cooled] = renderHud(baseCtx({
+    layout: 'normal', color: true,
+    metrics: { tps: 47, tpsStale: true, ttftMs: 1300, genSettledMs: 83 * 60_000, genSettledAt: NOW - 60_001 },
+  }));
+  assert.ok(cooled.includes('\x1b[90m⚡ 47 t/s\x1b[0m'));
+  assert.ok(cooled.includes('\x1b[90m · gen 1h23m\x1b[0m'));
+
+  // Compact tier follows the same grace.
+  const [compactHot] = renderHud(baseCtx({
+    layout: 'compact', color: true,
+    metrics: { tps: 47, genSettledMs: 5000, genSettledAt: NOW - 30_000 },
+  }));
+  assert.ok(compactHot.includes('⚡ 47 gen 5s'));
+  assert.ok(!compactHot.includes('\x1b[90m'));
+  const [compactCooled] = renderHud(baseCtx({
+    layout: 'compact', color: true,
+    metrics: { tps: 47, tpsStale: true, genSettledMs: 5000, genSettledAt: NOW - 60_001 },
+  }));
+  assert.ok(compactCooled.includes('\x1b[90m⚡ 47\x1b[0m \x1b[90mgen 5s\x1b[0m'));
+
+  // Without a speed reading the settled total stands alone, bright in the
+  // grace and muted after it.
+  const [soloHot] = renderHud(baseCtx({
+    layout: 'normal', color: true,
+    metrics: { tps: null, ttftMs: 1300, genSettledMs: 5000, genSettledAt: NOW - 10_000 },
+  }));
+  assert.ok(soloHot.includes('⚡ gen 5s'));
+  assert.ok(!soloHot.includes('\x1b[90m'));
+  const [soloCooled] = renderHud(baseCtx({
+    layout: 'normal', color: true,
+    metrics: { tps: null, ttftMs: 1300, genSettledMs: 5000, genSettledAt: NOW - 60_001 },
+  }));
+  assert.ok(soloCooled.includes('\x1b[90m⚡ gen 5s\x1b[0m'));
+});
+
+test('settle grace covers a finished compaction the same way', () => {
+  // =60s past the compaction close: the duration keeps the normal color.
+  const [hot] = renderHud(baseCtx({
+    layout: 'normal', color: true,
+    metrics: { tps: 47, ttftMs: 1300, compactionMs: 30_000, compactedAt: NOW - 60_000 },
+  }));
+  assert.ok(hot.includes('⚡ 47 t/s · compacted 30s'));
+  assert.ok(!hot.includes('\x1b[90m'));
+
+  // 60s+1: back to the muted post-settle dim (muted base, muted suffix).
+  const [cooled] = renderHud(baseCtx({
+    layout: 'normal', color: true,
+    metrics: { tps: 47, tpsStale: true, ttftMs: 1300, compactionMs: 30_000, compactedAt: NOW - 60_001 },
+  }));
+  assert.ok(cooled.includes('\x1b[90m⚡ 47 t/s\x1b[0m'));
+  assert.ok(cooled.includes('\x1b[90m · compacted 30s\x1b[0m'));
+
+  // Without a speed reading the compacted duration stands alone with the
+  // same grace.
+  const [soloHot] = renderHud(baseCtx({
+    layout: 'normal', color: true,
+    metrics: { tps: null, ttftMs: null, compactionMs: 30_000, compactedAt: NOW - 5_000 },
+  }));
+  assert.ok(soloHot.includes('compacted 30s'));
+  assert.ok(!soloHot.includes('\x1b[90m'));
+  const [soloCooled] = renderHud(baseCtx({
+    layout: 'normal', color: true,
+    metrics: { tps: null, ttftMs: null, compactionMs: 30_000, compactedAt: NOW - 60_001 },
+  }));
+  assert.ok(soloCooled.includes('\x1b[90mcompacted 30s\x1b[0m'));
 });
 
 test('fleet gen ticker appends to the fleet speed format', () => {
@@ -844,6 +926,8 @@ test('live compaction takes the TTFT slot like the gen timer', () => {
 });
 
 test('finished compaction holds the TTFT slot dimmed, drops in compact tier', () => {
+  // No compactedAt here: past the settle grace (or a legacy shape), the
+  // finished duration renders with the muted dim.
   const metrics = { tps: 47, ttftMs: 1300, compactionMs: 30_000 };
   const [normal] = renderHud(baseCtx({ layout: 'normal', metrics, color: true }));
   assert.ok(normal.includes('⚡ 47 t/s\x1b[90m · compacted 30s\x1b[0m'));

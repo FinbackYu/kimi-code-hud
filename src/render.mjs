@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { formatGoalBadge } from './goal.mjs';
+import { SETTLE_LINGER_MS } from './metrics-constants.mjs';
 import { QUOTA_AGE, quotaAge } from './quota.mjs';
 
 const ESC = '\x1b[';
@@ -349,6 +350,17 @@ function speedSegment({ layout, metrics, color, now, C }) {
     !generatedFor && !compacting && metrics && typeof metrics.genSettledMs === 'number'
       ? formatElapsed(metrics.genSettledMs)
       : null;
+  // Settle grace: for SETTLE_LINGER_MS after the cascade settles (or a
+  // compaction closes) the frozen figures are still the fresh answer to
+  // "how fast / how long", so they render in the normal color; only then do
+  // they fade to the muted post-settle dim. Figures without a settle
+  // instant (legacy state shapes) keep the muted dim.
+  const genLinger =
+    metrics && typeof metrics.genSettledAt === 'number' &&
+    now - metrics.genSettledAt <= SETTLE_LINGER_MS;
+  const compactedLinger =
+    metrics && typeof metrics.compactedAt === 'number' &&
+    now - metrics.compactedAt <= SETTLE_LINGER_MS;
   if (metrics && typeof metrics.tps === 'number') {
     const average = Math.round(metrics.tps);
     const paint = (text) => (
@@ -366,7 +378,9 @@ function speedSegment({ layout, metrics, color, now, C }) {
         : compacting
           ? `compacting ${compacting}`
           : genSettled
-            ? colorize(color, C.muted, `gen ${genSettled}`)
+            ? (genLinger
+              ? `gen ${genSettled}`
+              : colorize(color, C.muted, `gen ${genSettled}`))
             : null;
       return live ? `${paint(head)} ${live}` : paint(head);
     }
@@ -376,10 +390,14 @@ function speedSegment({ layout, metrics, color, now, C }) {
     if (generatedFor) return `${paint(base)} · gen ${generatedFor}`;
     if (compacting) return `${paint(base)} · compacting ${compacting}`;
     if (compacted) {
-      return `${paint(base)}${colorize(color, C.muted, ` · compacted ${compacted}`)}`;
+      return `${paint(base)}${compactedLinger
+        ? ` · compacted ${compacted}`
+        : colorize(color, C.muted, ` · compacted ${compacted}`)}`;
     }
     if (genSettled) {
-      return `${paint(base)}${colorize(color, C.muted, ` · gen ${genSettled}`)}`;
+      return `${paint(base)}${genLinger
+        ? ` · gen ${genSettled}`
+        : colorize(color, C.muted, ` · gen ${genSettled}`)}`;
     }
     const ttft = formatTtft(metrics.ttftMs);
     return paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`);
@@ -392,10 +410,14 @@ function speedSegment({ layout, metrics, color, now, C }) {
   }
   if (metrics && compacting) return `compacting ${compacting}`;
   if (metrics && compacted && layout !== 'compact') {
-    return colorize(color, C.muted, `compacted ${compacted}`);
+    return compactedLinger
+      ? `compacted ${compacted}`
+      : colorize(color, C.muted, `compacted ${compacted}`);
   }
   if (metrics && genSettled) {
-    return colorize(color, C.muted, `⚡ gen ${genSettled}`);
+    return genLinger
+      ? `⚡ gen ${genSettled}`
+      : colorize(color, C.muted, `⚡ gen ${genSettled}`);
   }
   const ttft = metrics ? formatTtft(metrics.ttftMs) : null;
   return ttft ? `TTFT ${ttft}` : null;
@@ -599,7 +621,7 @@ function buildSegments(layout, ctx) {
  * @param {object|null} ctx.quota context-verified schema-v2 quota cache
  *   (weekly/windows plus the fetchedAt the age contract is checked against)
  * @param {object|object[]|null} ctx.providerUsage normalized provider facts
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, towerMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs, tasks}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, towerMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, genSettledMs, genSettledAt, compactingSince, compactionMs, compactedAt, tasks}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] normal|compact
  * @param {string} [ctx.permissionNames] official|short — permission badge
