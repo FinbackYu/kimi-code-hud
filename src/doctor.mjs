@@ -34,6 +34,7 @@ import {
   QUOTA_AGE,
   quotaAge,
   quotaContextKeyFor,
+  credentialFileFingerprint,
   resolveQuotaEndpoints,
 } from './quota.mjs';
 import { readRefreshState } from './request-guard.mjs';
@@ -352,7 +353,11 @@ export function collectDoctorReport({
     configPath: p.configTomlPath,
     kimiHome: p.kimiHome,
   });
-  const contextKey = quotaContextKeyFor(endpoints.credentialsPath, endpoints.url);
+  const contextKey = quotaContextKeyFor(
+    endpoints.credentialsPath,
+    endpoints.url,
+    credentialFileFingerprint(endpoints.credentialsPath),
+  );
   let endpointHost = endpoints.url;
   try {
     endpointHost = new URL(endpoints.url).hostname;
@@ -429,7 +434,7 @@ export function collectDoctorReport({
       ? `backoff in effect after ${refreshState.failures} failure(s) (${refreshState.category}); next attempt ${formatUntil(refreshState.nextAttemptAt, now)}`
       : `last failure ${refreshState.category} ×${refreshState.failures}; retry allowed now`;
     if (foreign) {
-      detail += '; state belongs to a different credential context — the first attempt for the current context may wait out the remaining window';
+      detail += '; state belongs to a different credential context — it does not gate the current context; a first attempt is not delayed by this window';
     }
     add('quota', 'note', 'refresh state', detail, {
       path: p.quotaRefreshStatePath,

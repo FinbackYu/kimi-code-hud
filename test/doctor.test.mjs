@@ -13,7 +13,13 @@ import {
   formatDuration,
 } from '../src/doctor.mjs';
 import { nodeCommand } from '../src/command.mjs';
-import { parseQuotaPayload, quotaContextKeyFor, writeQuotaCache, USAGES_URL } from '../src/quota.mjs';
+import {
+  credentialFileFingerprint,
+  parseQuotaPayload,
+  quotaContextKeyFor,
+  writeQuotaCache,
+  USAGES_URL,
+} from '../src/quota.mjs';
 import { recordRefreshFailure } from '../src/request-guard.mjs';
 import { resolveProviderUsageTarget } from '../src/provider-usage.mjs';
 import { resolveRuntimePaths } from '../src/paths.mjs';
@@ -87,7 +93,12 @@ function seedCredentials(kimiHome, values = {}) {
 }
 
 function currentContextKey(kimiHome) {
-  return quotaContextKeyFor(path.join(kimiHome, 'credentials', 'kimi-code.json'), USAGES_URL);
+  const credentialsPath = path.join(kimiHome, 'credentials', 'kimi-code.json');
+  return quotaContextKeyFor(
+    credentialsPath,
+    USAGES_URL,
+    credentialFileFingerprint(credentialsPath),
+  );
 }
 
 function seedQuotaCache(paths, kimiHome, { now = NOW, ageMs = 0, contextKey } = {}) {
@@ -274,6 +285,9 @@ test('backoff recorded for another context is flagged, not inherited silently', 
   const { report } = collect(env);
   const check = one(report, 'quota', 'refresh state');
   assert.match(check.detail, /state belongs to a different credential context/);
+  // A foreign window never gates the current context's own refresh attempts.
+  assert.match(check.detail, /does not gate the current context/);
+  assert.doesNotMatch(check.detail, /may wait out/);
 });
 
 test('an expired retry window reads as "retry allowed now"', () => {

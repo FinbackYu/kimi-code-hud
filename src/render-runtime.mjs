@@ -35,6 +35,9 @@ import { resolveThinkingLevel } from './thinking.mjs';
 export const RUNTIME_BUDGET_MS = 220;
 const GIT_MIN_REMAINING_MS = 12;
 const REFRESH_MIN_REMAINING_MS = 8;
+// One small file read (the credential content fingerprint behind the quota
+// context) — cheap, but never attempted on a frame that is already spent.
+const CONTEXT_MIN_REMAINING_MS = 2;
 
 function remainingMs(deadline, clock) {
   return Math.max(0, deadline - clock());
@@ -88,30 +91,40 @@ export async function renderStatusLine({
   let providerUsage = null;
   if (provider === MANAGED_KIMI_PROVIDER) {
     // The cache is only current quota when its context tag still matches the
-    // credential slot + region the config points at right now. Everything
-    // else — a legacy untagged cache, a cache fetched for a different region
-    // or credential slot — renders nothing and is treated as refresh-needing,
-    // so a same-context refresh rewrites a tagged cache promptly. The
-    // expected context is derived from the config text this frame already
-    // read (no extra file I/O, and only when there is a cache to vet); the
-    // detached refresh resolves the same way.
-    let cached = null;
-    if (snapshot.quota !== null) {
-      const contextKey = resolveQuotaContextKey({
+    // credential slot + region + credential content the config points at
+    // right now. Everything else — a legacy untagged cache, a cache fetched
+    // for another region or slot, or for credentials since rotated or
+    // replaced — renders nothing and is treated as refresh-needing, so a
+    // refresh for the current context is scheduled promptly. The expected
+    // context is derived from the config text this frame already read plus
+    // one small fingerprint read of the credential file; when the frame
+    // cannot afford that read, quota stays hidden (never shown without a
+    // verifiable attribution) and scheduling waits for a less loaded frame.
+    // The same key is passed to the scheduler — with or without a
+    // displayable cache — so a backoff window recorded by another credential
+    // context never blocks the spawn. The detached refresh resolves the same
+    // way.
+    let contextKey = null;
+    if (remainingMs(deadline, clock) >= CONTEXT_MIN_REMAINING_MS) {
+      contextKey = resolveQuotaContextKey({
         env,
         configText: snapshot.configTomlText,
         kimiHome: paths.kimiHome,
       });
-      if (quotaCacheMatchesContext(snapshot.quota, contextKey)) cached = snapshot.quota;
+    }
+    let cached = null;
+    if (contextKey !== null && quotaCacheMatchesContext(snapshot.quota, contextKey)) {
+      cached = snapshot.quota;
     }
     quota = cached;
-    if (remainingMs(deadline, clock) >= REFRESH_MIN_REMAINING_MS) {
+    if (contextKey !== null && remainingMs(deadline, clock) >= REFRESH_MIN_REMAINING_MS) {
       const ensureQuota = dependencies.ensureFreshQuota || ensureFreshQuota;
       ensureQuota({
         scriptPath,
         cachePath: paths.quotaCachePath,
         lockPath: paths.quotaLockPath,
         statePath: paths.quotaRefreshStatePath,
+        contextKey,
         cachedQuota: cached,
         now,
       });

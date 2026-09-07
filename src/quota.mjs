@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { atomicWriteFile } from './fs-store.mjs';
 import {
   MANAGED_KIMI_PROVIDER,
@@ -36,12 +36,12 @@ export const LOCK_STALE_MS = 30_000;
 
 /**
  * On-disk quota cache schema. Version 2 adds the non-reversible context tag
- * (`contextKey`, derived from the credential slot + endpoint) that lets the
- * render data plane tell whether the figures still belong to the account and
- * region the config currently points at. Version-1 caches (no version, no
- * contextKey) are deliberately not readable as current quota: they cannot be
- * attributed to a context, so they render nothing until the next successful
- * refresh rewrites a tagged cache.
+ * (`contextKey`, derived from the credential slot + endpoint + the credential
+ * file's content digest) that lets the render data plane tell whether the
+ * figures still belong to the credentials the config currently points at.
+ * Version-1 caches (no version, no contextKey) are deliberately not readable
+ * as current quota: they cannot be attributed to a context, so they render
+ * nothing until the next successful refresh rewrites a tagged cache.
  */
 export const QUOTA_CACHE_VERSION = 2;
 
@@ -68,6 +68,36 @@ export const QUOTA_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 /** Shape of every context tag: 16 lowercase hex chars (sha-256 prefix). */
 export const QUOTA_CONTEXT_KEY_RE = /^[0-9a-f]{16}$/;
+
+/**
+ * Fingerprint standing in for "no credential content" (missing or unreadable
+ * credential file). Never stored: it is only hashed into the context tag, so
+ * a logged-out slot still gets a deterministic, attributable context.
+ */
+export const CREDENTIAL_FINGERPRINT_ABSENT = 'absent';
+
+/**
+ * Non-reversible fingerprint of one credential file's raw content (16 hex
+ * chars). Upstream keeps no account identity beside the OAuth tokens, so the
+ * content itself is the only observable "which credentials are these" signal:
+ * another account signing into the same slot, a routine token rotation, a
+ * logout and even a corrupting partial write all change the bytes and thus
+ * the fingerprint, while a rewrite with identical content does not. The
+ * digest is one-way and never persisted or printed on its own — it only ever
+ * enters the combined context tag.
+ * @param {string} credentialsPath
+ * @returns {string} 16-hex digest, or CREDENTIAL_FINGERPRINT_ABSENT
+ */
+export function credentialFileFingerprint(credentialsPath) {
+  try {
+    return createHash('sha256')
+      .update(fs.readFileSync(credentialsPath))
+      .digest('hex')
+      .slice(0, 16);
+  } catch {
+    return CREDENTIAL_FINGERPRINT_ABSENT;
+  }
+}
 
 export const QUOTA_AGE = Object.freeze({
   FRESH: 'fresh',
@@ -247,8 +277,8 @@ export function isQuotaStale(cache, now = Date.now()) {
 /**
  * Atomically write a schema-version-2, context-tagged quota cache (tmp file +
  * rename). Refuses to persist an unattributed cache: every on-disk quota file
- * must be able to answer "which credential slot and endpoint does this belong
- * to?". Never throws.
+ * must be able to answer "which credential slot, endpoint and credential
+ * content does this belong to?". Never throws.
  * @param {object} parsed result of parseQuotaPayload
  * @param {string} [cachePath]
  * @param {object} [opts]
@@ -279,24 +309,37 @@ export function writeQuotaCache(parsed, cachePath = QUOTA_CACHE_PATH, {
 }
 
 /**
- * The non-reversible context tag for one credential slot + endpoint pair.
- * The same digest that keys refresh backoff state (request-guard.mjs) tags
- * the cache, so backoff isolation and cache attribution always agree.
+ * The non-reversible context tag for one refresh target: credential slot
+ * path + endpoint + the credential file's content fingerprint. The same
+ * digest that keys refresh backoff state (request-guard.mjs) tags the cache,
+ * so backoff isolation and cache attribution always agree. Because the
+ * content fingerprint is part of the tag, a same-slot account switch or a
+ * token rotation changes the tag — the conservative invalidation that keeps
+ * attribution-uncertain figures off the HUD.
  * @param {string} credentialsPath
  * @param {string} url
+ * @param {string} [credentialFingerprint] result of credentialFileFingerprint;
+ *   omitted means "no credential content" (missing/unreadable file)
  * @returns {string}
  */
-export function quotaContextKeyFor(credentialsPath, url) {
-  return shortDigest(credentialsPath, url);
+export function quotaContextKeyFor(credentialsPath, url, credentialFingerprint) {
+  return shortDigest(
+    credentialsPath,
+    url,
+    credentialFingerprint ?? CREDENTIAL_FINGERPRINT_ABSENT,
+  );
 }
 
 /**
- * The context tag the current config/env expects, derived without any file
- * I/O when `configText` is supplied (the render hot path passes the config
- * text it already read this frame). Uses the same fail-closed resolution as
+ * The context tag the current config/env expects, derived from the config
+ * text plus one small read of the resolved credential file (its content
+ * fingerprint). The render hot path passes the config text it already read
+ * this frame and must budget-guard the call — the credential read is the one
+ * piece of I/O this adds per frame; without budget, callers skip the call and
+ * treat the cache as unverifiable. Uses the same fail-closed resolution as
  * the detached refresh, so both sides agree on what "the current context" is.
- * Never throws; returns the 16-hex digest of the resolved credential slot and
- * endpoint.
+ * Never throws; returns the 16-hex digest of the resolved credential slot,
+ * endpoint and credential content.
  * @param {object} [opts]
  * @param {object} [opts.env] same env override source as resolveQuotaEndpoints
  * @param {string} [opts.configPath] config.toml path read when configText is
@@ -312,14 +355,18 @@ export function resolveQuotaContextKey({
   kimiHome = KIMI_HOME,
 } = {}) {
   const endpoints = resolveQuotaEndpoints({ env, configPath, configText, kimiHome });
-  return quotaContextKeyFor(endpoints.credentialsPath, endpoints.url);
+  return quotaContextKeyFor(
+    endpoints.credentialsPath,
+    endpoints.url,
+    credentialFileFingerprint(endpoints.credentialsPath),
+  );
 }
 
 /**
  * True when the cache is a schema-version-2 cache tagged for the given
  * context. The render data plane calls this before presenting quota figures:
- * a cache from another credential slot or region is never shown as the
- * current account's numbers.
+ * a cache from another credential slot, region, or credential content is
+ * never shown as the current account's numbers.
  * @param {object|null} cache
  * @param {string|null} contextKey
  * @returns {boolean}
@@ -406,13 +453,13 @@ export function releaseQuotaLock(lockPath = REFRESH_LOCK_PATH, token = null) {
  * are treated as stale and overwritten. The backoff state file records the
  * last failure's next-attempt time, so every render process in the same HUD
  * home shares one retry schedule — per context: when `contextKey` is
- * supplied, a window recorded by a different credential slot or region never
- * blocks the spawn. Pass no statePath to disable the backoff gate. Never
- * throws, never blocks on the network.
+ * supplied, a window recorded by a different credential slot, region, or
+ * credential content never blocks the spawn. Pass no statePath to disable
+ * the backoff gate. Never throws, never blocks on the network.
  * @param {object} [opts]
  * @param {string|null} [opts.contextKey] digest of the credential slot +
- *   endpoint the current config resolves to; omit for the legacy
- *   shared-window gate
+ *   endpoint + credential content the current config resolves to; omit for
+ *   the legacy shared-window gate
  * @returns {boolean} true when a refresh was spawned
  */
 export function ensureFreshQuota({
@@ -644,32 +691,38 @@ export async function requestQuota({
  * whole deadline still backs off from the moment it actually failed (the
  * honored Retry-After window included) instead of from an already-stale
  * request start. The record is keyed by a non-reversible digest of the
- * credential path and endpoint, so switching context restarts the failure
- * count instead of inheriting the previous account's lockout, and the
- * scheduler-side gate compares that digest against its own context before
- * honouring a window. A failure is only recorded while the live config still
- * resolves to the credential slot and endpoint this request used: a refresh
+ * credential path, endpoint and credential content, so switching context
+ * restarts the failure count instead of inheriting the previous account's
+ * lockout, and the scheduler-side gate compares that digest against its own
+ * context before honouring a window. A failure is only recorded while the
+ * live config still resolves to the credential slot and endpoint, and the
+ * live credential file still has the content, this request used: a refresh
  * that outlived a context switch leaves the new context's backoff state (or
  * lack of one) untouched. Pass no statePath to skip persistence.
  *
  * Before this request may mutate the shared cache (write after success, drop
- * after /logout or missing token) the live config is re-resolved and compared
- * with the context this request actually used. A refresh that started before
- * an account, region, or credential-slot switch therefore never overwrites or
- * deletes the new context's cache with figures belonging to the old one — the
- * stale result is dropped and the next frame spawns a refresh for the current
- * context. The successful cache write carries the same context tag
- * (version 2), which the render data plane compares against the config's
- * current context before displaying anything; legacy untagged caches are not
- * treated as current quota until a refresh re-tags them.
+ * after /logout or missing token) the live config is re-resolved and the live
+ * credential file is re-fingerprinted, and both are compared with the context
+ * this request actually used. A refresh that started before an account,
+ * region, or credential-slot switch — or before a same-slot token rotation —
+ * therefore never overwrites or deletes the new context's cache with figures
+ * belonging to the old one: the stale result is dropped and the next frame
+ * spawns a refresh for the current context. The successful cache write
+ * carries the same context tag (version 2), which the render data plane
+ * compares against the config's current context before displaying anything;
+ * legacy untagged caches are not treated as current quota until a refresh
+ * re-tags them.
  *
- * Same-slot account switches remain undetectable by design: upstream keeps one
- * credential slot per region/env and persists no account identity beside the
- * tokens, so a fresh login overwrites the same file and the HUD cannot tell a
- * new account from a rotated token before the next successful refresh. Those
- * refreshes are rate-limited to one per TTL/failure window; between a switch
- * and the next success the previous figures may render at most within that
- * stale window and are always dimmed/hidden past the age contract.
+ * The context tag covers the credential file's content fingerprint, so a
+ * same-slot account switch or token rotation invalidates conservatively: the
+ * previous figures stop rendering immediately (the cache no longer matches)
+ * and a fresh refresh is scheduled, even though the HUD cannot tell "different
+ * account" from "same account, rotated token" and does not try to — upstream
+ * keeps one credential slot per region/env and persists no account identity
+ * beside the tokens. The cost is deliberate: attribution-uncertain data is
+ * hidden until the next successful refresh (normally one TTL) instead of
+ * being shown. Backoff is scoped to the same tag, so an auth lockout recorded
+ * for a rotated-away token never delays the fresh token's first attempt.
  * @param {object} [opts]
  * @returns {Promise<boolean>} true when the cache was updated
  */
@@ -690,13 +743,17 @@ export async function refreshQuota({
   configText = undefined,
   kimiHome = undefined,
 } = {}) {
-  const contextKey = quotaContextKeyFor(credentialsPath, url);
+  const contextKey = quotaContextKeyFor(
+    credentialsPath,
+    url,
+    credentialFileFingerprint(credentialsPath),
+  );
   const runtimePaths = resolveRuntimePaths();
   const currentConfigPath = configPath ?? runtimePaths.configTomlPath;
   const currentKimiHome = kimiHome ?? runtimePaths.kimiHome;
-  // Re-resolve the live config and test whether it still points at the
-  // credential slot + endpoint this request used. Memoized per refresh: the
-  // guard runs at most once per cache mutation.
+  // Re-resolve the live config and re-fingerprint the live credential file,
+  // testing whether they still form the context this request was made with.
+  // Memoized per refresh: the guard runs at most once per cache mutation.
   let checkedSameContext = false;
   let sameContext = true;
   const isStillCurrentContext = () => {
@@ -707,7 +764,11 @@ export async function refreshQuota({
         configText,
         kimiHome: currentKimiHome,
       });
-      sameContext = quotaContextKeyFor(current.credentialsPath, current.url) === contextKey;
+      sameContext = quotaContextKeyFor(
+        current.credentialsPath,
+        current.url,
+        credentialFileFingerprint(current.credentialsPath),
+      ) === contextKey;
       checkedSameContext = true;
     }
     return sameContext;

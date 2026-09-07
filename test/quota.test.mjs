@@ -23,6 +23,8 @@ import {
   resolveQuotaContextKey,
   quotaContextKeyFor,
   quotaCacheMatchesContext,
+  credentialFileFingerprint,
+  CREDENTIAL_FINGERPRINT_ABSENT,
   QUOTA_RESULT,
   QUOTA_TTL_MS,
   QUOTA_CACHE_VERSION,
@@ -47,10 +49,17 @@ const REAL_RESPONSE = {
 // Any valid 16-hex tag works for shape-level tests.
 const DUMMY_CONTEXT_KEY = '0123456789abcdef';
 
-// The mainland default slot for a temp kimi-home, used so refresh flows and
-// their seeded caches share one attributable context.
+// The mainland default slot for a temp kimi-home, keyed the same way the
+// resolver keys it: credential path + endpoint + content fingerprint (the
+// sentinel when the file is absent), so seeded caches share one attributable
+// context with the refresh flows under test.
 function mainlandContextKey(kimiHome) {
-  return quotaContextKeyFor(path.join(kimiHome, 'credentials', 'kimi-code.json'), USAGES_URL);
+  const credentialsPath = path.join(kimiHome, 'credentials', 'kimi-code.json');
+  return quotaContextKeyFor(
+    credentialsPath,
+    USAGES_URL,
+    credentialFileFingerprint(credentialsPath),
+  );
 }
 
 /** Seed a schema-v2 cache tagged for the temp kimi-home's mainland slot. */
@@ -554,7 +563,10 @@ test('global-region login resolves to api.kimi.ai with its scoped credentials', 
   assert.deepEqual(calls, [{ url: GLOBAL_USAGES_URL, auth: 'Bearer fake-global-access-token' }]);
   const cache = readQuotaCache(cachePath);
   assert.equal(cache.weekly.used, 29);
-  assert.equal(cache.contextKey, quotaContextKeyFor(scopedPath, GLOBAL_USAGES_URL));
+  assert.equal(
+    cache.contextKey,
+    quotaContextKeyFor(scopedPath, GLOBAL_USAGES_URL, credentialFileFingerprint(scopedPath)),
+  );
 });
 
 test('a managed provider without an oauth table keeps the mainland default', async () => {
@@ -996,8 +1008,16 @@ test('refreshQuota clears the backoff on success and keeps the cache format', as
   assert.equal(cache.weekly.used, 29);
   assert.equal(cache.fetchedAt, 2_000); // virtual clock honored, not Date.now()
   // The cache is tagged with the same non-reversible context key the refresh
-  // backoff used, so attribution and lockout isolation always agree.
-  assert.equal(cache.contextKey, shortDigest(env.credentialsPath, env.url));
+  // backoff used — credential path + endpoint + content fingerprint — so
+  // attribution and lockout isolation always agree.
+  assert.equal(
+    cache.contextKey,
+    quotaContextKeyFor(
+      env.credentialsPath,
+      env.url,
+      credentialFileFingerprint(env.credentialsPath),
+    ),
+  );
   assert.deepEqual(Object.keys(cache).sort(), [
     'contextKey', 'fetchedAt', 'version', 'weekly', 'windows',
   ]);
@@ -1346,7 +1366,11 @@ test('a refresh begun before a region switch cannot overwrite the new context ca
   fs.writeFileSync(scopedPath, JSON.stringify({ access_token: 'current-global-token' }));
   fs.writeFileSync(defaultPath, JSON.stringify({ access_token: 'old-mainland-token' }));
   const cachePath = path.join(dir, 'quota.json');
-  const globalKey = quotaContextKeyFor(scopedPath, GLOBAL_USAGES_URL);
+  const globalKey = quotaContextKeyFor(
+    scopedPath,
+    GLOBAL_USAGES_URL,
+    credentialFileFingerprint(scopedPath),
+  );
   writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, { contextKey: globalKey });
 
   // The stale mainland refresh (spawned before the switch) still completes...
@@ -1401,7 +1425,11 @@ test('a logout-shaped 401 from a stale context does not delete the current cache
   fs.writeFileSync(defaultPath, JSON.stringify({ access_token: 'old-mainland-token' }));
   const cachePath = path.join(dir, 'quota.json');
   writeQuotaCache(parseQuotaPayload(REAL_RESPONSE), cachePath, {
-    contextKey: quotaContextKeyFor(scopedPath, GLOBAL_USAGES_URL),
+    contextKey: quotaContextKeyFor(
+      scopedPath,
+      GLOBAL_USAGES_URL,
+      credentialFileFingerprint(scopedPath),
+    ),
   });
 
   const stale = await refreshQuota({
@@ -1416,6 +1444,124 @@ test('a logout-shaped 401 from a stale context does not delete the current cache
   });
   assert.equal(stale, false);
   assert.notEqual(readQuotaCache(cachePath), null); // current cache survives
+});
+
+// --- H02 补齐: the credential content itself is part of the context ---------
+
+test('the credential fingerprint is a stable content digest with an absent sentinel', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-fp-'));
+  const credPath = path.join(dir, 'kimi-code.json');
+  // A missing or unreadable file has a deterministic sentinel of its own.
+  assert.equal(credentialFileFingerprint(credPath), CREDENTIAL_FINGERPRINT_ABSENT);
+  fs.writeFileSync(credPath, JSON.stringify({ access_token: 'token-a' }));
+  const fingerprintA = credentialFileFingerprint(credPath);
+  assert.match(fingerprintA, /^[0-9a-f]{16}$/);
+  assert.equal(credentialFileFingerprint(credPath), fingerprintA);
+  // A rewrite with byte-identical content keeps the fingerprint...
+  fs.writeFileSync(credPath, JSON.stringify({ access_token: 'token-a' }));
+  assert.equal(credentialFileFingerprint(credPath), fingerprintA);
+  // ...while any content change (another account, a rotated token) moves it.
+  fs.writeFileSync(credPath, JSON.stringify({ access_token: 'token-b' }));
+  assert.notEqual(credentialFileFingerprint(credPath), fingerprintA);
+});
+
+test('the context key covers credential content, so a same-slot account switch changes it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-same-slot-'));
+  const credPath = path.join(dir, 'credentials', 'kimi-code.json');
+  fs.mkdirSync(path.dirname(credPath), { recursive: true });
+  fs.writeFileSync(credPath, JSON.stringify({ access_token: 'account-a-access' }));
+  const keyA = quotaContextKeyFor(credPath, USAGES_URL, credentialFileFingerprint(credPath));
+  assert.equal(
+    resolveQuotaContextKey({ env: {}, configText: '', kimiHome: dir }),
+    keyA,
+  );
+  // Account B signs in over the same slot: same path, same endpoint, new context.
+  fs.writeFileSync(credPath, JSON.stringify({ access_token: 'account-b-access' }));
+  const keyB = quotaContextKeyFor(credPath, USAGES_URL, credentialFileFingerprint(credPath));
+  assert.notEqual(keyB, keyA);
+  assert.equal(
+    resolveQuotaContextKey({ env: {}, configText: '', kimiHome: dir }),
+    keyB,
+  );
+  // Omitting the fingerprint means "no credential content" (missing file) and
+  // yields the same deterministic key the resolver computes for that state.
+  fs.unlinkSync(credPath);
+  assert.equal(
+    quotaContextKeyFor(credPath, USAGES_URL),
+    resolveQuotaContextKey({ env: {}, configText: '', kimiHome: dir }),
+  );
+});
+
+test('a credential swapped into the same slot mid-flight drops the in-flight result', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-swap-'));
+  const env = failureEnv(dir, { token: 'account-a-access' });
+  let deliver;
+  const fetchImpl = () => new Promise((resolve) => { deliver = resolve; });
+  const inFlight = refreshQuota({ ...env, fetchImpl, now: 1_000, jitter: () => 0 });
+  assert.ok(deliver, 'the request must be in flight before the swap');
+  // Account B replaces the very same credential file while A's request runs.
+  fs.writeFileSync(env.credentialsPath, JSON.stringify({ access_token: 'account-b-access' }));
+  deliver(response(200, REAL_RESPONSE));
+  const ok = await inFlight;
+  // A's figures must never land: no cache write, no backoff stamp for B.
+  assert.equal(ok, false);
+  assert.equal(fs.existsSync(env.cachePath), false);
+  assert.equal(readRefreshState(env.statePath), null);
+  // The next refresh for the current content succeeds and tags the cache with
+  // a key derived from B's credential content.
+  const okB = await refreshQuota({
+    ...env,
+    fetchImpl: async () => response(200, REAL_RESPONSE),
+    now: 2_000,
+  });
+  assert.equal(okB, true);
+  assert.equal(
+    readQuotaCache(env.cachePath).contextKey,
+    quotaContextKeyFor(
+      env.credentialsPath,
+      USAGES_URL,
+      credentialFileFingerprint(env.credentialsPath),
+    ),
+  );
+});
+
+test('a token rotation escapes the rotated-away token auth backoff', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-rotate-'));
+  const env = failureEnv(dir, { token: 'rotated-away-access' });
+  const oldKey = quotaContextKeyFor(
+    env.credentialsPath,
+    USAGES_URL,
+    credentialFileFingerprint(env.credentialsPath),
+  );
+  recordRefreshFailure({
+    statePath: env.statePath,
+    category: 'auth',
+    now: 1_000,
+    jitter: () => 0,
+    contextKey: oldKey,
+  });
+  // The CLI refreshes the access token lazily, in place, same slot.
+  fs.writeFileSync(env.credentialsPath, JSON.stringify({ access_token: 'fresh-access' }));
+  const currentKey = quotaContextKeyFor(
+    env.credentialsPath,
+    USAGES_URL,
+    credentialFileFingerprint(env.credentialsPath),
+  );
+  assert.notEqual(currentKey, oldKey);
+  let spawns = 0;
+  const ok = ensureFreshQuota({
+    ...env,
+    scriptPath: '/tmp/fake-kimi-hud.mjs',
+    contextKey: currentKey,
+    now: 1_100,
+    cachedQuota: null,
+    spawnImpl: () => { spawns += 1; return { once() {}, unref() {} }; },
+    tokenFactory: () => 'fixed',
+  });
+  // The auth window belongs to the rotated-away content: the fresh token's
+  // first attempt is not delayed by it.
+  assert.equal(ok, true);
+  assert.equal(spawns, 1);
 });
 
 test('a far-future cache stamp is treated as refresh-needing by the scheduler', () => {
