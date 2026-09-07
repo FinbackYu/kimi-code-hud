@@ -23,7 +23,11 @@ test('atomicWriteFile writes, overwrites, and creates missing target directories
   assert.equal(fs.readFileSync(nested, 'utf8'), 'new');
 });
 
-test('atomicWriteFile keeps existing permission bits unless told otherwise', () => {
+test('atomicWriteFile keeps existing permission bits unless told otherwise', {
+  skip: process.platform === 'win32'
+    ? 'Windows models only a read-only bit, so POSIX permission-bit preservation cannot be observed there'
+    : false,
+}, () => {
   const file = path.join(tmpDir(), 'state.json');
   fs.writeFileSync(file, 'old');
   fs.chmodSync(file, 0o644);
