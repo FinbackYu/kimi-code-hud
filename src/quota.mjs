@@ -405,15 +405,21 @@ export function releaseQuotaLock(lockPath = REFRESH_LOCK_PATH, token = null) {
  * timestamp) prevents concurrent refreshes; locks older than LOCK_STALE_MS
  * are treated as stale and overwritten. The backoff state file records the
  * last failure's next-attempt time, so every render process in the same HUD
- * home shares one retry schedule. Pass no statePath to disable the backoff
- * gate. Never throws, never blocks on the network.
+ * home shares one retry schedule — per context: when `contextKey` is
+ * supplied, a window recorded by a different credential slot or region never
+ * blocks the spawn. Pass no statePath to disable the backoff gate. Never
+ * throws, never blocks on the network.
  * @param {object} [opts]
+ * @param {string|null} [opts.contextKey] digest of the credential slot +
+ *   endpoint the current config resolves to; omit for the legacy
+ *   shared-window gate
  * @returns {boolean} true when a refresh was spawned
  */
 export function ensureFreshQuota({
   cachePath = QUOTA_CACHE_PATH,
   lockPath = REFRESH_LOCK_PATH,
   statePath = null,
+  contextKey = null,
   scriptPath,
   now = Date.now(),
   spawnImpl = spawn,
@@ -424,7 +430,7 @@ export function ensureFreshQuota({
   try {
     const cache = cachedQuota === undefined ? readQuotaCache(cachePath) : cachedQuota;
     if (!isQuotaStale(cache, now)) return false;
-    if (isRefreshBlocked(statePath, now)) return false;
+    if (isRefreshBlocked(statePath, now, contextKey)) return false;
     lockToken = acquireQuotaLock({
       lockPath,
       now,
@@ -633,13 +639,18 @@ export async function requestQuota({
  *
  * Every failed attempt (timeout, network error, 429, 5xx, auth, unusable
  * payload) persists a failure record with the error category and the next
- * allowed attempt time; success clears it. The record is keyed by a
- * non-reversible digest of the credential path and endpoint, so switching
- * context restarts the failure count instead of inheriting the previous
- * account's lockout. Pass no statePath to skip persistence. Note the
- * scheduler-side gate reads this same file, so after a context switch the
- * first spawn may still wait out the previously recorded window (bounded by
- * RETRY_MAX_DELAY_MS).
+ * allowed attempt time; success clears it. The next-attempt time is stamped
+ * from a clock read after the request settles, so a request that burns its
+ * whole deadline still backs off from the moment it actually failed (the
+ * honored Retry-After window included) instead of from an already-stale
+ * request start. The record is keyed by a non-reversible digest of the
+ * credential path and endpoint, so switching context restarts the failure
+ * count instead of inheriting the previous account's lockout, and the
+ * scheduler-side gate compares that digest against its own context before
+ * honouring a window. A failure is only recorded while the live config still
+ * resolves to the credential slot and endpoint this request used: a refresh
+ * that outlived a context switch leaves the new context's backoff state (or
+ * lack of one) untouched. Pass no statePath to skip persistence.
  *
  * Before this request may mutate the shared cache (write after success, drop
  * after /logout or missing token) the live config is re-resolved and compared
@@ -672,6 +683,7 @@ export async function refreshQuota({
   fetchImpl = globalThis.fetch,
   lockToken = null,
   now = Date.now(),
+  clock = Date.now,
   jitter = Math.random,
   env = process.env,
   configPath = undefined,
@@ -723,10 +735,18 @@ export async function refreshQuota({
       // account is still logged in; keep the last good cache for that case.
       const canRefresh =
         cred && typeof cred.refresh_token === 'string' && cred.refresh_token.length > 0;
-      if (!canRefresh && isStillCurrentContext()) {
-        try { fs.unlinkSync(cachePath); } catch { /* no cache to drop */ }
+      if (isStillCurrentContext()) {
+        if (!canRefresh) {
+          try { fs.unlinkSync(cachePath); } catch { /* no cache to drop */ }
+        }
+        recordRefreshFailure({
+          statePath,
+          category: REQUEST_CATEGORY.AUTH,
+          now: clock(),
+          jitter,
+          contextKey,
+        });
       }
-      recordRefreshFailure({ statePath, category: REQUEST_CATEGORY.AUTH, now, jitter, contextKey });
       return false;
     }
     if (result.status === QUOTA_RESULT.SUCCESS) {
@@ -737,15 +757,20 @@ export async function refreshQuota({
       clearRefreshState(statePath);
       return true;
     }
-    recordRefreshFailure({
-      statePath,
-      category: result.category,
-      retryAfterSeen: result.retryAfterSeen === true,
-      retryAfterMs: result.retryAfterMs ?? null,
-      now,
-      jitter,
-      contextKey,
-    });
+    // The write path validates ownership: a request that outlived its
+    // context must neither stamp a lockout for the live context nor reset
+    // the backoff the live context may already have accumulated.
+    if (isStillCurrentContext()) {
+      recordRefreshFailure({
+        statePath,
+        category: result.category,
+        retryAfterSeen: result.retryAfterSeen === true,
+        retryAfterMs: result.retryAfterMs ?? null,
+        now: clock(),
+        jitter,
+        contextKey,
+      });
+    }
     return false;
   } catch {
     return false;
