@@ -61,6 +61,14 @@ jobs:
         shell: bash
         run: printf '' | node bin/kimi-hud.mjs
       - name: Shell quoting smoke test (spaces, CJK, shell metacharacters)
+        # POSIX-only, and not just for the execution half: the sandboxed
+        # KIMI_CODE_HOME/KIMI_HUD_HOME exported below are MSYS-style paths,
+        # which node.exe on Windows would resolve against the current drive
+        # root instead of the Git Bash /tmp the greps read back. Windows
+        # install/uninstall behavior is covered by the node-spawned suites,
+        # and command execution there stays with the honest probe in
+        # test/command.test.mjs.
+        if: runner.os != 'Windows'
         shell: bash
         # Exercises the generated statusLine command end to end: the CLI is
         # copied to a path that forces quoteCommandArg quoting, --install
@@ -68,8 +76,7 @@ jobs:
         # string is executed through a real POSIX shell. Windows hosts run the
         # generated command with their own shell, whose semantics remain
         # unverified for this project (no local Windows), so the execution
-        # half of this step is POSIX-only; the install/render/uninstall half
-        # runs everywhere.
+        # half of this step is POSIX-only.
         run: |
           set -euo pipefail
           root="$(pwd)"
@@ -86,17 +93,15 @@ jobs:
           node "$script" --install >/dev/null
           grep -q '^command = ' "$KIMI_CODE_HOME/tui.toml"
 
-          if [ "$RUNNER_OS" != "Windows" ]; then
-            generated="$(node -e '
-              const fs = require("node:fs");
-              const line = fs.readFileSync(process.argv[1], "utf8")
-                .split("\n")
-                .find((entry) => entry.startsWith("command = "));
-              if (!line) process.exit(1);
-              process.stdout.write(JSON.parse(line.slice("command = ".length)));
-            ' "$KIMI_CODE_HOME/tui.toml")"
-            printf '' | bash -c "$generated" >/dev/null
-          fi
+          generated="$(node -e '
+            const fs = require("node:fs");
+            const line = fs.readFileSync(process.argv[1], "utf8")
+              .split("\n")
+              .find((entry) => entry.startsWith("command = "));
+            if (!line) process.exit(1);
+            process.stdout.write(JSON.parse(line.slice("command = ".length)));
+          ' "$KIMI_CODE_HOME/tui.toml")"
+          printf '' | bash -c "$generated" >/dev/null
 
           printf '' | node "$script" >/dev/null
           node "$script" --uninstall >/dev/null

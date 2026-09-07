@@ -39,6 +39,15 @@ test('backslash paths are quoted so POSIX shells do not consume the escape', () 
 
 const POSIX_SHELLS = ['/bin/sh', '/bin/bash', '/bin/zsh'];
 
+// Everything below is POSIX-only: on Windows /bin/sh does not exist and
+// several hostile directory names (pipe, wildcard, quote, newline) are
+// illegal filenames. Those cases skip there instead of failing CI, and
+// Windows execution stays covered by the honest cmd.exe/PowerShell probe
+// at the bottom of this file — the only place it can ever be verified.
+const POSIX_SKIP = process.platform === 'win32'
+  ? 'drives /bin/sh and POSIX path semantics; Windows needs its own verified run'
+  : false;
+
 // A stub "entry point" that records the argv it received, so the test can
 // prove the shell handed the script path through as a single argument.
 const STUB_SCRIPT = [
@@ -75,11 +84,12 @@ function availableShells() {
   });
 }
 
-test('at least one POSIX shell is available for dynamic command execution', () => {
+test('at least one POSIX shell is available for dynamic command execution', { skip: POSIX_SKIP }, () => {
   assert.ok(availableShells().length > 0, `none of ${POSIX_SHELLS.join(', ')} could run`);
 });
 
-for (const shell of availableShells()) {
+// Empty on Windows, so the matrix loop below creates no tests there.
+for (const shell of POSIX_SKIP ? [] : availableShells()) {
   test(`generated command runs the script with one exact argument in real ${path.basename(shell)}`, () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), `kimi-hud-shell-${path.basename(shell)}-`));
     const record = path.join(root, 'argv-records.jsonl');
@@ -98,7 +108,7 @@ for (const shell of availableShells()) {
   });
 }
 
-test('backslash paths reach node byte-exact, though node itself refuses them as ESM entries', () => {
+test('backslash paths reach node byte-exact, though node itself refuses them as ESM entries', { skip: POSIX_SKIP }, () => {
   // Two stacked facts established by dynamic execution:
   // 1. quoteCommandArg used to treat `\` as safe and left such paths
   //    unquoted; sh then consumed the backslashes as escapes and node
@@ -122,7 +132,7 @@ test('backslash paths reach node byte-exact, though node itself refuses them as 
   }
 });
 
-test('the real entry point runs from a quoted hostile install path via a real shell', () => {
+test('the real entry point runs from a quoted hostile install path via a real shell', { skip: POSIX_SKIP }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-shell-entry-'));
   const hostileRoot = path.join(root, 'HUD 空间$k `tick`', '中文');
   const bin = path.join(hostileRoot, 'bin', 'kimi-hud.mjs');

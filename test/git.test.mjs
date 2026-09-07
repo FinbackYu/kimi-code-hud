@@ -566,7 +566,11 @@ test('a stale cache lock is collected before the merged write', (t) => {
   assert.equal(JSON.parse(fs.readFileSync(cachePath, 'utf8')).version, 1);
 });
 
-test('every successful cache write tightens an existing 0644 file to 0600', (t) => {
+test('every successful cache write tightens an existing 0644 file to 0600', {
+  skip: process.platform === 'win32'
+    ? 'Windows models only a read-only bit, so the 0644 -> 0600 tightening cannot be observed there'
+    : false,
+}, (t) => {
   const { cwd, env, cachePath } = statusFixture(t);
   fs.writeFileSync(cachePath, JSON.stringify({ version: 1, entries: {} }), { mode: 0o644 });
   fs.chmodSync(cachePath, 0o644);
@@ -598,7 +602,12 @@ test('a directory at cachePath is not chmodded or replaced', (t) => {
   );
   const stat = fs.lstatSync(cachePath);
   assert.equal(stat.isDirectory(), true);
-  assert.equal(stat.mode & 0o777, 0o755);
+  // Windows stats directories as 0o777 and models no other permission bits,
+  // so the not-chmodded evidence is only readable on POSIX; the directory
+  // must simply still be there on every platform.
+  if (process.platform !== 'win32') {
+    assert.equal(stat.mode & 0o777, 0o755);
+  }
 });
 
 test('a symlink cachePath is atomically replaced without touching its target', (t) => {
