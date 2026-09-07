@@ -270,7 +270,10 @@ export function shortDigest(...parts) {
 /**
  * Read one persisted refresh-failure state. Returns null for missing,
  * corrupt or foreign-version files — the guard then behaves as if no
- * failure had ever been recorded.
+ * failure had ever been recorded. Legacy states written before backoff was
+ * context-attributed carry no `contextKey` and stay readable; a present but
+ * malformed `contextKey` makes the whole record unusable, since ownership
+ * comparisons could not be trusted.
  * @param {string|null} statePath
  * @returns {object|null}
  */
@@ -287,6 +290,8 @@ export function readRefreshState(statePath) {
       || state.failures < 0
       || typeof state.nextAttemptAt !== 'number'
       || !Number.isFinite(state.nextAttemptAt)
+      || (state.contextKey !== undefined
+        && (typeof state.contextKey !== 'string' || state.contextKey.length === 0))
     ) {
       return null;
     }
@@ -297,14 +302,29 @@ export function readRefreshState(statePath) {
 }
 
 /**
- * True while persisted failures forbid starting another refresh. Never
- * throws; a missing statePath (feature off) never blocks.
+ * True while persisted failures forbid starting another refresh. When the
+ * caller passes its `contextKey` (the non-reversible digest of the credential
+ * slot + endpoint it would refresh for), a lockout recorded by a different
+ * context never blocks it — switching accounts or regions no longer inherits
+ * the previous context's failure window. States without a usable context tag
+ * (legacy files) stay in force for every caller, since they cannot be proven
+ * foreign. Never throws; a missing statePath (feature off) never blocks.
  * @param {string|null} statePath
  * @param {number} [now]
+ * @param {string|null} [contextKey] digest of the caller's credential slot +
+ *   endpoint; omit for the legacy shared-window gate
  */
-export function isRefreshBlocked(statePath, now = Date.now()) {
+export function isRefreshBlocked(statePath, now = Date.now(), contextKey = null) {
   const state = readRefreshState(statePath);
-  return state !== null && now < state.nextAttemptAt;
+  if (state === null) return false;
+  if (
+    contextKey !== null
+    && typeof state.contextKey === 'string'
+    && state.contextKey !== contextKey
+  ) {
+    return false;
+  }
+  return now < state.nextAttemptAt;
 }
 
 /**
@@ -313,7 +333,10 @@ export function isRefreshBlocked(statePath, now = Date.now()) {
  * context digest — never response bodies, tokens or request headers. When the
  * recorded context digest differs from the current one (account or region
  * switch), the failure count restarts instead of inheriting the other
- * account's lockout. Writes are atomic; failures to persist are swallowed.
+ * account's lockout; callers that can re-resolve the live configuration should
+ * do so first and record only while their own context is still the current
+ * one, so a stale in-flight request never overwrites the live context's
+ * record. Writes are atomic; failures to persist are swallowed.
  * @param {object} opts
  * @returns {object|null} the recorded state, or null when nothing was written
  */

@@ -327,7 +327,9 @@ export function releaseProviderUsageLock(lockPath, token = null) {
 /** Spawn a detached provider refresh when its account-scoped cache is stale
  * and no persisted failure backoff forbids it. Backoff state lives next to
  * the cache under the same account fingerprint, so concurrent processes share
- * one retry schedule per credential.
+ * one retry schedule per credential; the fingerprint is also compared against
+ * the state's context tag, so a window recorded by another account never
+ * blocks this one even if a state file were to change hands.
  */
 export function ensureFreshProviderUsage({
   scriptPath,
@@ -342,7 +344,7 @@ export function ensureFreshProviderUsage({
     if (!target) return false;
     const cache = cachedUsage === undefined ? readProviderUsageCache(target) : cachedUsage;
     if (!isProviderUsageStale(cache, now)) return false;
-    if (isRefreshBlocked(target.statePath, now)) return false;
+    if (isRefreshBlocked(target.statePath, now, target.credentialFingerprint)) return false;
     lockToken = acquireProviderUsageLock({
       lockPath: target.lockPath,
       now,
@@ -409,8 +411,12 @@ function removeFile(filePath) {
  * the child, and the expected fingerprint prevents a key switch from writing
  * old-account data into the new account's cache. Failed attempts persist a
  * failure record (category + next attempt time) beside the cache; success
- * clears it. The per-fingerprint state file keeps accounts isolated — one
- * key's failures never throttle another key's refresh.
+ * clears it. The next-attempt time is stamped from a clock read after the
+ * request settles, so a request that burns its whole deadline still backs off
+ * from the moment it actually failed (the honored Retry-After window
+ * included) instead of from an already-stale request start. Each record is
+ * tagged with the owning credential fingerprint and kept in a per-fingerprint
+ * state file, so one key's failures never throttle another key's refresh.
  */
 export async function refreshProviderUsage({
   provider,
@@ -421,6 +427,7 @@ export async function refreshProviderUsage({
   fetchImpl = globalThis.fetch,
   lockToken = null,
   now = Date.now(),
+  clock = Date.now,
   jitter = Math.random,
 } = {}) {
   const expectedPaths = providerUsagePaths({
@@ -456,8 +463,9 @@ export async function refreshProviderUsage({
       category: result.category,
       retryAfterSeen: result.retryAfterSeen === true,
       retryAfterMs: result.retryAfterMs ?? null,
-      now,
+      now: clock(),
       jitter,
+      contextKey: context.target.credentialFingerprint,
     });
     if (result.status !== PROVIDER_USAGE_RESULT.TRANSIENT) {
       removeFile(context.target.cachePath);

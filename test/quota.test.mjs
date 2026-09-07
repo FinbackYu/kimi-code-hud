@@ -937,6 +937,7 @@ test('refreshQuota persists 429 backoff with Retry-After honored', async () => {
   const ok = await refreshQuota({
     ...env,
     now: 50_000,
+    clock: () => 50_000, // instantaneous failure: the clock never advances
     jitter: () => 0,
     fetchImpl: async () => statusResponse(429, {
       get: (name) => (name === 'retry-after' ? '120' : null),
@@ -960,8 +961,12 @@ test('refreshQuota grows the backoff across consecutive network failures', async
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-backoff-net-'));
   const env = failureEnv(dir);
   const offline = async () => { throw new Error('offline'); };
-  await refreshQuota({ ...env, now: 1_000, jitter: () => 0, fetchImpl: offline });
-  await refreshQuota({ ...env, now: 2_000, jitter: () => 0, fetchImpl: offline });
+  await refreshQuota({
+    ...env, now: 1_000, clock: () => 1_000, jitter: () => 0, fetchImpl: offline,
+  });
+  await refreshQuota({
+    ...env, now: 2_000, clock: () => 2_000, jitter: () => 0, fetchImpl: offline,
+  });
   const state = readRefreshState(env.statePath);
   assert.equal(state.failures, 2);
   assert.equal(state.category, 'network');
@@ -1073,6 +1078,7 @@ test('concurrent refresh processes share one backoff schedule', async () => {
     ...env,
     lockToken: lock.token,
     now: 1_002,
+    clock: () => 1_002, // instantaneous failure
     jitter: () => 0,
     fetchImpl: async () => statusResponse(429),
   });
@@ -1094,7 +1100,13 @@ test('a crashed child is recovered via stale lock once the backoff expires', asy
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-crash-'));
   const env = failureEnv(dir);
   // One failed refresh leaves backoff; a then-crashed child leaves its lock.
-  await refreshQuota({ ...env, now: 1_000, jitter: () => 0, fetchImpl: async () => statusResponse(500) });
+  await refreshQuota({
+    ...env,
+    now: 1_000,
+    clock: () => 1_000,
+    jitter: () => 0,
+    fetchImpl: async () => statusResponse(500),
+  });
   fs.writeFileSync(env.lockPath, JSON.stringify({ pid: 1, at: 1_000, token: 'crashed' }));
 
   let spawns = 0;
@@ -1111,27 +1123,60 @@ test('a crashed child is recovered via stale lock once the backoff expires', asy
   assert.equal(spawns, 1);
 });
 
-test('switching quota context restarts the backoff instead of inheriting it', async () => {
+test('a stale-context failure records nothing; the live context starts fresh', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-switch-'));
   const envA = failureEnv(dir);
-  await refreshQuota({ ...envA, now: 1_000, jitter: () => 0, fetchImpl: async () => statusResponse(500) });
-  await refreshQuota({ ...envA, now: 2_000, jitter: () => 0, fetchImpl: async () => statusResponse(500) });
+  await refreshQuota({
+    ...envA,
+    now: 1_000,
+    clock: () => 1_000,
+    jitter: () => 0,
+    fetchImpl: async () => statusResponse(500),
+  });
+  await refreshQuota({
+    ...envA,
+    now: 2_000,
+    clock: () => 2_000,
+    jitter: () => 0,
+    fetchImpl: async () => statusResponse(500),
+  });
   const stateA = readRefreshState(envA.statePath);
   assert.equal(stateA.failures, 2);
   assert.match(stateA.contextKey, /^[0-9a-f]{16}$/);
 
-  const credentialsB = path.join(dir, 'other-account.json');
+  // A request that lost currency mid-flight — the live config no longer
+  // resolves to the credential slot it used — records nothing: its failure
+  // belongs to a dead context and must not clobber or lock out the live one.
+  const staleCredentials = path.join(dir, 'stale-account.json');
+  fs.writeFileSync(staleCredentials, JSON.stringify({ access_token: 'fake-stale-token' }));
+  const stale = await refreshQuota({
+    ...envA,
+    credentialsPath: staleCredentials,
+    now: 3_000,
+    clock: () => 3_000,
+    jitter: () => 0,
+    fetchImpl: async () => statusResponse(500),
+  });
+  assert.equal(stale, false);
+  assert.deepEqual(readRefreshState(envA.statePath), stateA);
+
+  // The live context keeps its own, freshly counted backoff instead of
+  // inheriting the previous context's failure count.
+  const kimiHomeB = makeKimiHome(path.join(dir, 'home-b'));
+  const credentialsB = path.join(kimiHomeB, 'credentials', 'kimi-code.json');
   fs.writeFileSync(credentialsB, JSON.stringify({ access_token: 'fake-access-token-b' }));
   await refreshQuota({
     ...envA,
     credentialsPath: credentialsB,
-    now: 3_000,
+    kimiHome: kimiHomeB,
+    now: 4_000,
+    clock: () => 4_000,
     jitter: () => 0,
     fetchImpl: async () => statusResponse(500),
   });
   const stateB = readRefreshState(envA.statePath);
-  assert.equal(stateB.failures, 1); // reset instead of inheriting 2 failures
-  assert.equal(stateB.nextAttemptAt, 5_000);
+  assert.equal(stateB.failures, 1); // restarted instead of inheriting 2 failures
+  assert.equal(stateB.nextAttemptAt, 6_000);
   assert.notEqual(stateB.contextKey, stateA.contextKey);
 });
 
@@ -1183,11 +1228,109 @@ test('a /logout-shaped 401 drops the cache and still records the auth backoff', 
   await refreshQuota({
     ...env,
     now: 1_000,
+    clock: () => 1_000,
     jitter: () => 0,
     fetchImpl: async () => statusResponse(401),
   });
   assert.equal(fs.existsSync(env.cachePath), false);
   assert.equal(readRefreshState(env.statePath).category, 'auth');
+});
+
+test('slow failures stamp the backoff from the post-failure clock, not the request start', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-backoff-clock-'));
+  const env = failureEnv(dir);
+  let clockNow = 1_000;
+  const ok = await refreshQuota({
+    ...env,
+    now: 1_000, // request start
+    clock: () => clockNow, // re-read once the request settles
+    jitter: () => 0,
+    fetchImpl: async () => {
+      clockNow = 9_000; // the request burns 8s before failing
+      return statusResponse(500);
+    },
+  });
+  assert.equal(ok, false);
+  const state = readRefreshState(env.statePath);
+  assert.equal(state.updatedAt, 9_000);
+  // Entry-time stamping would have produced 3_000 — already expired at the
+  // moment the failure actually happened.
+  assert.equal(state.nextAttemptAt, 11_000);
+  assert.equal(state.nextAttemptAt > clockNow, true);
+});
+
+test('a slow 429 stamps its honored Retry-After window from the failure time', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-backoff-429-'));
+  const env = failureEnv(dir);
+  let clockNow = 50_000;
+  await refreshQuota({
+    ...env,
+    now: 50_000,
+    clock: () => clockNow,
+    jitter: () => 0,
+    fetchImpl: async () => {
+      clockNow = 90_000;
+      return statusResponse(429, {
+        get: (name) => (name === 'retry-after' ? '120' : null),
+      });
+    },
+  });
+  const state = readRefreshState(env.statePath);
+  assert.equal(state.updatedAt, 90_000);
+  assert.equal(state.nextAttemptAt, 210_000); // 90s failure time + honored 120s
+});
+
+test('a slow auth failure backs off from the failure time too', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-backoff-auth-'));
+  const env = failureEnv(dir);
+  let clockNow = 1_000;
+  await refreshQuota({
+    ...env,
+    now: 1_000,
+    clock: () => clockNow,
+    jitter: () => 0,
+    fetchImpl: async () => {
+      clockNow = 9_000;
+      return statusResponse(401);
+    },
+  });
+  const state = readRefreshState(env.statePath);
+  assert.equal(state.category, 'auth');
+  assert.equal(state.nextAttemptAt, 11_000);
+});
+
+test('the scheduler does not inherit another context backoff', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-gate-ctx-'));
+  const env = failureEnv(dir);
+  recordRefreshFailure({
+    statePath: env.statePath,
+    category: 'network',
+    now: 1_000,
+    jitter: () => 0,
+    contextKey: 'context-a',
+  });
+  let spawns = 0;
+  const spawnImpl = () => { spawns += 1; return { once() {}, unref() {} }; };
+  const opts = (contextKey, now) => ({
+    ...env,
+    scriptPath: '/tmp/fake-kimi-hud.mjs',
+    contextKey,
+    now,
+    cachedQuota: null, // no usable cache: the stale check wants a refresh
+    spawnImpl,
+    tokenFactory: () => 'fixed',
+  });
+  // A foreign window with no usable cache never blocks the current context.
+  assert.equal(ensureFreshQuota(opts('context-b', 1_100)), true);
+  assert.equal(spawns, 1);
+  // The recorded context itself stays quiet inside its own window.
+  assert.equal(ensureFreshQuota(opts('context-a', 1_500)), false);
+  // The fresh context's next frame hits the lock, not the foreign backoff.
+  assert.equal(ensureFreshQuota(opts('context-b', 1_101)), false);
+  assert.equal(spawns, 1);
+  // Past window and lock the owner proceeds as usual.
+  assert.equal(ensureFreshQuota(opts('context-a', 31_101)), true);
+  assert.equal(spawns, 2);
 });
 
 // --- H02: context isolation of cache writes ---------------------------------

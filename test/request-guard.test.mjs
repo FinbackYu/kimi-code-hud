@@ -454,6 +454,50 @@ test('a context switch restarts the failure count instead of inheriting lockout'
   assert.equal(switched.contextKey, 'account-b');
 });
 
+test('a foreign context lockout never blocks an attributed caller', () => {
+  const statePath = tempStatePath();
+  recordRefreshFailure({
+    statePath,
+    category: REQUEST_CATEGORY.NETWORK,
+    now: 1_000,
+    jitter: () => 0,
+    contextKey: 'account-a',
+  });
+  // The scheduler compares ownership: inside A's window, account B — a
+  // different credential slot or region — still refreshes.
+  assert.equal(isRefreshBlocked(statePath, 1_100, 'account-b'), false);
+  // The owning context honours its own window, expiring exactly on time.
+  assert.equal(isRefreshBlocked(statePath, 2_999, 'account-a'), true);
+  assert.equal(isRefreshBlocked(statePath, 3_000, 'account-a'), false);
+  // A caller that cannot attribute itself keeps the conservative legacy gate.
+  assert.equal(isRefreshBlocked(statePath, 1_100), true);
+  // A legacy state file carries no context key: unprovable as foreign, so an
+  // attributed caller still honours it until it expires.
+  const legacyPath = tempStatePath();
+  recordRefreshFailure({
+    statePath: legacyPath,
+    category: REQUEST_CATEGORY.NETWORK,
+    now: 1_000,
+    jitter: () => 0,
+  });
+  assert.equal(isRefreshBlocked(legacyPath, 1_100, 'account-a'), true);
+});
+
+test('a refresh state with a malformed context key reads as absent', () => {
+  for (const contextKey of [42, '', null]) {
+    const statePath = tempStatePath();
+    fs.writeFileSync(statePath, JSON.stringify({
+      version: REFRESH_STATE_VERSION,
+      category: 'network',
+      failures: 1,
+      nextAttemptAt: 9e15,
+      contextKey,
+    }));
+    assert.equal(readRefreshState(statePath), null, String(contextKey));
+    assert.equal(isRefreshBlocked(statePath, 0, 'account-a'), false, String(contextKey));
+  }
+});
+
 test('recording failures without a statePath is a no-op', () => {
   assert.equal(recordRefreshFailure({ statePath: null, now: 1 }), null);
   assert.equal(clearRefreshState(null), false);

@@ -332,6 +332,7 @@ test('refreshProviderUsage records 429 backoff with Retry-After honored', async 
     configPath: paths.configPath,
     providerUsageDir: paths.providerUsageDir,
     now: 10_000,
+    clock: () => 10_000, // instantaneous failure: the clock never advances
     jitter: () => 0,
     fetchImpl: async () => mockResponse(429, '60'),
   });
@@ -458,4 +459,84 @@ test('a credential switch removes the stale account cache and its backoff state'
   assert.equal(refreshed, false);
   assert.equal(fs.existsSync(oldTarget.cachePath), false);
   assert.equal(fs.existsSync(oldTarget.statePath), false);
+});
+
+test('slow provider failures stamp the backoff from the post-failure clock', async () => {
+  const paths = tempPaths();
+  fs.writeFileSync(paths.configPath, config());
+  const target = targetFor(paths);
+  let clockNow = 1_000;
+  const refreshed = await refreshProviderUsage({
+    provider: 'deepseek',
+    configPath: paths.configPath,
+    providerUsageDir: paths.providerUsageDir,
+    now: 1_000, // request start
+    clock: () => clockNow, // re-read once the request settles
+    jitter: () => 0,
+    fetchImpl: async () => {
+      clockNow = 9_000; // the request burns 8s before failing
+      return mockResponse(503);
+    },
+  });
+  assert.equal(refreshed, false);
+  const state = readRefreshState(target.statePath);
+  assert.equal(state.updatedAt, 9_000);
+  // Entry-time stamping would have produced 3_000 — already expired at the
+  // moment the failure actually happened.
+  assert.equal(state.nextAttemptAt, 11_000);
+});
+
+test('provider backoff state carries its owning fingerprint and honours it', async () => {
+  const paths = tempPaths();
+  fs.writeFileSync(paths.configPath, config());
+  const target = targetFor(paths);
+  await refreshProviderUsage({
+    provider: 'deepseek',
+    configPath: paths.configPath,
+    providerUsageDir: paths.providerUsageDir,
+    now: 1_000,
+    clock: () => 1_000,
+    jitter: () => 0,
+    fetchImpl: async () => mockResponse(500),
+  });
+  const state = readRefreshState(target.statePath);
+  assert.equal(state.contextKey, target.credentialFingerprint);
+  assert.doesNotMatch(JSON.stringify(state), new RegExp(API_KEY));
+
+  // The scheduler compares ownership: the owning fingerprint stays quiet
+  // inside its own window.
+  let spawns = 0;
+  const spawnImpl = () => { spawns += 1; return { once() {}, unref() {} }; };
+  assert.equal(ensureFreshProviderUsage({
+    scriptPath: 'x', target, cachedUsage: null, now: 1_500, spawnImpl, tokenFactory: () => 'one',
+  }), false);
+  assert.equal(spawns, 0);
+  assert.equal(ensureFreshProviderUsage({
+    scriptPath: 'x', target, cachedUsage: null, now: 3_000, spawnImpl, tokenFactory: () => 'one',
+  }), true);
+  assert.equal(spawns, 1);
+});
+
+test('a state file tagged for another fingerprint never blocks this account', () => {
+  const paths = tempPaths();
+  const target = targetFor(paths);
+  fs.mkdirSync(paths.providerUsageDir, { recursive: true });
+  fs.writeFileSync(target.statePath, JSON.stringify({
+    version: 1,
+    category: 'network',
+    failures: 3,
+    nextAttemptAt: 9e15,
+    contextKey: 'ffffffffffffffff',
+  }));
+  let spawns = 0;
+  const ok = ensureFreshProviderUsage({
+    scriptPath: 'x',
+    target,
+    cachedUsage: null,
+    now: 10,
+    spawnImpl: () => { spawns += 1; return { once() {}, unref() {} }; },
+    tokenFactory: () => 'one',
+  });
+  assert.equal(ok, true);
+  assert.equal(spawns, 1);
 });
