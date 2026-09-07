@@ -515,7 +515,9 @@ test('shareable output masks personal paths; local output shows them', () => {
   const report = collectDoctorReport({ paths: env.paths, env: {}, scriptPath: SCRIPT, now: NOW });
   const local = formatDoctorReport(report);
   const share = formatDoctorReport(report, { shareable: true });
-  assert.match(local, new RegExp(`path: ${env.paths.quotaCachePath}`));
+  // includes, not a RegExp: a Windows path's backslashes would be consumed
+  // as regex escapes and the assertion would never match its own output.
+  assert.ok(local.includes(`path: ${env.paths.quotaCachePath}`));
   assert.equal(share.includes(env.root), false, 'shareable output must not contain the tmp root');
   // Paths under the known roots are rewritten to logical labels.
   assert.match(share, /path: \$KIMI_HUD_HOME[\\/]quota\.json/);
@@ -581,7 +583,9 @@ test('bin --doctor --share masks a UNC kimi home (user repro)', () => {
     },
     encoding: 'utf8',
   });
-  assert.equal(result.status, 0, result.stderr);
+  // The report body on failure is synthetic (a fake UNC server) and shows
+  // exactly which doctor check classified the unreachable home as a warning.
+  assert.equal(result.status, 0, `${result.stderr}\n--- stdout ---\n${result.stdout}`);
   assert.equal(result.stdout.includes('private-server'), false);
   assert.equal(result.stdout.includes('PrivateCustomer'), false);
   assert.match(result.stdout, /path: \$KIMI_CODE_HOME/);
