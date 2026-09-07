@@ -10,7 +10,11 @@ import {
   MAX_PARTIAL_LINE_BYTES,
   wireTailDigest,
 } from '../src/wire-reader.mjs';
-import { runHousekeeping, SESSION_FILE_TTL_MS } from '../src/housekeeping.mjs';
+import {
+  runHousekeeping,
+  scrubLegacySessionCaches,
+  SESSION_FILE_TTL_MS,
+} from '../src/housekeeping.mjs';
 import {
   EVENT_TIME,
   makeSession,
@@ -386,7 +390,65 @@ test('a legacy backfill reader migrates without persisting its pending content',
   assertStateCarriesNoContent(state, ['"type":"config.update"']);
 });
 
-test('housekeeping retires stale legacy caches; fresh ones wait for their session', () => {
+test('a legacy cache whose session is gone is still scrubbed on disk', () => {
+  const fx = makeSession({ tmpPrefix: 'kimi-hud-privacy-', stateDir: true });
+  // The host data is already deleted: this session can never be reopened,
+  // so migration-on-read alone would keep its body copy until the TTL.
+  fs.rmSync(fx.sessionDir, { recursive: true, force: true });
+  fs.writeFileSync(fx.statePath, JSON.stringify({
+    v: 8,
+    agents: {
+      main: {
+        offset: 4096,
+        fileId: null,
+        pendingBase64: Buffer.from(`tail of ${PENDING_MARKER}`).toString('base64'),
+        discardingLine: false,
+        tailMarker: Buffer.from('raw bytes before the cursor').toString('base64'),
+        samples: [],
+        lastMedian: null,
+      },
+    },
+    modelAlias: null,
+    thinkingLevel: null,
+    goal: null,
+    swarmMode: false,
+    sessionUsage: {
+      v: 1,
+      complete: false,
+      agents: {
+        main: {
+          reader: {
+            offset: 128,
+            fileId: null,
+            pendingBase64: Buffer.from(PENDING_MARKER).toString('base64'),
+            discardingLine: false,
+            tailMarker: 'legacy==',
+          },
+          byModel: {},
+        },
+      },
+    },
+  }));
+
+  const metrics = getMetrics(fx.id, {
+    sessionsRoot: fx.sessionsRoot, stateDir: fx.stateDir, now: NOW,
+  });
+  assert.equal(metrics.tps, null, 'a missing session keeps the empty projection');
+  assert.equal(metrics.turnStartedAt, null);
+  const state = readState(fx.statePath);
+  assert.equal(state.v, 9, 'the migrated state is persisted without its session');
+  assertStateCarriesNoContent(state, [PENDING_MARKER]);
+
+  const settled = fs.readFileSync(fx.statePath, 'utf8');
+  getMetrics(fx.id, { sessionsRoot: fx.sessionsRoot, stateDir: fx.stateDir, now: NOW });
+  assert.equal(
+    fs.readFileSync(fx.statePath, 'utf8'),
+    settled,
+    'the scrubbed cache is not rewritten on every later frame',
+  );
+});
+
+test('housekeeping retires stale legacy caches; the cleanup entry clears fresh ones', () => {
   const now = Date.now();
   const hudDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-privacy-hk-'));
   const sessionStateDir = path.join(hudDir, 'sessions');
@@ -404,10 +466,27 @@ test('housekeeping retires stale legacy caches; fresh ones wait for their sessio
 
   assert.equal(runHousekeeping({ hudDir, sessionStateDir, now }), true);
   assert.ok(!fs.existsSync(stale), 'a never-reopened legacy cache ages out with the retention window');
-  assert.ok(fs.existsSync(fresh));
+  assert.ok(fs.existsSync(fresh), 'the daily sweep never rewrites a fresh cache');
   assert.match(
     fs.readFileSync(fresh, 'utf8'),
     /pendingBase64/,
-    'a cache inside the retention window is left for its session to migrate on reopen',
+    'waiting for the retention window alone is not the cleanup path',
+  );
+
+  // The explicit cleanup entry migrates the fresh legacy cache in place —
+  // no session reopen and no retention wait required.
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir }),
+    { scanned: 1, cleaned: 1, removed: 0 },
+  );
+  const migrated = JSON.parse(fs.readFileSync(fresh, 'utf8'));
+  assert.equal(migrated.v, 9);
+  assert.equal(migrated.agents.main.offset, 10, 'the cursor survives the migration');
+  assertStateCarriesNoContent(migrated, [PENDING_MARKER]);
+
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir }),
+    { scanned: 1, cleaned: 0, removed: 0 },
+    'a second pass finds nothing left to migrate',
   );
 });

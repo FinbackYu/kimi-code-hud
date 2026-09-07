@@ -476,9 +476,13 @@ export function getMetrics(sessionId, {
       { deadline },
     );
     if (!sessionDir) {
-      return deadlineOpen(deadline)
-        ? empty
-        : finishMetrics(state, statePath, stateChanged, now);
+      // A missing session used to skip persistence entirely, so a legacy
+      // content-bearing cache stayed on disk for its whole retention window
+      // whenever its session never reopened. Persist the migrated,
+      // content-free state here too; the visible projection stays empty
+      // while the session cannot be located.
+      const metrics = finishMetrics(state, statePath, stateChanged, now);
+      return deadlineOpen(deadline) ? empty : metrics;
     }
     if (state.sessionDir !== sessionDir) {
       state.sessionDir = sessionDir;
@@ -503,7 +507,12 @@ export function getMetrics(sessionId, {
     if (!deadlineOpen(deadline)) {
       return finishMetrics(state, statePath, stateChanged, now);
     }
-    if (!prepared.length && !Object.keys(state.agents).length) return empty;
+    if (!prepared.length && !Object.keys(state.agents).length) {
+      // No readers anywhere — but a migrated state (e.g. a legacy backfill
+      // cursor for a vanished session) still has to reach the disk once.
+      finishMetrics(state, statePath, stateChanged, now);
+      return empty;
+    }
     const visibleAgentNames = new Set(prepared.map((wire) => wire.agent));
     const main = prepared.find((wire) => wire.agent === 'main') ?? null;
 

@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,14 +11,26 @@ import {
   SESSION_FILE_TTL_MS,
   TMP_FILE_MAX_AGE_MS,
   runHousekeeping,
+  scrubLegacySessionCaches,
 } from '../src/housekeeping.mjs';
+import { emptyState } from '../src/metrics-state.mjs';
 
 // Daily housekeeping: orphaned atomic-write and lock temporaries are swept,
 // session state past the retention window is pruned, and the whole sweep is
-// throttled to once per interval by a stamp file.
+// throttled to once per interval by a stamp file. The explicit cleanup entry
+// rewrites recognized legacy session caches to the content-free shape on
+// demand, without waiting for a session to reopen or the retention window.
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'kimi-hud.mjs');
+
+function legacyCache(offset) {
+  return JSON.stringify({
+    v: 8,
+    agents: { main: { offset, pendingBase64: Buffer.from('body copy').toString('base64') } },
+  });
+}
 
 function makeHudHome() {
   const hudDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-hk-'));
@@ -113,4 +127,89 @@ test('tolerates missing directories and creates the sessions dir for the stamp',
   const sessionStateDir = path.join(hudDir, 'sessions');
   assert.equal(runHousekeeping({ hudDir, sessionStateDir }), true);
   assert.ok(fs.existsSync(path.join(sessionStateDir, '.housekeeping-stamp')));
+});
+
+test('the cleanup entry migrates legacy caches and leaves every other shape alone', () => {
+  const { hudDir, sessionStateDir } = makeHudHome();
+  const legacy = write(path.join(sessionStateDir, 'metrics-legacy.json'), legacyCache(7));
+  const current = write(
+    path.join(sessionStateDir, 'metrics-current.json'),
+    JSON.stringify(emptyState()),
+  );
+  const foreign = write(
+    path.join(sessionStateDir, 'metrics-newer.json'),
+    JSON.stringify({ v: 10, agents: {}, note: 'a future HUD version owns this' }),
+  );
+  const corruptContent = write(
+    path.join(hudDir, 'metrics-corrupt.json'),
+    '{"v":8,"agents":{"main":{"pendingBase64":"Ym9keSBjb3B5"',
+  );
+  const corruptPlain = write(path.join(hudDir, 'metrics-plain.json'), 'not json at all');
+  const nonCache = write(path.join(hudDir, 'quota.json'), legacyCache(1));
+  const before = {
+    current: fs.readFileSync(current, 'utf8'),
+    foreign: fs.readFileSync(foreign, 'utf8'),
+    corruptPlain: fs.readFileSync(corruptPlain, 'utf8'),
+    nonCache: fs.readFileSync(nonCache, 'utf8'),
+  };
+
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir }),
+    { scanned: 5, cleaned: 1, removed: 1 },
+  );
+
+  const migrated = JSON.parse(fs.readFileSync(legacy, 'utf8'));
+  assert.equal(migrated.v, 9);
+  assert.equal(migrated.agents.main.offset, 7, 'the cursor survives the rewrite');
+  assert.equal(fs.readFileSync(legacy, 'utf8').includes('pendingBase64'), false);
+  assert.equal(fs.readFileSync(current, 'utf8'), before.current, 'a current cache is not rewritten');
+  assert.equal(fs.readFileSync(foreign, 'utf8'), before.foreign, 'a newer version\'s cache is not destroyed');
+  assert.ok(!fs.existsSync(corruptContent), 'an unparseable legacy content cache is removed');
+  assert.equal(fs.readFileSync(corruptPlain, 'utf8'), before.corruptPlain, 'corrupt non-content files wait for the TTL');
+  assert.equal(fs.readFileSync(nonCache, 'utf8'), before.nonCache, 'only session cache names are touched');
+});
+
+test('the cleanup pass is bounded by maxFiles', () => {
+  const { hudDir, sessionStateDir } = makeHudHome();
+  const caches = [];
+  for (let i = 0; i < 5; i++) {
+    caches.push(write(path.join(sessionStateDir, `metrics-s${i}.json`), legacyCache(i)));
+  }
+
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir, maxFiles: 2 }),
+    { scanned: 2, cleaned: 2, removed: 0 },
+  );
+  const migrated = caches.filter(
+    (filePath) => !fs.readFileSync(filePath, 'utf8').includes('pendingBase64'),
+  );
+  assert.equal(migrated.length, 2, 'the rest wait for the next pass');
+});
+
+test('the cleanup entry tolerates missing directories', () => {
+  const hudDir = path.join(os.tmpdir(), `kimi-hud-hk-scrub-missing-${Date.now()}-${process.pid}`);
+  assert.deepEqual(
+    scrubLegacySessionCaches({ hudDir, sessionStateDir: path.join(hudDir, 'sessions') }),
+    { scanned: 0, cleaned: 0, removed: 0 },
+  );
+});
+
+test('bin --clean-legacy-caches migrates caches under the resolved HUD home', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-hk-bin-'));
+  const hudDir = path.join(root, 'hud');
+  const sessionStateDir = path.join(hudDir, 'sessions');
+  fs.mkdirSync(sessionStateDir, { recursive: true });
+  const cache = write(path.join(sessionStateDir, 'metrics-legacy.json'), legacyCache(5));
+
+  const result = spawnSync(process.execPath, [BIN, '--clean-legacy-caches'], {
+    env: { ...process.env, KIMI_HUD_HOME: hudDir },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr, '');
+  assert.match(result.stdout, /1 scanned, 1 migrated, 0 corrupt removed/);
+  const migrated = JSON.parse(fs.readFileSync(cache, 'utf8'));
+  assert.equal(migrated.v, 9);
+  assert.equal(migrated.agents.main.offset, 5);
+  assert.equal(fs.readFileSync(cache, 'utf8').includes('pendingBase64'), false);
 });

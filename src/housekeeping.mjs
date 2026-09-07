@@ -2,11 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { atomicWriteFile } from './fs-store.mjs';
+import { migrateParsedState } from './metrics-state.mjs';
 
 export const HOUSEKEEPING_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const SESSION_FILE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const TMP_FILE_MAX_AGE_MS = 60 * 60 * 1000;
 export const HOUSEKEEPING_MAX_UNLINKS = 200;
+export const SCRUB_MAX_FILES = 200;
 
 const STAMP_NAME = '.housekeeping-stamp';
 // Session file names carry sanitized ids, so these anchored prefixes can
@@ -16,6 +18,8 @@ const STAMP_NAME = '.housekeeping-stamp';
 // write — an old one is always an orphan from a killed process.
 const SESSION_FILE_RE = /^(?:metrics|thinking)-[A-Za-z0-9_-]+\.json$/;
 const TEMPORARY_RE = /\.tmp-/;
+// Fields the pre-v9 writer used to persist raw wire bytes under.
+const LEGACY_CONTENT_RE = /"(?:pendingBase64|tailMarker)"/;
 
 function sweepDirectory(dir, { now, maxAgeMs, budget, matches }) {
   let entries;
@@ -71,4 +75,70 @@ export function runHousekeeping({
   } catch {
     return false; // housekeeping must never break its caller
   }
+}
+
+/**
+ * One bounded, on-demand pass that rewrites every recognized session cache in
+ * the two HUD state directories to the current content-free shape — whatever
+ * the file's age, and without waiting for its session to reopen or for the
+ * retention window. This is the explicit cleanup entry for legacy caches that
+ * still carry wire content (pre-v9 pendingBase64 tails, raw tailMarker bytes):
+ * the same migration the runtime performs on read, applied to caches whose
+ * sessions no longer exist. Only HUD-owned session cache names are touched,
+ * only inside the HUD state directories, through atomic same-directory
+ * writes; host wire files are never read. An unrecognized shape (a newer
+ * HUD's file, or a `thinking-*` snapshot) is left untouched, and an
+ * unparseable file is removed only when it still carries legacy content
+ * markers — anything else waits for the retention sweep. Silent and fail-open
+ * throughout; returns the pass counts.
+ *
+ * @returns {{scanned: number, cleaned: number, removed: number}}
+ */
+export function scrubLegacySessionCaches({
+  hudDir,
+  sessionStateDir,
+  maxFiles = SCRUB_MAX_FILES,
+} = {}) {
+  const counts = { scanned: 0, cleaned: 0, removed: 0 };
+  try {
+    for (const dir of [hudDir, sessionStateDir]) {
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue; // missing or unreadable directory: nothing to scrub
+      }
+      for (const entry of entries) {
+        if (counts.scanned >= maxFiles) return counts;
+        if (!entry.isFile() || !SESSION_FILE_RE.test(entry.name)) continue;
+        counts.scanned += 1;
+        const filePath = path.join(dir, entry.name);
+        try {
+          const text = fs.readFileSync(filePath, 'utf8');
+          let raw;
+          try {
+            raw = JSON.parse(text);
+          } catch {
+            // Unparseable files cannot be migrated in place.
+            if (LEGACY_CONTENT_RE.test(text)) {
+              fs.unlinkSync(filePath);
+              counts.removed += 1;
+            }
+            continue;
+          }
+          const state = migrateParsedState(raw);
+          if (!state) continue; // not a format this HUD version owns
+          const next = JSON.stringify(state);
+          if (next === text) continue; // already content-free and current
+          atomicWriteFile(filePath, next);
+          counts.cleaned += 1;
+        } catch {
+          // Best effort: a file racing a live writer is left for the next run.
+        }
+      }
+    }
+  } catch {
+    // fail-open, like the rest of housekeeping
+  }
+  return counts;
 }
