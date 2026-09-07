@@ -6,6 +6,7 @@ import {
   MAX_SAMPLES,
   MIN_SAMPLES,
   SAMPLE_WINDOW_MS,
+  SETTLE_LINGER_MS,
   TPS_TTL_MS,
 } from './metrics-constants.mjs';
 import { median } from './metrics-math.mjs';
@@ -136,12 +137,23 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
     }
     ttftMs = soleActive.bucket.lastTtftMs ?? null;
   } else {
-    const mainMedian = state.agents.main?.lastMedian ?? null;
+    const mainBucket = state.agents.main;
+    const mainMedian = mainBucket?.lastMedian ?? null;
     if (mainMedian !== null) {
       tps = mainMedian;
-      tpsStale = true;
+      // Settle grace: the moment the fleet empties, the last median is still
+      // the figure the user just watched being produced, so it keeps the
+      // normal color for SETTLE_LINGER_MS past the turn end before fading
+      // into the muted stale reading. Only this idle-fleet fallback is
+      // softened — provisional and insufficient-sample staleness keep their
+      // semantics (a stale figure is never presented as live data).
+      const settledAt = mainBucket.lastTurnEndAt;
+      tpsStale = !(
+        typeof settledAt === 'number' &&
+        now - settledAt <= SETTLE_LINGER_MS
+      );
     }
-    ttftMs = state.agents.main?.lastTtftMs ?? null;
+    ttftMs = mainBucket?.lastTtftMs ?? null;
   }
 
   const main = state.agents.main;
@@ -162,6 +174,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
   // reading (latest prompt of any origin while the turn is open).
   let turnStartedAt = null;
   let genSettledMs = null;
+  let genSettledAt = null;
   if (main && main.lastUserPromptAt !== null) {
     if (mainTurnOpen || activeSubagents > 0) {
       turnStartedAt = main.lastUserPromptAt;
@@ -171,6 +184,10 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       (main.lastCompactionEndAt === null ||
         main.lastTurnEndAt >= main.lastCompactionEndAt)
     ) {
+      // The turn end is the settle instant: the renderer uses it to hold the
+      // normal color through the SETTLE_LINGER_MS grace before the frozen
+      // duration fades to the muted post-settle dim.
+      genSettledAt = main.lastTurnEndAt;
       genSettledMs = main.lastTurnEndAt - main.lastUserPromptAt;
     }
   } else if (mainTurnOpen) {
@@ -178,6 +195,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
   }
   let compactingSince = null;
   let compactionMs = null;
+  let compactedAt = null;
   if (main) {
     const beginAt = main.lastCompactionBeginAt;
     const endAt = main.lastCompactionEndAt;
@@ -192,6 +210,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       endAt !== null &&
       (main.lastTurnPromptAt === null || endAt > main.lastTurnPromptAt)
     ) {
+      compactedAt = endAt;
       compactionMs = main.lastCompactionMs;
     }
   }
@@ -219,8 +238,10 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       mainSpeed,
       turnStartedAt,
       genSettledMs,
+      genSettledAt,
       compactingSince,
       compactionMs,
+      compactedAt,
       // Durable background-task running counts (bash processes vs background
       // subagents). Kept apart from the throughput head counts above: those
       // describe recent LLM generation and include the main agent, these

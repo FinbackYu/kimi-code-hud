@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { formatGoalBadge } from './goal.mjs';
+import { SETTLE_LINGER_MS } from './metrics-constants.mjs';
 import { QUOTA_AGE, quotaAge } from './quota.mjs';
 
 const ESC = '\x1b[';
@@ -349,6 +350,17 @@ function speedSegment({ layout, metrics, color, now, C }) {
     !generatedFor && !compacting && metrics && typeof metrics.genSettledMs === 'number'
       ? formatElapsed(metrics.genSettledMs)
       : null;
+  // Settle grace: for SETTLE_LINGER_MS after the cascade settles (or a
+  // compaction closes) the frozen figures are still the fresh answer to
+  // "how fast / how long", so they render in the normal color; only then do
+  // they fade to the muted post-settle dim. Figures without a settle
+  // instant (legacy state shapes) keep the muted dim.
+  const genLinger =
+    metrics && typeof metrics.genSettledAt === 'number' &&
+    now - metrics.genSettledAt <= SETTLE_LINGER_MS;
+  const compactedLinger =
+    metrics && typeof metrics.compactedAt === 'number' &&
+    now - metrics.compactedAt <= SETTLE_LINGER_MS;
   if (metrics && typeof metrics.tps === 'number') {
     const average = Math.round(metrics.tps);
     const paint = (text) => (
@@ -366,7 +378,9 @@ function speedSegment({ layout, metrics, color, now, C }) {
         : compacting
           ? `compacting ${compacting}`
           : genSettled
-            ? colorize(color, C.muted, `gen ${genSettled}`)
+            ? (genLinger
+              ? `gen ${genSettled}`
+              : colorize(color, C.muted, `gen ${genSettled}`))
             : null;
       return live ? `${paint(head)} ${live}` : paint(head);
     }
@@ -376,10 +390,14 @@ function speedSegment({ layout, metrics, color, now, C }) {
     if (generatedFor) return `${paint(base)} · gen ${generatedFor}`;
     if (compacting) return `${paint(base)} · compacting ${compacting}`;
     if (compacted) {
-      return `${paint(base)}${colorize(color, C.muted, ` · compacted ${compacted}`)}`;
+      return `${paint(base)}${compactedLinger
+        ? ` · compacted ${compacted}`
+        : colorize(color, C.muted, ` · compacted ${compacted}`)}`;
     }
     if (genSettled) {
-      return `${paint(base)}${colorize(color, C.muted, ` · gen ${genSettled}`)}`;
+      return `${paint(base)}${genLinger
+        ? ` · gen ${genSettled}`
+        : colorize(color, C.muted, ` · gen ${genSettled}`)}`;
     }
     const ttft = formatTtft(metrics.ttftMs);
     return paint(`${base}${ttft ? ` · TTFT ${ttft}` : ''}`);
@@ -392,10 +410,14 @@ function speedSegment({ layout, metrics, color, now, C }) {
   }
   if (metrics && compacting) return `compacting ${compacting}`;
   if (metrics && compacted && layout !== 'compact') {
-    return colorize(color, C.muted, `compacted ${compacted}`);
+    return compactedLinger
+      ? `compacted ${compacted}`
+      : colorize(color, C.muted, `compacted ${compacted}`);
   }
   if (metrics && genSettled) {
-    return colorize(color, C.muted, `⚡ gen ${genSettled}`);
+    return genLinger
+      ? `⚡ gen ${genSettled}`
+      : colorize(color, C.muted, `⚡ gen ${genSettled}`);
   }
   const ttft = metrics ? formatTtft(metrics.ttftMs) : null;
   return ttft ? `TTFT ${ttft}` : null;
@@ -434,14 +456,21 @@ function quotaSegment({ layout, quota, color, now, C }) {
   if (!quota) return null;
   // The age contract lives in quota.mjs so rendering and the refresh
   // scheduler share one boundary: fresh figures render normally, stale ones
-  // stay visible but dimmed with a plain-text marker, and anything past the
-  // maximum stale age (or stamped impossibly far in the future) is dropped —
-  // seven-day-old numbers must never be presented the same as fresh ones.
+  // stay visible but dimmed, and anything past the maximum stale age (or
+  // stamped impossibly far in the future) is dropped — seven-day-old numbers
+  // must never be presented the same as fresh ones. The stale state itself
+  // tiers: within QUOTA_STALE_MARK_MS ("aging" — the first hour, which is
+  // also the background refresh cadence, so returning after a few minutes
+  // lands here) the dim alone signals age because window figures that young
+  // are almost certainly still valid; past it the literal `[stale]` marker
+  // joins the dim for figures old enough to be genuinely doubted.
   const age = quotaAge(quota, now);
   if (age.state === QUOTA_AGE.EXPIRED) return null;
   const stale = age.state === QUOTA_AGE.STALE;
-  // Usage-level colors (bar / percentage) only apply to fresh figures; a
-  // stale segment is toned down as a whole so it reads as old, not current.
+  const markStale = stale && age.markStale === true;
+  // Usage-level colors (bar / percentage) only apply to fresh figures; an
+  // aging or stale segment is toned down as a whole so it reads as old, not
+  // current.
   const useLevelColor = color && !stale;
   const parts = [];
   for (const window of quota.windows || []) {
@@ -471,9 +500,13 @@ function quotaSegment({ layout, quota, color, now, C }) {
   if (parts.length === 0) return null;
   const text = parts.join(' · ');
   if (!stale) return text;
-  // Dimmed in color; the literal marker keeps the state readable when colors
-  // are disabled (NO_COLOR / KIMI_HUD_NO_COLOR).
-  return colorize(color, C.muted, `${text} [stale]`);
+  // Dimmed in color either way. The literal marker only joins past the mark
+  // age, and keeps the genuinely-stale state readable when colors are
+  // disabled (NO_COLOR / KIMI_HUD_NO_COLOR); the aging tier deliberately
+  // carries no text marker — the dim alone reads as "old, not current".
+  return markStale
+    ? colorize(color, C.muted, `${text} [stale]`)
+    : colorize(color, C.muted, text);
 }
 
 function providerBalanceText(balance) {
@@ -588,7 +621,7 @@ function buildSegments(layout, ctx) {
  * @param {object|null} ctx.quota context-verified schema-v2 quota cache
  *   (weekly/windows plus the fetchedAt the age contract is checked against)
  * @param {object|object[]|null} ctx.providerUsage normalized provider facts
- * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, towerMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, compactingSince, compactionMs, tasks}
+ * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, towerMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, genSettledMs, genSettledAt, compactingSince, compactionMs, compactedAt, tasks}
  * @param {boolean} ctx.gitDirty
  * @param {string} [ctx.layout] normal|compact
  * @param {string} [ctx.permissionNames] official|short — permission badge

@@ -49,13 +49,22 @@ export const QUOTA_CACHE_VERSION = 2;
  * Freshness contract shared by the scheduler and the renderer.
  *
  *  - fresh   (age <= QUOTA_TTL_MS): rendered as the current figure;
- *  - stale   (TTL < age <= QUOTA_STALE_MAX_MS): still usable — shown dimmed
- *    with an explicit `[stale]` marker so a monochrome terminal can tell it
- *    apart from fresh data while a background refresh is throttled/offline;
+ *  - stale   (TTL < age <= QUOTA_STALE_MAX_MS): still usable — shown dimmed.
+ *    Rendering splits this one logic state into two tiers via `markStale`:
+ *    within QUOTA_STALE_MARK_MS ("aging") the dim is the only signal, since
+ *    5h/weekly window figures that young are almost certainly still valid —
+ *    the 60s TTL is also the background refresh cadence, so the first frame
+ *    after switching away for a few minutes would always cry wolf; past
+ *    QUOTA_STALE_MARK_MS an explicit `[stale]` marker is added so a
+ *    monochrome terminal can tell genuinely old figures apart from fresh
+ *    data while a background refresh is throttled/offline;
  *  - expired (age > QUOTA_STALE_MAX_MS, or a fetchedAt so far in the future
  *    that the clock must have moved): hidden entirely — the figure is never
  *    presented as current once it can no longer be trusted.
  *
+ * QUOTA_STALE_MARK_MS is one hour: long enough that an away-from-keyboard
+ * gap never renders the marker, short enough that truly stale data is still
+ * called out within one working session.
  * QUOTA_STALE_MAX_MS is one week, the longest horizon any returned window
  * (the weekly summary) can legitimately describe before its own reset, so a
  * cache older than that is always superseded rather than merely unrefreshed.
@@ -63,6 +72,7 @@ export const QUOTA_CACHE_VERSION = 2;
  * not hide a just-written cache, while a large rollback turns the cache into
  * "needs refresh" instead of pinning it fresh forever.
  */
+export const QUOTA_STALE_MARK_MS = 60 * 60 * 1000;
 export const QUOTA_STALE_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 export const QUOTA_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
@@ -243,20 +253,28 @@ export function readQuotaCache(cachePath = QUOTA_CACHE_PATH) {
  * the renderer and the refresh scheduler. A missing cache or a non-finite
  * fetchedAt is expired (nothing trustworthy to show); a fetchedAt far in the
  * future means the clock moved backwards, which is likewise untrusted.
+ * A stale result additionally carries `markStale` — true only once the age
+ * passes QUOTA_STALE_MARK_MS, i.e. when the renderer should add the literal
+ * `[stale]` marker instead of dimming alone (see the freshness contract
+ * above).
  * @param {object|null} cache
  * @param {number} [now]
- * @returns {{state: string, ageMs: number|null}}
+ * @returns {{state: string, ageMs: number|null, markStale: boolean}}
  */
 export function quotaAge(cache, now = Date.now()) {
   if (!cache || typeof cache.fetchedAt !== 'number' || !Number.isFinite(cache.fetchedAt)) {
-    return { state: QUOTA_AGE.EXPIRED, ageMs: null };
+    return { state: QUOTA_AGE.EXPIRED, ageMs: null, markStale: false };
   }
   const ageMs = now - cache.fetchedAt;
-  if (ageMs < -QUOTA_CLOCK_SKEW_MS) return { state: QUOTA_AGE.EXPIRED, ageMs };
+  if (ageMs < -QUOTA_CLOCK_SKEW_MS) {
+    return { state: QUOTA_AGE.EXPIRED, ageMs, markStale: false };
+  }
   const age = ageMs < 0 ? 0 : ageMs;
-  if (age <= QUOTA_TTL_MS) return { state: QUOTA_AGE.FRESH, ageMs };
-  if (age <= QUOTA_STALE_MAX_MS) return { state: QUOTA_AGE.STALE, ageMs };
-  return { state: QUOTA_AGE.EXPIRED, ageMs };
+  if (age <= QUOTA_TTL_MS) return { state: QUOTA_AGE.FRESH, ageMs, markStale: false };
+  if (age <= QUOTA_STALE_MAX_MS) {
+    return { state: QUOTA_AGE.STALE, ageMs, markStale: age > QUOTA_STALE_MARK_MS };
+  }
+  return { state: QUOTA_AGE.EXPIRED, ageMs, markStale: false };
 }
 
 /**

@@ -415,7 +415,10 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * so the renderer can label the head count "main+N" instead of letting it
  * pass as a pure subagent figure. A single active
  * agent keeps the hardened MIN_SAMPLES gate; an idle session falls back to
- * the last full-window median (flagged stale). `turnStartedAt` anchors the
+ * the last full-window median, which keeps the normal color for
+ * `SETTLE_LINGER_MS` past the last turn end (the settle grace shared with
+ * the frozen gen/compaction durations) and is flagged stale afterwards.
+ * `turnStartedAt` anchors the
  * live timer at the user's latest prompt — only user-initiated prompt records
  * (origin user/skill_activation/plugin_command, or pre-origin legacy rows)
  * move that anchor, so a tower run's task-notification turns never reset the
@@ -423,7 +426,10 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * subagent still generating (turn end is read from turn.ended, or the legacy
  * end_turn / active turn.cancel fallbacks). Once the cascade settles, the
  * frozen total surfaces as `genSettledMs` and holds the slot until the next
- * user prompt, unless a between-turns compaction closed later.
+ * user prompt, unless a between-turns compaction closed later. The settle
+ * instants (`genSettledAt` for the frozen gen span, `compactedAt` for the
+ * finished compaction) let the renderer hold the normal color through the
+ * settle grace before the frozen durations fade to the muted dim.
  * `compactingSince`/`compactionMs` mirror the full_compaction journal: a
  * begin without a close anchors the live compaction timer (expires after
  * SAMPLE_WINDOW_MS when the close record was lost), and the finished
@@ -438,7 +444,7 @@ function finishMetrics(state, statePath, stateChanged, now, agentNames = null) {
  * @param {number} [opts.deadline] absolute `performance.now()` deadline
  * @param {number} [opts.readBudgetBytes] total wire bytes allowed this frame
  * @param {string|null} [opts.hostVersion] Kimi Code version from the status-line payload
- * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, towerMode: boolean, cache: object|null, modelUsage: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, genSettledMs: number|null, compactingSince: number|null, compactionMs: number|null, tasks: {bash: number, agents: number}}}
+ * @returns {{tps: number|null, tpsStale: boolean, ttftMs: number|null, thinkingLevel: string|null, goal: object|null, modelAlias: string|null, swarmMode: boolean, towerMode: boolean, cache: object|null, modelUsage: object|null, tpsTotal: number|null, tpsAgents: number, activeAgents: number, mainActive: boolean, mainSpeed: boolean, turnStartedAt: number|null, genSettledMs: number|null, genSettledAt: number|null, compactingSince: number|null, compactionMs: number|null, compactedAt: number|null, tasks: {bash: number, agents: number}}}
  */
 export function getMetrics(sessionId, {
   sessionsRoot = SESSIONS_ROOT,
@@ -455,6 +461,7 @@ export function getMetrics(sessionId, {
     cache: null, modelUsage: null,
     tpsTotal: null, tpsAgents: 0, activeAgents: 0, mainActive: false, mainSpeed: false,
     turnStartedAt: null, compactingSince: null, compactionMs: null, genSettledMs: null,
+    genSettledAt: null, compactedAt: null,
     tasks: { bash: 0, agents: 0 },
   };
   try {
