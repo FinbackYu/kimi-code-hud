@@ -51,8 +51,9 @@ Usage:
   kimi-code-hud --doctor        read-only diagnostics: paths, install state,
                                 caches, refresh backoff (no network, no fixes)
   kimi-code-hud --doctor --share
-                                same report with personal paths masked for
-                                pasting into issues
+                                same report with personal paths replaced by
+                                logical labels and unknown absolute paths
+                                hidden — safe to paste into issues
   kimi-code-hud --clean-legacy-caches
                                 rewrite legacy session caches that may still
                                 hold wire content into the content-free

@@ -11,7 +11,8 @@
 // ages, failure categories, retry timing, file existence, and non-reversible
 // digests (quota contextKey, provider credential fingerprint) — the same
 // digests the on-disk state files already carry. Shareable mode additionally
-// masks personal path prefixes (~) so the report can be pasted into an issue.
+// rewrites paths under known roots to logical labels and hides every other
+// absolute path, so the report can be pasted into an issue.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -562,21 +563,59 @@ export function doctorExitCode(report) {
   return report.checks.some((c) => c.level === DOCTOR_LEVEL.WARN) ? 1 : 0;
 }
 
-/** Replace personal path prefixes so a report can be shared publicly. */
-function maskPath(value, { home, tmp }) {
-  if (typeof value !== 'string') return value;
-  for (const [prefix, replacement] of [[home, '~'], [tmp, '~tmp']]) {
-    if (prefix && (value === prefix || value.startsWith(prefix + path.sep))) {
-      return replacement + value.slice(prefix.length);
-    }
+// Share-mode path policy. Paths under a known root are rewritten to a logical
+// label ($KIMI_CODE_HOME/..., $KIMI_HUD_HOME/..., ~, ~tmp); any other absolute
+// path is hidden outright — a custom KIMI_CODE_HOME on a customer volume or a
+// project checkout must never reach a public issue verbatim. Local
+// (non-shareable) output is passed through untouched.
+const HIDDEN_PATH = '<absolute-path-hidden>';
+
+// Absolute-path tokens inside free text: POSIX-style (not part of a URL or a
+// larger word) and Windows drive-letter style.
+const POSIX_PATH_TOKEN_RE = /(?<![:/\w])\/[^\s'"`,;:)\]]*/g;
+const WINDOWS_PATH_TOKEN_RE = /\b[A-Za-z]:[\\/][^\s'"`,;:)\]]*/g;
+
+/** Known roots, longest first, so nested roots (kimi home under ~) win. */
+function shareRoots({ paths, home, tmp }) {
+  return [
+    [paths && paths.kimiHome, '$KIMI_CODE_HOME'],
+    [paths && paths.hudDir, '$KIMI_HUD_HOME'],
+    [home, '~'],
+    [tmp, '~tmp'],
+  ]
+    .filter(([prefix]) => typeof prefix === 'string' && prefix.length > 1)
+    .sort((a, b) => b[0].length - a[0].length);
+}
+
+function underRoot(value, prefix) {
+  return value === prefix
+    || value.startsWith(`${prefix}/`)
+    || value.startsWith(prefix + path.sep);
+}
+
+function redactPathValue(value, roots) {
+  if (typeof value !== 'string' || value === '') return value;
+  if (!value.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(value)) return value;
+  for (const [prefix, label] of roots) {
+    if (underRoot(value, prefix)) return label + value.slice(prefix.length);
   }
-  return value;
+  return HIDDEN_PATH;
+}
+
+function redactPathTokens(text, roots) {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(POSIX_PATH_TOKEN_RE, (token) => redactPathValue(token, roots))
+    .replace(WINDOWS_PATH_TOKEN_RE, (token) => redactPathValue(token, roots));
 }
 
 /**
  * Render the report as plain text. Every line stays free of session content,
- * tokens and config bodies in both modes; shareable mode additionally masks
- * personal path prefixes with `~` (and tmp roots with `~tmp`).
+ * tokens and config bodies in both modes. Shareable mode additionally rewrites
+ * paths under known roots to logical labels ($KIMI_CODE_HOME, $KIMI_HUD_HOME,
+ * ~, ~tmp) and hides every other absolute path as <absolute-path-hidden> —
+ * in `path` fields and inside free text (detail, hint) alike — so the report
+ * can be pasted into an issue.
  * @param {object} report result of collectDoctorReport
  * @param {object} [opts]
  * @param {boolean} [opts.shareable] mask personal paths for pasting into issues
@@ -589,7 +628,9 @@ export function formatDoctorReport(report, {
   home = os.homedir(),
   tmp = os.tmpdir(),
 } = {}) {
-  const mask = (value) => (shareable ? maskPath(value, { home, tmp }) : value);
+  const roots = shareable ? shareRoots({ paths: report.paths, home, tmp }) : [];
+  const mask = (value) => (shareable ? redactPathValue(value, roots) : value);
+  const maskText = (value) => (shareable ? redactPathTokens(value, roots) : value);
   const lines = [`kimi-code-hud doctor — read-only diagnostics`, ``];
   let section = null;
   for (const check of report.checks) {
@@ -597,9 +638,9 @@ export function formatDoctorReport(report, {
       section = check.section;
       lines.push(`${section}`);
     }
-    lines.push(`  [${check.level}] ${check.label}: ${check.detail}`);
+    lines.push(`  [${check.level}] ${check.label}: ${maskText(check.detail)}`);
     if (check.path) lines.push(`        path: ${mask(check.path)}`);
-    if (check.hint) lines.push(`        hint: ${check.hint}`);
+    if (check.hint) lines.push(`        hint: ${maskText(check.hint)}`);
   }
   const warnings = report.checks.filter((c) => c.level === DOCTOR_LEVEL.WARN).length;
   const notes = report.checks.filter((c) => c.level === DOCTOR_LEVEL.NOTE).length;
