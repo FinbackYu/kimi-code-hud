@@ -170,7 +170,11 @@ test('independent readers share branch and dirty results through the disk cache'
   assert.match(key, /^[a-f0-9]{64}$/);
   assert.doesNotMatch(rawCache, new RegExp(cwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.deepEqual(Object.keys(parsedCache.entries[key]).sort(), ['branch', 'checkedAt', 'dirty']);
-  assert.equal(fs.statSync(cachePath).mode & 0o777, 0o600);
+  // Windows models no POSIX permission bits and stats every writable file as
+  // 0o666, so the 0o600 evidence is only readable on POSIX.
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(cachePath).mode & 0o777, 0o600);
+  }
 
   now += 14_999;
   const secondReader = createGitStatusReader({
@@ -631,9 +635,16 @@ test('a symlink cachePath is atomically replaced without touching its target', (
     { branch: 'secured', dirty: false },
   );
   assert.equal(fs.readFileSync(targetPath, 'utf8'), 'target-content');
-  assert.equal(fs.statSync(targetPath).mode & 0o777, 0o644);
+  // Windows stats every writable file as 0o666 regardless of the chmod, so
+  // the untouched-mode evidence is only readable on POSIX; the byte-identical
+  // content above carries the not-recreated proof on every platform.
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(targetPath).mode & 0o777, 0o644);
+  }
   const cacheStat = fs.lstatSync(cachePath);
   assert.equal(cacheStat.isSymbolicLink(), false);
   assert.equal(cacheStat.isFile(), true);
-  assert.equal(cacheStat.mode & 0o777, 0o600);
+  if (process.platform !== 'win32') {
+    assert.equal(cacheStat.mode & 0o777, 0o600);
+  }
 });

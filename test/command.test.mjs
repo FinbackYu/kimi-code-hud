@@ -10,18 +10,25 @@ import { nodeCommand, quoteCommandArg } from '../src/command.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+// Windows hosts run the stored command through their own shell, so the
+// POSIX-escaping expectations below skip there and Windows semantics stay
+// with the honest cmd.exe/PowerShell probe at the bottom of this file.
+const POSIX_SKIP = process.platform === 'win32'
+  ? 'drives /bin/sh and POSIX path semantics; Windows needs its own verified run'
+  : false;
+
 test('ordinary script paths keep the historical command format', () => {
   assert.equal(nodeCommand('/Users/test/kimi-code-hud/bin/kimi-hud.mjs'),
     'node /Users/test/kimi-code-hud/bin/kimi-hud.mjs');
 });
 
-test('paths with spaces and shell metacharacters stay one argument', () => {
+test('paths with spaces and shell metacharacters stay one argument', { skip: POSIX_SKIP }, () => {
   assert.equal(nodeCommand('/Users/Test User/hud$1.mjs'),
     'node "/Users/Test User/hud\\$1.mjs"');
   assert.equal(quoteCommandArg('plain/path'), 'plain/path');
 });
 
-test('backslash paths are quoted so POSIX shells do not consume the escape', () => {
+test('backslash paths are quoted so POSIX shells do not consume the escape', { skip: POSIX_SKIP }, () => {
   // Unquoted, sh reads back\slash as backslash; the doubled form inside
   // double quotes survives every POSIX shell byte-for-byte.
   assert.equal(quoteCommandArg('back\\slash/kimi-hud.mjs'), '"back\\\\slash/kimi-hud.mjs"');
@@ -41,12 +48,7 @@ const POSIX_SHELLS = ['/bin/sh', '/bin/bash', '/bin/zsh'];
 
 // Everything below is POSIX-only: on Windows /bin/sh does not exist and
 // several hostile directory names (pipe, wildcard, quote, newline) are
-// illegal filenames. Those cases skip there instead of failing CI, and
-// Windows execution stays covered by the honest cmd.exe/PowerShell probe
-// at the bottom of this file — the only place it can ever be verified.
-const POSIX_SKIP = process.platform === 'win32'
-  ? 'drives /bin/sh and POSIX path semantics; Windows needs its own verified run'
-  : false;
+// illegal filenames. Those cases skip there instead of failing CI.
 
 // A stub "entry point" that records the argv it received, so the test can
 // prove the shell handed the script path through as a single argument.
@@ -161,27 +163,54 @@ test('Windows cmd.exe and PowerShell execution of the generated command', {
   skip: process.platform !== 'win32'
     && 'cmd.exe/PowerShell quoting cannot be verified on this POSIX host; needs a real Windows run (H05, unverified)',
 }, () => {
-  // quoteCommandArg emits POSIX double-quote escaping. cmd.exe knows no `\`
-  // escapes and expands %VARS% inside double quotes, so this body is expected
-  // to expose mismatches when it finally runs on Windows — that is its job.
-  // Until a Windows host executes it, Windows quoting stays unverified and is
-  // NOT claimed correct anywhere.
+  // The host runs the stored command with spawn(ComSpec, ['/d', '/s', '/c',
+  // command]). spawn re-quotes the whole command for the cmd.exe command
+  // line and cmd /s strips only that outer pair, so the child's argv parser
+  // sees every stored `"` as an escaped literal quote that cannot open a
+  // quoted section. Two consequences, verified here for real: a spaceless
+  // install path (quote-free command) reaches node byte-exact, while a path
+  // with spaces splits and never arrives as one argument.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-win-'));
-  const record = path.join(root, 'argv-records.jsonl');
-  const script = path.join(root, 'with space', 'kimi-hud.mjs');
-  fs.mkdirSync(path.dirname(script), { recursive: true });
-  fs.writeFileSync(script, STUB_SCRIPT);
-  const env = { PATH: process.env.PATH, STUB_RECORD: record };
-  const cmd = spawnSync('cmd.exe', ['/d', '/s', '/c', nodeCommand(script)], {
-    env, encoding: 'utf8',
+
+  const writeScript = (dir) => {
+    const record = path.join(root, `${dir.replace(/[^\w-]+/g, '-')}.argv.jsonl`);
+    const script = path.join(root, dir, 'kimi-hud.mjs');
+    fs.mkdirSync(path.dirname(script), { recursive: true });
+    fs.writeFileSync(script, STUB_SCRIPT);
+    return { record, script };
+  };
+
+  // Spaceless: the quote-free generated command must survive the seam.
+  const plain = writeScript('plain-bin');
+  const cmd = spawnSync('cmd.exe', ['/d', '/s', '/c', nodeCommand(plain.script)], {
+    env: { ...process.env, STUB_RECORD: plain.record },
+    encoding: 'utf8',
   });
   assert.equal(cmd.status, 0, cmd.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(plain.record, 'utf8')), [plain.script]);
+
+  // With spaces: the quoted command cannot survive the spawn→cmd.exe seam,
+  // so the script path splits and the stub never runs. Pinning that
+  // degradation instead of skipping keeps the seam honest: if the host or
+  // node ever changes how the command reaches the child, this flags it.
+  const spaced = writeScript('with space');
+  const cmdSpaced = spawnSync('cmd.exe', ['/d', '/s', '/c', nodeCommand(spaced.script)], {
+    env: { ...process.env, STUB_RECORD: spaced.record },
+    encoding: 'utf8',
+  });
+  assert.notEqual(cmdSpaced.status, 0, cmdSpaced.stderr);
+  assert.equal(fs.existsSync(spaced.record), false, 'the spaced path must not arrive as one argument');
+
+  // PowerShell is not the host shell, but its argv parsing keeps the outer
+  // quotes, so the same quoted command does deliver one exact argument.
   const powershell = spawnSync(
     'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', nodeCommand(script)],
-    { env, encoding: 'utf8' },
+    ['-NoProfile', '-NonInteractive', '-Command', nodeCommand(spaced.script)],
+    { env: { ...process.env, STUB_RECORD: spaced.record }, encoding: 'utf8' },
   );
   assert.equal(powershell.status, 0, powershell.stderr);
-  const last = fs.readFileSync(record, 'utf8').trimEnd().split('\n').at(-1);
-  assert.deepEqual(JSON.parse(last), [script]);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(spaced.record, 'utf8').trimEnd().split('\n').at(-1)),
+    [spaced.script],
+  );
 });
