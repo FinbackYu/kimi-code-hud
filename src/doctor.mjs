@@ -80,12 +80,15 @@ function readTextFile(filePath) {
   try {
     return { state: 'ok', text: fs.readFileSync(filePath, 'utf8') };
   } catch (err) {
-    // An unreachable UNC server surfaces on Windows as a code-less UNKNOWN
-    // error (libuv has no errno name for the network failure). The path is
-    // not a broken local file but simply unreachable, so it is classified
+    // An unreachable UNC server surfaces on Windows as libuv's UNKNOWN error
+    // (observed on a real CI run: statSync reports ENOENT for the same path
+    // while the open fails without a network-specific errno name). The path
+    // is not a broken local file but simply unreachable, so it is classified
     // like absence instead of raising a false "cannot be read" warning.
     return {
-      state: !err || !err.code || err.code === 'ENOENT' ? 'missing' : 'unreadable',
+      state: !err || !err.code || err.code === 'ENOENT' || err.code === 'UNKNOWN'
+        ? 'missing'
+        : 'unreadable',
       text: null,
     };
   }

@@ -18,7 +18,10 @@
 export function quoteCommandArg(value) {
   const text = String(value);
   if (process.platform === 'win32') {
-    if (/^[A-Za-z0-9_@%+=:,./\\-]+$/.test(text)) return text;
+    // `~` is a plain filename character for cmd.exe (no tilde expansion) and
+    // occurs in 8.3 short names like RUNNER~1, so it must reach the unquoted
+    // fast path there.
+    if (/^[A-Za-z0-9_@%+=:,./\\~-]+$/.test(text)) return text;
     return `"${text}"`;
   }
   // A backslash must never reach the unquoted fast path: unquoted, a POSIX

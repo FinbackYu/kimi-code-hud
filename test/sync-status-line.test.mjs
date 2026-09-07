@@ -37,7 +37,9 @@ function runHook(env) {
 // Windows path, so the quotes wrap the path unescaped there.
 function expectedStatusLine(pluginRoot) {
   const script = path.join(pluginRoot, 'bin', 'kimi-hud.mjs');
-  const safe = /^[A-Za-z0-9_@%+=:,./\\-]+$/;
+  // Mirrors src/command.mjs's per-platform unquoted fast path: the Windows
+  // set adds the native separator and 8.3 short names' `~`.
+  const safe = /^[A-Za-z0-9_@%+=:,./\\~-]+$/;
   const posixSafe = /^[A-Za-z0-9_@%+=:,./-]+$/;
   const needsQuotes = process.platform === 'win32'
     ? !safe.test(script)
