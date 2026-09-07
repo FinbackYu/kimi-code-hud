@@ -12,7 +12,8 @@
 // digests (quota contextKey, provider credential fingerprint) — the same
 // digests the on-disk state files already carry. Shareable mode additionally
 // rewrites paths under known roots to logical labels and hides every other
-// absolute path, so the report can be pasted into an issue.
+// absolute path (POSIX, drive-letter, Windows UNC and \\?\ extended forms),
+// so the report can be pasted into an issue.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -571,14 +572,39 @@ export function doctorExitCode(report) {
 // Share-mode path policy. Paths under a known root are rewritten to a logical
 // label ($KIMI_CODE_HOME/..., $KIMI_HUD_HOME/..., ~, ~tmp); any other absolute
 // path is hidden outright — a custom KIMI_CODE_HOME on a customer volume or a
-// project checkout must never reach a public issue verbatim. Local
+// project checkout must never reach a public issue verbatim. Absolute covers
+// the POSIX and Windows drive-letter shapes plus Windows UNC
+// (\\server\share\...) and the extended-length \\?\... device forms. Local
 // (non-shareable) output is passed through untouched.
 const HIDDEN_PATH = '<absolute-path-hidden>';
 
-// Absolute-path tokens inside free text: POSIX-style (not part of a URL or a
-// larger word) and Windows drive-letter style.
+// UNC recognition: \\server\share (server and share both non-empty) and the
+// extended-length device forms \\?\C:\... / \\?\UNC\server\share\...
+const UNC_PATH_RE = /^\\\\(?:\?\\|[^\\]+\\[^\\])/;
+
+// Absolute-path tokens inside free text: UNC (matched first so a UNC-shaped
+// token is consumed whole), Windows drive-letter style, and POSIX-style (not
+// part of a URL or a larger word). The UNC alternatives after `\\` are, in
+// order: the extended drive form \\?\C:\... (its colon is consumed
+// explicitly — the classes below stop at `:` to keep https: out), the other
+// \\?\ device forms, and plain \\server\share\.... The classes stop at
+// whitespace, quotes/backticks and closers (,;:)] — but keep dots and
+// separators, which occur inside path components, so punctuation glued to a
+// token is redacted together with it.
 const POSIX_PATH_TOKEN_RE = /(?<![:/\w])\/[^\s'"`,;:)\]]*/g;
 const WINDOWS_PATH_TOKEN_RE = /\b[A-Za-z]:[\\/][^\s'"`,;:)\]]*/g;
+const UNC_PATH_TOKEN_RE = /(?<!\\)\\\\(?:\?\\[A-Za-z]:[\\/][^\s'"`,;:)\]]*(?:\\[^\\\s'"`,;:)\]]*)*|\?\\[^\\\s'"`,;:)\]]*(?:\\[^\\\s'"`,;:)\]]*)*|[^\\\s'"`,;:)\]]*(?:\\[^\\\s'"`,;:)\]]*)*)/g;
+
+// Strip the \\?\ device prefixes: `\\?\C:\x` and `\\?\UNC\server\share\x`
+// compare as their plain drive/UNC equivalents. `skip` is how many characters
+// of the original string the plain form's head does not account for: 4 for
+// the `\\?\` marker, 6 for `?\UNC\` (the plain UNC's leading `\\` maps onto
+// the original's own first two backslashes).
+function plainWindowsForm(value) {
+  if (value.startsWith('\\\\?\\UNC\\')) return { skip: 6, text: `\\\\${value.slice(8)}` };
+  if (value.startsWith('\\\\?\\')) return { skip: 4, text: value.slice(4) };
+  return { skip: 0, text: value };
+}
 
 /** Known roots, longest first, so nested roots (kimi home under ~) win. */
 function shareRoots({ paths, home, tmp }) {
@@ -589,20 +615,41 @@ function shareRoots({ paths, home, tmp }) {
     [tmp, '~tmp'],
   ]
     .filter(([prefix]) => typeof prefix === 'string' && prefix.length > 1)
-    .sort((a, b) => b[0].length - a[0].length);
+    .sort((a, b) => plainWindowsForm(b[0]).text.length - plainWindowsForm(a[0]).text.length);
 }
 
-function underRoot(value, prefix) {
-  return value === prefix
-    || value.startsWith(`${prefix}/`)
-    || value.startsWith(prefix + path.sep);
+/**
+ * Remainder of `value` after its `prefix`-shaped head, or null when `value` is
+ * neither the prefix itself nor under it. Windows-flavored roots (drive
+ * letters, UNC) match either separator, fold case, and accept the
+ * extended-length forms of both sides; POSIX roots stay verbatim.
+ */
+function remainderUnder(value, prefix) {
+  if (!(/^[A-Za-z]:/.test(prefix) || prefix.startsWith('\\\\'))) {
+    if (value === prefix) return '';
+    if (value.startsWith(`${prefix}/`) || value.startsWith(prefix + path.sep)) {
+      return value.slice(prefix.length);
+    }
+    return null;
+  }
+  const v = plainWindowsForm(value);
+  const p = plainWindowsForm(prefix);
+  const head = p.text.toLowerCase();
+  const body = v.text.toLowerCase();
+  if (body !== head && !body.startsWith(`${head}/`) && !body.startsWith(`${head}\\`)) {
+    return null;
+  }
+  return value.slice(v.skip + p.text.length);
 }
 
 function redactPathValue(value, roots) {
   if (typeof value !== 'string' || value === '') return value;
-  if (!value.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(value)) return value;
+  if (!value.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(value) && !UNC_PATH_RE.test(value)) {
+    return value;
+  }
   for (const [prefix, label] of roots) {
-    if (underRoot(value, prefix)) return label + value.slice(prefix.length);
+    const remainder = remainderUnder(value, prefix);
+    if (remainder !== null) return label + remainder;
   }
   return HIDDEN_PATH;
 }
@@ -610,8 +657,9 @@ function redactPathValue(value, roots) {
 function redactPathTokens(text, roots) {
   if (typeof text !== 'string') return text;
   return text
-    .replace(POSIX_PATH_TOKEN_RE, (token) => redactPathValue(token, roots))
-    .replace(WINDOWS_PATH_TOKEN_RE, (token) => redactPathValue(token, roots));
+    .replace(UNC_PATH_TOKEN_RE, (token) => redactPathValue(token, roots))
+    .replace(WINDOWS_PATH_TOKEN_RE, (token) => redactPathValue(token, roots))
+    .replace(POSIX_PATH_TOKEN_RE, (token) => redactPathValue(token, roots));
 }
 
 /**
@@ -619,8 +667,9 @@ function redactPathTokens(text, roots) {
  * tokens and config bodies in both modes. Shareable mode additionally rewrites
  * paths under known roots to logical labels ($KIMI_CODE_HOME, $KIMI_HUD_HOME,
  * ~, ~tmp) and hides every other absolute path as <absolute-path-hidden> —
- * in `path` fields and inside free text (detail, hint) alike — so the report
- * can be pasted into an issue.
+ * POSIX, drive-letter, UNC and \\?\ extended shapes, in `path` fields and
+ * inside free text (detail, hint) alike — so the report can be pasted into an
+ * issue.
  * @param {object} report result of collectDoctorReport
  * @param {object} [opts]
  * @param {boolean} [opts.shareable] mask personal paths for pasting into issues
