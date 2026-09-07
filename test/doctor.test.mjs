@@ -503,9 +503,72 @@ test('shareable output masks personal paths; local output shows them', () => {
   const share = formatDoctorReport(report, { shareable: true });
   assert.match(local, new RegExp(`path: ${env.paths.quotaCachePath}`));
   assert.equal(share.includes(env.root), false, 'shareable output must not contain the tmp root');
-  assert.match(share, /path: ~tmp\//);
+  // Paths under the known roots are rewritten to logical labels.
+  assert.match(share, /path: \$KIMI_HUD_HOME\/quota\.json/);
+  assert.match(share, /path: \$KIMI_CODE_HOME/);
   // The context digest is a non-reversible summary and stays visible.
   assert.match(share, new RegExp(`context ${currentContextKey(env.kimiHome)}`));
+});
+
+test('share mode hides custom roots like /Volumes/PrivateCustomer; local keeps them readable', () => {
+  const privateRoot = '/Volumes/PrivateCustomer/Project/Kimi';
+  const paths = resolveRuntimePaths({
+    env: {
+      KIMI_CODE_HOME: `${privateRoot}/.kimi-code`,
+      KIMI_HUD_HOME: `${privateRoot}/.kimi-code-hud`,
+      KIMI_HUD_TUI_TOML: '/etc/kimi-hud-doctor-fixture/tui.toml',
+      KIMI_HUD_CONFIG_TOML: `${privateRoot}/.kimi-code/config.toml`,
+    },
+  });
+  const report = collectDoctorReport({ paths, env: {}, scriptPath: SCRIPT, now: NOW });
+  const local = formatDoctorReport(report);
+  const share = formatDoctorReport(report, { shareable: true });
+  assert.match(local, new RegExp(`path: ${privateRoot}/\\.kimi-code`));
+  assert.match(local, /path: \/etc\/kimi-hud-doctor-fixture\/tui\.toml/);
+  for (const secret of ['/Volumes/PrivateCustomer', '/etc/kimi-hud-doctor-fixture']) {
+    assert.equal(share.includes(secret), false, `shareable output leaked: ${secret}`);
+  }
+  assert.match(share, /path: \$KIMI_CODE_HOME/);
+  assert.match(share, /path: \$KIMI_HUD_HOME/);
+  assert.match(share, /path: <absolute-path-hidden>/);
+});
+
+test('share mode redacts absolute paths in free text; local keeps them', () => {
+  const report = {
+    now: NOW,
+    paths: null,
+    checks: [{
+      section: 'install',
+      level: 'warn',
+      label: 'status line',
+      detail: 'a third-party status line occupies the slot '
+        + '(command: bash /Volumes/PrivateCustomer/Project/Kimi/other-hud.sh)',
+      hint: 'run `kimi-code-hud --install` to replace it (a .bak backup is kept)',
+    }],
+  };
+  const local = formatDoctorReport(report);
+  const share = formatDoctorReport(report, { shareable: true });
+  assert.match(local, /\/Volumes\/PrivateCustomer\/Project\/Kimi\/other-hud\.sh/);
+  assert.equal(share.includes('/Volumes/PrivateCustomer'), false, 'share leaked the foreign command path');
+  assert.match(share, /bash <absolute-path-hidden>\)/);
+  assert.match(share, /run `kimi-code-hud --install` to replace it/);
+
+  const known = {
+    now: NOW,
+    paths: { kimiHome: '/Volumes/PrivateCustomer/Project/Kimi/.kimi-code' },
+    checks: [{
+      section: 'install',
+      level: 'warn',
+      label: 'status line',
+      detail: 'installed, but pointing at a different kimi-hud copy: node '
+        + '/Volumes/PrivateCustomer/Project/Kimi/.kimi-code/other/bin/kimi-hud.mjs and C:\\Private\\hud.js',
+    }],
+  };
+  const knownShare = formatDoctorReport(known, { shareable: true });
+  assert.equal(knownShare.includes('/Volumes/PrivateCustomer'), false);
+  assert.match(knownShare, /node \$KIMI_CODE_HOME\/other\/bin\/kimi-hud\.mjs/);
+  assert.equal(knownShare.includes('C:\\Private'), false);
+  assert.match(knownShare, /<absolute-path-hidden>/);
 });
 
 test('collection is strictly read-only: the state tree is byte-identical after', () => {
@@ -608,7 +671,8 @@ test('bin --doctor --share masks personal paths', () => {
   });
   assert.equal(result.status, 0);
   assert.equal(result.stdout.includes(env.root), false);
-  assert.match(result.stdout, /path: ~tmp\//);
+  assert.match(result.stdout, /path: \$KIMI_HUD_HOME\//);
+  assert.match(result.stdout, /path: \$KIMI_CODE_HOME/);
 });
 
 test('bin --help documents the doctor entry point', () => {
