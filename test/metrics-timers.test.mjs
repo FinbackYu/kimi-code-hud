@@ -156,6 +156,7 @@ test('getMetrics never lets task/system prompts re-anchor the user clock (tower 
   assert.equal(m.activeAgents, 0);
   assert.equal(m.turnStartedAt, null);
   assert.equal(m.genSettledMs, 55_000);
+  assert.equal(m.genSettledAt, EVENT_TIME + 55_000);
 });
 
 test('getMetrics freezes the settled gen total until the next user prompt', () => {
@@ -170,6 +171,7 @@ test('getMetrics freezes the settled gen total until the next user prompt', () =
   let m = getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME + 30_000 });
   assert.equal(m.turnStartedAt, null);
   assert.equal(m.genSettledMs, 5000);
+  assert.equal(m.genSettledAt, EVENT_TIME + 5000);
 
   // A task-origin notification alone neither revives nor re-anchors the
   // clock: its open turn anchors at the last USER prompt, and once it ends
@@ -181,6 +183,7 @@ test('getMetrics freezes the settled gen total until the next user prompt', () =
   );
   m = getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME + 46_000 });
   assert.equal(m.genSettledMs, 45_000);
+  assert.equal(m.genSettledAt, EVENT_TIME + 45_000);
 
   // The next user prompt re-anchors and hands the slot back to the live timer.
   fs.appendFileSync(wirePath, turnPrompt('next', EVENT_TIME + 50_000) + '\n');
@@ -201,7 +204,9 @@ test('a compaction closed after the final turn end takes the slot over genSettle
   );
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.compactionMs, 30_000);
+  assert.equal(m.compactedAt, EVENT_TIME + 50_000);
   assert.equal(m.genSettledMs, null);
+  assert.equal(m.genSettledAt, null);
 });
 
 test('applyTurnRow moves the user clock only for user-initiated prompt origins', () => {
@@ -248,6 +253,54 @@ test('summarizeMetrics keeps the legacy reading when no user anchor exists yet',
   m = summarizeMetrics(state, { now: FRESH_NOW }).metrics;
   assert.equal(m.turnStartedAt, null);
   assert.equal(m.genSettledMs, null);
+});
+
+test('summarizeMetrics exposes the settle instants behind the frozen figures', () => {
+  const state = makeState();
+  state.agents.main = {
+    ...emptyAgent(),
+    lastUserPromptAt: EVENT_TIME,
+    lastTurnPromptAt: EVENT_TIME,
+    lastTurnEndAt: EVENT_TIME + 5_000,
+  };
+  let m = summarizeMetrics(state, { now: EVENT_TIME + 6_000 }).metrics;
+  assert.equal(m.genSettledMs, 5_000);
+  assert.equal(m.genSettledAt, EVENT_TIME + 5_000);
+
+  // A compaction closing after the turn end takes the slot and carries its
+  // own settle instant; the gen span disappears entirely.
+  state.agents.main.lastCompactionBeginAt = EVENT_TIME + 10_000;
+  state.agents.main.lastCompactionEndAt = EVENT_TIME + 20_000;
+  state.agents.main.lastCompactionMs = 10_000;
+  m = summarizeMetrics(state, { now: EVENT_TIME + 21_000 }).metrics;
+  assert.equal(m.genSettledMs, null);
+  assert.equal(m.genSettledAt, null);
+  assert.equal(m.compactionMs, 10_000);
+  assert.equal(m.compactedAt, EVENT_TIME + 20_000);
+});
+
+test('summarizeMetrics holds the idle-median dim only through the settle grace', () => {
+  const state = makeState();
+  state.agents.main = {
+    ...emptyAgent(),
+    lastMedian: 50,
+    lastTurnEndAt: EVENT_TIME + 40_000,
+  };
+  // =SETTLE_LINGER_MS past the turn end: the figure the user just watched
+  // keeps the normal color.
+  let m = summarizeMetrics(state, { now: EVENT_TIME + 100_000 }).metrics;
+  assert.equal(m.activeAgents, 0);
+  assert.equal(m.tps, 50);
+  assert.equal(m.tpsStale, false);
+  // One tick past: back to the muted stale reading.
+  m = summarizeMetrics(state, { now: EVENT_TIME + 100_001 }).metrics;
+  assert.equal(m.tps, 50);
+  assert.equal(m.tpsStale, true);
+  // No turn end (state predating the journal) means no grace.
+  state.agents.main.lastTurnEndAt = null;
+  m = summarizeMetrics(state, { now: EVENT_TIME + 40_001 }).metrics;
+  assert.equal(m.tps, 50);
+  assert.equal(m.tpsStale, true);
 });
 
 test('processWireChunk tracks the compaction timer (main agent only)', () => {
@@ -336,6 +389,7 @@ test('getMetrics keeps the finished compaction duration until the next prompt', 
   let m = getMetrics(id, opts);
   assert.equal(m.compactingSince, null);
   assert.equal(m.compactionMs, 30_000);
+  assert.equal(m.compactedAt, EVENT_TIME + 30_000);
   // A new prompt takes over the slot; the stale duration drops out.
   fs.appendFileSync(wirePath, turnPrompt('next', EVENT_TIME + 40_000) + '\n');
   m = getMetrics(id, opts);

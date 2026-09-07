@@ -401,7 +401,9 @@ export function collectDoctorReport({
     let detail;
     if (age.state === QUOTA_AGE.FRESH) detail = `fresh, age ${formatDuration(age.ageMs)}`;
     else if (age.state === QUOTA_AGE.STALE) {
-      detail = `stale, age ${formatDuration(age.ageMs)} — rendered dimmed with a [stale] marker`;
+      detail = age.markStale === true
+        ? `stale, age ${formatDuration(age.ageMs)} — rendered dimmed with a [stale] marker`
+        : `stale, age ${formatDuration(age.ageMs)} — rendered dimmed, gains the [stale] marker after 1h`;
     } else if (age.ageMs !== null && age.ageMs < 0) {
       detail = 'timestamp ahead of the clock — treated as expired, figures hidden';
     } else {

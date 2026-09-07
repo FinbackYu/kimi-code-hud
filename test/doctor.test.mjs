@@ -196,6 +196,16 @@ test('stale and expired quota caches are categorized without warnings', () => {
   assert.match(staleCheck.detail, /stale, age 2h 00m — rendered dimmed with a \[stale\] marker/);
   assert.equal(doctorExitCode(staleReport), 0);
 
+  // Aging tier: past the 60s TTL but inside the one-hour mark — dimmed
+  // without the marker yet.
+  const aging = makeEnv();
+  seedQuotaCache(aging.paths, aging.kimiHome, { ageMs: 5 * 60 * 1000 });
+  const { report: agingReport } = collect(aging);
+  const agingCheck = one(agingReport, 'quota', 'cache');
+  assert.equal(agingCheck.level, 'note');
+  assert.match(agingCheck.detail, /stale, age 5m 00s — rendered dimmed, gains the \[stale\] marker after 1h/);
+  assert.equal(doctorExitCode(agingReport), 0);
+
   const expired = makeEnv();
   seedQuotaCache(expired.paths, expired.kimiHome, { ageMs: 8 * 24 * 60 * 60 * 1000 });
   const { report: expiredReport } = collect(expired);
