@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { atomicWriteFile } from './fs-store.mjs';
 import { HUD_DIR } from './paths.mjs';
@@ -19,8 +20,24 @@ export { CONFIG_TOML_PATH };
  * a session that never switched effort in-session would follow whatever
  * other sessions later wrote into config.toml. So the first resolved level
  * is pinned per sessionId under ~/.kimi-code-hud/sessions/thinking-<sessionId>.json,
- * with `confirmed` recording the provenance: true when the level came from
- * the wire journal, false while it is only inferred from config.toml.
+ * with two provenance fields:
+ *  - `confirmed` records whether the level is wire-verified (the journal, or
+ *    a snapshot pinned from it); everything resolved from config.toml is
+ *    provisional and renders muted until a wire row confirms it. Even an
+ *    explicit `[thinking]` key stays provisional: the host does not persist
+ *    the top effort tier, so config can silently lag the current choice and
+ *    the HUD cannot tell a fresh config from a stale one.
+ *  - `configBasis` is a digest of exactly the config.toml tables a level was
+ *    resolved from ([thinking] plus the matched model table); it is `null`
+ *    on wire-pinned snapshots. A config-derived snapshot is only as
+ *    authoritative as the config it came from, so a basis change re-resolves
+ *    instead of shadowing the edit — including same-model effort edits.
+ *    Wire-pinned snapshots are this session's own ground truth and are never
+ *    re-resolved by config edits; that immunity is the reason the snapshot
+ *    exists. The accepted trade-off: a session still in its lazy-start
+ *    window (config-derived only) follows live config.toml, so another
+ *    session's `/effort` rewrite moves its badge too — the only signal
+ *    available before the first wire row pins the real runtime effort.
  * Snapshots written before the flag existed carry no `confirmed` key and
  * are treated as confirmed, preserving their pre-existing rendering.
  */
@@ -32,13 +49,27 @@ function readSnapshot(snapshotFile) {
   return null;
 }
 
-function writeSnapshot(snapshotFile, level, model, confirmed) {
+function writeSnapshot(snapshotFile, level, model, confirmed, configBasis) {
   try {
     atomicWriteFile(
       snapshotFile,
-      JSON.stringify({ level, model, confirmed }),
+      JSON.stringify({ level, model, confirmed, configBasis }),
     );
   } catch { /* best effort */ }
+}
+
+/**
+ * Digest of the config tables a resolution read. Not a secret — a staleness
+ * tag like the quota cache's context key — so the whole snapshot stays small
+ * and free of config text. A null `thinking`/`modelTable` (absent table)
+ * hashes as the empty string, and the separator keeps distinct table pairs
+ * from colliding; a missing config file never reaches here (empty basis).
+ */
+const BASIS_SEPARATOR = '\n@@hud-config-basis@@\n';
+function configBasis(thinking, modelTable) {
+  return createHash('sha256')
+    .update(`${thinking ?? ''}${BASIS_SEPARATOR}${modelTable ?? ''}`)
+    .digest('hex');
 }
 
 /**
@@ -47,9 +78,16 @@ function writeSnapshot(snapshotFile, level, model, confirmed) {
  * (defaultThinkingEffortFor / resolveThinkingEffort): a model whose table
  * explicitly declares capabilities without thinking resolves to 'off', and
  * an always_thinking model can never resolve to 'off'.
+ *
+ * Returns `{ level, basis }`. Every level resolved here is provisional by
+ * definition — including an explicit `[thinking].effort`, because the host
+ * does not persist the top effort tier and a merge can leave a stale value
+ * behind, so config.toml is never proof of the current choice. `basis`
+ * digests the config tables behind the answer for snapshot staleness
+ * checks.
  * @param {string} model payload model display string
  * @param {string} configPath
- * @returns {string}
+ * @returns {{ level: string, basis: string }}
  */
 function resolveFromConfig(model, configPath, configText = undefined) {
   let text = '';
@@ -59,12 +97,13 @@ function resolveFromConfig(model, configPath, configText = undefined) {
     try {
       text = fs.readFileSync(configPath, 'utf8');
     } catch {
-      return 'on'; // host default: thinking enabled
+      return { level: 'on', basis: '' }; // host default: thinking enabled
     }
   }
 
   const thinking = tableText(text, 'thinking');
   const modelTable = findModelTable(text, model);
+  const basis = configBasis(thinking, modelTable);
   const caps = modelTable !== null ? stringArrayValue(modelTable, 'capabilities') : null;
   const alwaysThinking = caps !== null && caps.includes('always_thinking');
   const thinkingCapable = alwaysThinking
@@ -73,7 +112,9 @@ function resolveFromConfig(model, configPath, configText = undefined) {
 
   // Host: [thinking] enabled=false forces off — except on always_thinking
   // models, where an off state would be a lie (upstream keeps reasoning).
-  if (thinking !== null && boolValue(thinking, 'enabled') === false && !alwaysThinking) return 'off';
+  if (thinking !== null && boolValue(thinking, 'enabled') === false && !alwaysThinking) {
+    return { level: 'off', basis };
+  }
 
   const globalEffort = thinking !== null ? stringValue(thinking, 'effort') : null;
   const hasEfforts = modelTable !== null && /^\s*support_efforts\s*=/m.test(modelTable);
@@ -81,16 +122,19 @@ function resolveFromConfig(model, configPath, configText = undefined) {
     // Explicit capabilities without thinking resolve to 'off' upstream; a
     // configured global effort still shows on compatible (non-kimi)
     // protocols, which pass the value through to the backend.
-    if (caps !== null && !thinkingCapable) return globalEffort ? 'on' : 'off';
-    return 'on'; // boolean model (or no declared capabilities) -> plain " thinking"
+    if (caps !== null && !thinkingCapable) return { level: globalEffort ? 'on' : 'off', basis };
+    return { level: 'on', basis }; // boolean model (or no declared capabilities) -> plain " thinking"
   }
 
   const modelDefault = modelTable !== null ? stringValue(modelTable, 'default_effort') : null;
   if (alwaysThinking) {
     // Skip 'off' values and fall back to the model's own default.
-    return (globalEffort && globalEffort !== 'off' ? globalEffort : null) ?? modelDefault ?? 'on';
+    return {
+      level: (globalEffort && globalEffort !== 'off' ? globalEffort : null) ?? modelDefault ?? 'on',
+      basis,
+    };
   }
-  return globalEffort ?? modelDefault ?? 'on';
+  return { level: globalEffort ?? modelDefault ?? 'on', basis };
 }
 
 /**
@@ -136,19 +180,37 @@ export function resolveThinkingLevel({
     : null;
   if (typeof sessionLevel === 'string' && sessionLevel.length > 0) {
     if (snapshotFile && canUseSnapshot()) {
-      writeSnapshot(snapshotFile, sessionLevel, model, true);
+      writeSnapshot(snapshotFile, sessionLevel, model, true, null);
     }
     return { level: sessionLevel, confirmed: true };
   }
-  if (snapshotFile && canUseSnapshot()) {
-    const snap = readSnapshot(snapshotFile);
-    // Snapshots predate the confirmed flag: treat a missing flag as
-    // confirmed so long-running sessions keep their previous rendering.
-    if (snap && snap.model === model) {
-      return { level: snap.level, confirmed: snap.confirmed !== false };
-    }
+  const snap = snapshotFile && canUseSnapshot() ? readSnapshot(snapshotFile) : null;
+  // Snapshots predate the confirmed flag: treat a missing flag as confirmed
+  // so long-running sessions keep their previous rendering. Wire-pinned
+  // snapshots (no configBasis) are this session's ground truth and stay
+  // pinned no matter what other sessions write into config.toml — that
+  // immunity is the reason the snapshot exists.
+  if (
+    snap && snap.model === model
+    && typeof snap.configBasis !== 'string'
+    && snap.confirmed !== false
+  ) {
+    return { level: snap.level, confirmed: true };
   }
-  const level = resolveFromConfig(model, configPath, configText);
-  if (snapshotFile && canUseSnapshot()) writeSnapshot(snapshotFile, level, model, false);
-  return { level, confirmed: false };
+  const resolved = resolveFromConfig(model, configPath, configText);
+  // A config-derived snapshot is only as good as the config it was resolved
+  // from: with the same model and an unchanged config basis, the pinned
+  // level is deterministically what a re-resolution would produce, so it is
+  // reused without rewriting the file; any basis change — a same-model
+  // effort edit included — re-resolves and rewrites instead of shadowing
+  // the edit. Config-provenance snapshots are always provisional, and
+  // pre-basis snapshots pinned with confirmed:false fail this check once
+  // (undefined never equals the digest) and upgrade themselves.
+  if (snap && snap.model === model && snap.configBasis === resolved.basis) {
+    return { level: snap.level, confirmed: false };
+  }
+  if (snapshotFile && canUseSnapshot()) {
+    writeSnapshot(snapshotFile, resolved.level, model, false, resolved.basis);
+  }
+  return { level: resolved.level, confirmed: false };
 }

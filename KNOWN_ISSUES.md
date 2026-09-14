@@ -1,6 +1,6 @@
 # Known issues
 
-- Last verified: 2026-09-05
+- Last verified: 2026-09-14
 - HUD behavior baseline: `v0.8.2` (`ae66403`)
 - Kimi Code baseline: `0.41.0` (`95478e8c7ba248fd2470d5bb151555ec7fedd19d`)
 
@@ -122,37 +122,66 @@ Acceptance criteria for closing as a HUD problem:
   contract test;
 - README instructions remain consistent with the observed runner behavior.
 
-## KI-5: In-session effort switches are invisible to the status line
+## KI-5: Lazy-start effort follows config.toml, where the top effort tier is never persisted
 
-Status: open upstream API gap
+Status: open upstream API gap (narrowed 2026-09-14: the in-session-switch half
+recorded here against 0.34.0 is obsolete — 0.41.0 journals those switches)
 
 Affected upstream slot: `model` / status-line payload
 
-The built-in footer follows an in-session effort switch instantly because it
-renders the host's in-memory session state (`state.thinkingEffort`, updated by
-the model picker via `session.setThinking` → `getStatus` → `setAppState`). The
-custom status line cannot: `StatusLinePayload` (10 fields) carries no
-thinking-effort field, and the wire journal records effort only in
-`profile.bind` (session start) and `llm.request` (per request) — the switch
-itself emits no local event (only an ACP `config_option_update` session
-notification, which never reaches the wire file).
+The built-in footer renders the host's in-memory session state
+(`state.thinkingEffort`), so it always shows the current runtime effort. The
+custom status line has no such field: `StatusLinePayload` (10 fields,
+unchanged through 0.41.0) carries no thinking-effort entry.
 
-Consequence: the HUD shows the effort the last request actually ran with and
-updates on the next request after a switch (typically within a second of
-sending a message). The built-in footer shows the session's current runtime
-effort immediately. Both are truthful; they differ only in the switch →
-next-request window. Verified against host source `footer.ts` /
-`status-line-command.ts` and real 0.34.0 session wires.
+In-session switches: the original finding, verified against 0.34.0 wires, was
+that a switch emits no local event the HUD could read. That is no longer true:
+0.41.0 journals a `config.update` wire row carrying the resolved
+`thinkingEffort` on every in-session switch (`packages/agent-core/src/agent/config/index.ts`
+`applyUpdate` → `records.logRecord`, mirrored by the agent-core-v2
+`profileOps` `config.update` Op). The HUD folds `config.update` /
+`profile.bind` / `llm.request` rows, so switches now surface immediately; the
+per-request `llm.request` fallback keeps covering older hosts that only
+journal effort per request.
+
+Remaining gap — the lazy-start window: kimi-code lazy-starts sessions, so
+before the first turn's wire rows land the HUD has no per-session source and
+resolves the global `config.toml` (`src/thinking.mjs`). Everything derived
+that way — an explicit `[thinking].effort` key, the model `default_effort`,
+the boolean `"on"` fallback, a capability-derived off — renders muted until
+the first wire row confirms the level. The HUD deliberately does not treat
+even the explicit config key as confirmed: the top-tier behavior below can
+leave config.toml silently stale, and the HUD cannot tell a fresh config
+from a stale one, so a bright value would mark a possibly-wrong level as
+verified. Only wire records (`config.update` / `profile.bind` /
+`llm.request`) promote the level to the default color.
+
+Top-tier limitation — accepted upstream information gap: selecting a model's
+highest declared effort (the last `support_efforts` entry, e.g. `max`) is
+deliberately not persisted: the host writes only `[thinking] enabled = true`
+with no `effort` key, "so the most expensive tier never becomes the global
+default for every new session" (`apps/kimi-code/src/tui/utils/thinking-config.ts`
+`thinkingEffortToConfig`), and re-confirming the effort the picker showed
+persists only `enabled`, leaving the stored effort preference alone
+(`tui/commands/config.ts` `persistModelSelection`). The merge keeps the
+previous value, so in the lazy-start window the HUD can only show the model
+`default_effort` or the stale previous effort — never `max`. The truth
+appears with the first wire row. The HUD does not guess around this; it
+documents the window. (HUD-side handling: config-derived snapshots re-resolve
+when the config basis changes, wire-pinned snapshots are immune.)
 
 Acceptance criteria:
 
 - the host exposes the current thinking effort in the status-line payload
-  (e.g. `thinkingEffort` alongside `model`), or emits a local event on an
-  in-session switch;
+  (e.g. `thinkingEffort` alongside `model`), or journals the session-start
+  effort before the first turn so the lazy-start window has an authoritative
+  source;
 - the HUD prefers the payload field when present, keeping the wire-derived
-  effort as the fallback;
-- the fallback (next-request update) keeps working unchanged on hosts without
-  the field.
+  and config-derived fallbacks;
+- the next-request fallback keeps working unchanged on hosts without
+  `config.update` rows;
+- the `max`-tier mismatch stays confined to the lazy-start window and is
+  documented here rather than hidden.
 
 ## KI-6: Mixed-provider sessions could show a partial cost
 

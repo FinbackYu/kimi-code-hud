@@ -27,6 +27,7 @@ import {
   CREDENTIAL_FINGERPRINT_ABSENT,
   QUOTA_RESULT,
   QUOTA_TTL_MS,
+  QUOTA_REFRESH_MARGIN_MS,
   QUOTA_CACHE_VERSION,
   QUOTA_STALE_MARK_MS,
   QUOTA_STALE_MAX_MS,
@@ -175,6 +176,47 @@ test('cache round-trip and staleness', () => {
   assert.equal(typeof cache.fetchedAt, 'number');
   assert.equal(isQuotaStale(cache, cache.fetchedAt + QUOTA_TTL_MS - 1), false);
   assert.equal(isQuotaStale(cache, cache.fetchedAt + QUOTA_TTL_MS + 1), true);
+  // isQuotaStale stays on the display contract (quotaAge): it does not know
+  // about the scheduler's refresh margin — that gate lives in ensureFreshQuota.
+});
+
+test('the refresh scheduler works one tier ahead of the display boundary', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-margin-'));
+  const lockPath = path.join(dir, 'refresh.lock');
+  const cache = {
+    version: QUOTA_CACHE_VERSION,
+    contextKey: DUMMY_CONTEXT_KEY,
+    fetchedAt: 100_000,
+    weekly: null,
+    windows: [],
+  };
+  let spawns = 0;
+  const spawnImpl = () => { spawns += 1; return { once() {}, unref() {} }; };
+  const opts = (now) => ({
+    cachePath: path.join(dir, 'unused-cache.json'),
+    lockPath,
+    scriptPath: '/tmp/fake-kimi-hud.mjs',
+    now,
+    cachedQuota: cache,
+    spawnImpl,
+    tokenFactory: () => 'fixed',
+  });
+  const marginEnd = cache.fetchedAt + QUOTA_TTL_MS - QUOTA_REFRESH_MARGIN_MS;
+  // The display threshold is untouched: the whole margin window still renders
+  // fresh (white), and dimming starts only past the TTL itself.
+  assert.equal(quotaAge(cache, marginEnd).state, QUOTA_AGE.FRESH);
+  assert.equal(quotaAge(cache, marginEnd + 1).state, QUOTA_AGE.FRESH);
+  assert.equal(quotaAge(cache, cache.fetchedAt + QUOTA_TTL_MS).state, QUOTA_AGE.FRESH);
+  assert.equal(quotaAge(cache, cache.fetchedAt + QUOTA_TTL_MS + 1).state, QUOTA_AGE.STALE);
+  // The scheduler, though, refreshes inside the margin: quiet up to and
+  // including TTL - margin, spawning the moment the margin opens.
+  assert.equal(ensureFreshQuota(opts(marginEnd)), false);
+  assert.equal(spawns, 0);
+  assert.equal(ensureFreshQuota(opts(marginEnd + 1)), true);
+  assert.equal(spawns, 1);
+  // The next frame is repelled by the refresh lock, not by freshness.
+  assert.equal(ensureFreshQuota(opts(marginEnd + 2)), false);
+  assert.equal(spawns, 1);
 });
 
 test('quotaAge draws the fresh/stale/expired boundaries exactly', () => {
@@ -1021,7 +1063,7 @@ test('refreshQuota clears the backoff on success and keeps the cache format', as
 
   const ok = await refreshQuota({
     ...env,
-    now: 2_000,
+    clock: () => 2_000, // fetchedAt is stamped when the response lands
     fetchImpl: async () => response(200, REAL_RESPONSE),
   });
   assert.equal(ok, true);

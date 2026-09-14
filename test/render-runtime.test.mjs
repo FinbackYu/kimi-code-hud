@@ -645,3 +645,47 @@ test('a normal local render frame completes inside the 220ms internal budget', a
   assert.ok(result.line.startsWith('[Always Ask]'));
   assert.ok(elapsed < RUNTIME_BUDGET_MS, `render took ${elapsed.toFixed(1)}ms`);
 });
+
+test('runtime renders config-derived effort muted until a wire row confirms', async () => {
+  const paths = makePaths();
+  const explicitConfig = [
+    '[thinking]',
+    'enabled = true',
+    'effort = "high"',
+    '',
+    '[models."K3"]',
+    'model = "k3"',
+    'display_name = "K3"',
+    'support_efforts = [ "low", "high" ]',
+    'default_effort = "low"',
+    '',
+  ].join('\n');
+  const run = async (configTomlText) => renderStatusLine({
+    scriptPath: '/tmp/kimi-hud.mjs',
+    paths,
+    clock: () => 0,
+    env: {}, // colors on
+    dependencies: {
+      managedPluginDisabled: () => false,
+      readPayload: async () => ({ ...payload(), gitBranch: null }),
+      captureRuntimeSnapshot: () => ({
+        hudConfig: {},
+        configTomlText,
+        tuiTomlText: '',
+        quota: null,
+      }),
+      getMetrics: () => ({ ...metrics(), thinkingLevel: null }),
+    },
+  });
+
+  // Even the explicit [thinking] effort is provisional: the host does not
+  // persist the top tier, so config-derived values render muted.
+  const explicit = await run(explicitConfig);
+  assert.ok(explicit.line.includes('\x1b[90m high\x1b[0m'), explicit.line);
+
+  // Dropping the key leaves only the model default, still muted — the
+  // config-basis change re-resolves the same session's snapshot.
+  const provisional = await run(explicitConfig.replace('effort = "high"\n', ''));
+  assert.ok(provisional.line.includes('\x1b[90m low\x1b[0m'), provisional.line);
+  assert.ok(!provisional.line.includes('\x1b[90m high'), provisional.line);
+});
