@@ -32,6 +32,11 @@ export { HUD_DIR, CREDENTIALS_PATH, QUOTA_CACHE_PATH, QUOTA_REFRESH_STATE_PATH, 
 export const USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
 export const GLOBAL_USAGES_URL = 'https://api.kimi.ai/coding/v1/usages';
 export const QUOTA_TTL_MS = 60_000;
+// The refresh scheduler starts this far ahead of the fresh window's end, so
+// the detached refresh (subprocess start + HTTPS + cache write) is in flight
+// before the renderer's dim boundary is reached. Without the margin every TTL
+// expired as a white → dim → white flicker about a second long.
+export const QUOTA_REFRESH_MARGIN_MS = 10_000;
 export const LOCK_STALE_MS = 30_000;
 
 /**
@@ -53,14 +58,23 @@ export const QUOTA_CACHE_VERSION = 2;
  *    Rendering splits this one logic state into two tiers via `markStale`:
  *    within QUOTA_STALE_MARK_MS ("aging") the dim is the only signal, since
  *    5h/weekly window figures that young are almost certainly still valid —
- *    the 60s TTL is also the background refresh cadence, so the first frame
- *    after switching away for a few minutes would always cry wolf; past
+ *    the refresh cadence (QUOTA_TTL_MS minus the scheduling margin below)
+ *    keeps on-screen figures younger than the TTL, so the first frame after
+ *    switching away for a few minutes would always cry wolf; past
  *    QUOTA_STALE_MARK_MS an explicit `[stale]` marker is added so a
  *    monochrome terminal can tell genuinely old figures apart from fresh
  *    data while a background refresh is throttled/offline;
  *  - expired (age > QUOTA_STALE_MAX_MS, or a fetchedAt so far in the future
  *    that the clock must have moved): hidden entirely — the figure is never
  *    presented as current once it can no longer be trusted.
+ *
+ * The refresh scheduler works one tier ahead of this display contract: it
+ * schedules the detached refresh once the age passes
+ * QUOTA_TTL_MS - QUOTA_REFRESH_MARGIN_MS, still inside the fresh window, so
+ * the subprocess (start + HTTPS round trip + atomic cache write) has usually
+ * landed before the renderer's dim boundary arrives. A dimmed segment
+ * therefore means a refresh was attempted but has not landed yet — slow
+ * network, a backoff window, or offline — not that one is starting now.
  *
  * QUOTA_STALE_MARK_MS is one hour: long enough that an away-from-keyboard
  * gap never renders the marker, short enough that truly stale data is still
@@ -278,11 +292,12 @@ export function quotaAge(cache, now = Date.now()) {
 }
 
 /**
- * True when the cache needs a background refresh: missing, older than the
- * fresh window, or stamped so far in the future that the clock must have
- * moved backwards. A cache inside the stale-but-usable window is still
- * refresh-worthy — the scheduler keeps trying while the renderer may keep
- * showing the dimmed figure until the retry backoff lets it through.
+ * The display contract's staleness: missing, older than the fresh window, or
+ * stamped so far in the future that the clock must have moved backwards. A
+ * cache inside the stale-but-usable window is still refresh-worthy — the
+ * scheduler keeps trying while the renderer keeps showing the dimmed figure
+ * until the retry backoff lets it through. This predicate stays on the
+ * display boundary; the scheduler itself fires earlier, via isQuotaRefreshDue.
  * @param {object|null} cache
  * @param {number} [now]
  * @returns {boolean}
@@ -290,6 +305,26 @@ export function quotaAge(cache, now = Date.now()) {
 export function isQuotaStale(cache, now = Date.now()) {
   if (!cache) return true;
   return quotaAge(cache, now).state !== QUOTA_AGE.FRESH;
+}
+
+/**
+ * The scheduler's gate, one tier ahead of the display contract: true when a
+ * background refresh should be scheduled. Besides everything isQuotaStale
+ * covers, it fires inside the QUOTA_REFRESH_MARGIN_MS window before the fresh
+ * TTL expires, so the detached refresh is already in flight when the
+ * renderer's dim boundary arrives and the dim reads as "refresh attempted,
+ * not landed" instead of flashing at every TTL expiry. A cache stamped
+ * slightly in the future (within the clock-skew allowance) is brand new and
+ * stays quiet.
+ * @param {object|null} cache
+ * @param {number} [now]
+ * @returns {boolean}
+ */
+function isQuotaRefreshDue(cache, now = Date.now()) {
+  if (!cache) return true;
+  const { state, ageMs } = quotaAge(cache, now);
+  if (state !== QUOTA_AGE.FRESH) return true;
+  return ageMs > QUOTA_TTL_MS - QUOTA_REFRESH_MARGIN_MS;
 }
 
 /**
@@ -465,15 +500,19 @@ export function releaseQuotaLock(lockPath = REFRESH_LOCK_PATH, token = null) {
 }
 
 /**
- * If the cache is stale and no persisted failure backoff forbids it, spawn a
- * detached background refresh and return immediately. A lock file (pid +
- * timestamp) prevents concurrent refreshes; locks older than LOCK_STALE_MS
- * are treated as stale and overwritten. The backoff state file records the
- * last failure's next-attempt time, so every render process in the same HUD
- * home shares one retry schedule — per context: when `contextKey` is
- * supplied, a window recorded by a different credential slot, region, or
- * credential content never blocks the spawn. Pass no statePath to disable
- * the backoff gate. Never throws, never blocks on the network.
+ * If the cache is refresh-worthy and no persisted failure backoff forbids it,
+ * spawn a detached background refresh and return immediately. Refresh-worthy
+ * is the scheduler's own gate (isQuotaRefreshDue): it fires
+ * QUOTA_REFRESH_MARGIN_MS before the display's fresh window ends, so the
+ * refresh usually lands before the renderer would dim the figure. A lock
+ * file (pid + timestamp) prevents concurrent refreshes; locks older than
+ * LOCK_STALE_MS are treated as stale and overwritten. The backoff state file
+ * records the last failure's next-attempt time, so every render process in
+ * the same HUD home shares one retry schedule — per context: when
+ * `contextKey` is supplied, a window recorded by a different credential
+ * slot, region, or credential content never blocks the spawn. Pass no
+ * statePath to disable the backoff gate. Never throws, never blocks on the
+ * network.
  * @param {object} [opts]
  * @param {string|null} [opts.contextKey] digest of the credential slot +
  *   endpoint + credential content the current config resolves to; omit for
@@ -494,7 +533,7 @@ export function ensureFreshQuota({
   let lockToken = null;
   try {
     const cache = cachedQuota === undefined ? readQuotaCache(cachePath) : cachedQuota;
-    if (!isQuotaStale(cache, now)) return false;
+    if (!isQuotaRefreshDue(cache, now)) return false;
     if (isRefreshBlocked(statePath, now, contextKey)) return false;
     lockToken = acquireQuotaLock({
       lockPath,
@@ -708,8 +747,11 @@ export async function requestQuota({
  * from a clock read after the request settles, so a request that burns its
  * whole deadline still backs off from the moment it actually failed (the
  * honored Retry-After window included) instead of from an already-stale
- * request start. The record is keyed by a non-reversible digest of the
- * credential path, endpoint and credential content, so switching context
+ * request start; the successful cache's fetchedAt is stamped from the same
+ * post-settle clock read, so the display freshness window starts when the
+ * figures landed rather than when the subprocess started. The record is
+ * keyed by a non-reversible digest of the credential path, endpoint and
+ * credential content, so switching context
  * restarts the failure count instead of inheriting the previous account's
  * lockout, and the scheduler-side gate compares that digest against its own
  * context before honouring a window. A failure is only recorded while the
@@ -753,7 +795,6 @@ export async function refreshQuota({
   timeoutMs = 8000,
   fetchImpl = globalThis.fetch,
   lockToken = null,
-  now = Date.now(),
   clock = Date.now,
   jitter = Math.random,
   env = process.env,
@@ -832,7 +873,7 @@ export async function refreshQuota({
       // A request that outlived a context switch must not overwrite the new
       // context's cache (or clear its backoff) with old-context figures.
       if (!isStillCurrentContext()) return false;
-      writeQuotaCache(result.parsed, cachePath, { now, contextKey });
+      writeQuotaCache(result.parsed, cachePath, { now: clock(), contextKey });
       clearRefreshState(statePath);
       return true;
     }
