@@ -41,10 +41,10 @@ test('session level wins over everything', () => {
   });
 });
 
-test('missing config file defaults to boolean on', () => {
-  assert.equal(
-    levelOf({ sessionLevel: null, model: 'K3', configPath: '/nonexistent/config.toml' }),
-    'on',
+test('missing config file defaults to a provisional boolean on', () => {
+  assert.deepEqual(
+    resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath: '/nonexistent/config.toml' }),
+    { level: 'on', confirmed: false },
   );
 });
 
@@ -132,27 +132,113 @@ test('always_thinking models never resolve to off', () => {
   });
 });
 
+test('config-derived levels stay provisional in every source layer', () => {
+  withConfig(CONFIG, (configPath) => {
+    // Even the explicit [thinking] effort stays provisional: the host does
+    // not persist the top effort tier, so config can silently lag the
+    // current choice.
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }),
+      { level: 'high', confirmed: false },
+    );
+  });
+  const noGlobal = CONFIG.replace('effort = "high"\n', '');
+  withConfig(noGlobal, (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }),
+      { level: 'high', confirmed: false }, // model default_effort
+    );
+    const noDefault = noGlobal.replace('default_effort = "high"\n', '');
+    withConfig(noDefault, (fallbackPath) => {
+      assert.deepEqual(
+        resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath: fallbackPath }),
+        { level: 'on', confirmed: false }, // boolean fallback
+      );
+    });
+  });
+});
+
+test('explicit off states stay provisional too', () => {
+  withConfig(CONFIG.replace('enabled = true', 'enabled = false'), (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }),
+      { level: 'off', confirmed: false },
+    );
+  });
+  withConfig(CONFIG.replace('effort = "high"', 'effort = "off"'), (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }),
+      { level: 'off', confirmed: false },
+    );
+  });
+});
+
+test('always_thinking models stay provisional: global effort or model default', () => {
+  withConfig(`[thinking]\nenabled = true\neffort = "low"\n${THIRD_PARTY}`, (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'always-effort', configPath }),
+      { level: 'low', confirmed: false },
+    );
+  });
+  withConfig(THIRD_PARTY, (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'always-effort', configPath }),
+      { level: 'max', confirmed: false }, // model default_effort
+    );
+  });
+});
+
+test('third-party passthrough stays provisional either way', () => {
+  withConfig(THIRD_PARTY, (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'vision-only', configPath }),
+      { level: 'off', confirmed: false }, // capability-derived
+    );
+  });
+  withConfig(`[thinking]\nenabled = true\neffort = "high"\n${THIRD_PARTY}`, (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'vision-only', configPath }),
+      { level: 'on', confirmed: false }, // rides on the explicit key
+    );
+  });
+});
+
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-snap-'));
 }
 
-test('snapshot pins the level per session across config changes', () => {
+test('config-pinned snapshots follow config edits; wire-pinned ones stay pinned', () => {
   const snapshotDir = tmpDir();
   withConfig(CONFIG, (configPath) => {
-    assert.equal(
-      levelOf({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
-      'high',
+    // s1 lazy-starts under the config effort (provisional, like any
+    // config-derived level).
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'high', confirmed: false },
     );
-    // Another session runs /effort low -> global config rewritten.
+    // Another session runs /effort low -> global config rewritten. A
+    // config-derived snapshot must not shadow the edit: same model, changed
+    // config basis -> re-resolve.
     fs.writeFileSync(configPath, CONFIG.replace('effort = "high"', 'effort = "low"'));
-    // s1 keeps its start-of-session level; a new session sees the new config.
-    assert.equal(
-      levelOf({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
-      'high',
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'low', confirmed: false },
     );
-    assert.equal(
-      levelOf({ sessionLevel: null, model: 'K3', configPath, sessionId: 's2', snapshotDir }),
-      'low',
+    // s2 is pinned by its own profile.bind wire row before the edit.
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: 'max', model: 'K3', configPath, sessionId: 's2', snapshotDir }),
+      { level: 'max', confirmed: true },
+    );
+    fs.writeFileSync(configPath, CONFIG.replace('effort = "high"', 'effort = "off"'));
+    // The wire-pinned session keeps its start-of-session level; a fresh
+    // session sees the new config.
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's2', snapshotDir }),
+      { level: 'max', confirmed: true },
+    );
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's3', snapshotDir }),
+      { level: 'off', confirmed: false },
     );
   });
 });
@@ -226,6 +312,8 @@ test('wire levels are confirmed; config inference is provisional', () => {
       resolveThinkingLevel({ sessionLevel: 'max', model: 'K3', configPath }),
       { level: 'max', confirmed: true },
     );
+    // Even an explicit config effort stays provisional until a wire row
+    // confirms it (the top tier is never persisted to config.toml).
     assert.deepEqual(
       resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath }),
       { level: 'high', confirmed: false },
@@ -240,7 +328,7 @@ test('config-pinned snapshot stays provisional until the wire confirms', () => {
       resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
       { level: 'high', confirmed: false },
     );
-    // Re-reads of the config-pinned snapshot stay provisional.
+    // Re-reads of the unchanged config stay provisional.
     assert.deepEqual(
       resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
       { level: 'high', confirmed: false },
@@ -250,6 +338,12 @@ test('config-pinned snapshot stays provisional until the wire confirms', () => {
       resolveThinkingLevel({ sessionLevel: 'max', model: 'K3', configPath, sessionId: 's1', snapshotDir }),
       { level: 'max', confirmed: true },
     );
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'max', confirmed: true },
+    );
+    // ...and the wire pin is immune to later config edits on the same model.
+    fs.writeFileSync(configPath, CONFIG.replace('effort = "high"', 'effort = "low"'));
     assert.deepEqual(
       resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
       { level: 'max', confirmed: true },
@@ -268,5 +362,71 @@ test('legacy snapshots without a confirmed flag read as confirmed', () => {
       resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
       { level: 'max', confirmed: true },
     );
+    // Later config edits on the same model do not re-resolve it, and reads
+    // never rewrite the legacy file into the new format.
+    fs.writeFileSync(configPath, CONFIG.replace('effort = "high"', 'effort = "low"'));
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'max', confirmed: true },
+    );
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(snapshotDir, 'thinking-s1.json'), 'utf8')),
+      { level: 'max', model: 'K3' },
+    );
+  });
+});
+
+test('snapshots record provenance: wire pins store a null config basis', () => {
+  const snapshotDir = tmpDir();
+  withConfig(CONFIG, (configPath) => {
+    resolveThinkingLevel({ sessionLevel: 'max', model: 'K3', configPath, sessionId: 'w1', snapshotDir });
+    resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 'c1', snapshotDir });
+    const wirePinned = JSON.parse(fs.readFileSync(path.join(snapshotDir, 'thinking-w1.json'), 'utf8'));
+    assert.deepEqual(
+      { level: wirePinned.level, confirmed: wirePinned.confirmed, configBasis: wirePinned.configBasis },
+      { level: 'max', confirmed: true, configBasis: null },
+    );
+    const configPinned = JSON.parse(fs.readFileSync(path.join(snapshotDir, 'thinking-c1.json'), 'utf8'));
+    assert.equal(configPinned.level, 'high');
+    assert.equal(configPinned.confirmed, false);
+    assert.equal(typeof configPinned.configBasis, 'string');
+  });
+});
+
+test('a same-model default_effort edit re-resolves instead of being shadowed', () => {
+  const snapshotDir = tmpDir();
+  const noGlobal = CONFIG.replace('effort = "high"\n', '');
+  withConfig(noGlobal, (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'high', confirmed: false },
+    );
+    fs.writeFileSync(
+      configPath,
+      noGlobal.replace('default_effort = "high"', 'default_effort = "max"'),
+    );
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'max', confirmed: false },
+    );
+  });
+});
+
+test('pre-basis config-pinned snapshots stop shadowing on first read', () => {
+  const snapshotDir = tmpDir();
+  const snapshotFile = path.join(snapshotDir, 'thinking-s1.json');
+  fs.mkdirSync(snapshotDir, { recursive: true });
+  fs.writeFileSync(
+    snapshotFile,
+    JSON.stringify({ level: 'low', model: 'K3', confirmed: false }),
+  );
+  withConfig(CONFIG, (configPath) => {
+    assert.deepEqual(
+      resolveThinkingLevel({ sessionLevel: null, model: 'K3', configPath, sessionId: 's1', snapshotDir }),
+      { level: 'high', confirmed: false },
+    );
+    const upgraded = JSON.parse(fs.readFileSync(snapshotFile, 'utf8'));
+    assert.equal(upgraded.level, 'high');
+    assert.equal(typeof upgraded.configBasis, 'string');
   });
 });
