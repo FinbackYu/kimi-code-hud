@@ -25,6 +25,7 @@ Kimi Code 基线版本取自 CAPABILITIES.md 中 "- Kimi Code baseline: …" 一
 """
 import argparse
 import json
+import os
 import re
 import struct
 import zlib
@@ -130,8 +131,11 @@ def export_pngs(hud_version, cli_version):
         raise SystemExit("完整导出需要 Python Playwright；仅补元数据可用 --metadata-only") from error
 
     query = urlencode({"hudver": hud_version, "cliver": cli_version})
+    # chrome remains the default; machines without it can opt into another
+    # Chromium-based channel (e.g. KIMI_HUD_SHOWCASE_CHANNEL=msedge).
+    channel = os.environ.get("KIMI_HUD_SHOWCASE_CHANNEL", "chrome")
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(channel="chrome")
+        browser = playwright.chromium.launch(channel=channel)
         for html, out, padding in public_targets():
             out.parent.mkdir(parents=True, exist_ok=True)
             page = browser.new_page(
