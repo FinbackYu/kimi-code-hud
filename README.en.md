@@ -30,7 +30,7 @@ In the Kimi Code TUI, run:
 | Recommended runtimes | Node.js LTS lines inside their upstream maintenance window (at the time of writing, 22 / 24) | The target of day-to-day development and release verification |
 | Best-effort runtimes | Every version meeting the **Node.js ≥ 18** minimum (the minimum is unchanged) | Releases past their upstream End-of-Life (e.g. 18 / 20) are not proactively tested; issues there are handled on a best-effort basis |
 | Operating systems | macOS / Linux / Windows | macOS is the maintainer's primary development and dynamic-verification environment; Linux is covered by the automated CI suite (actual matrix: [`.github/workflows/test.yml`](.github/workflows/test.yml)); Windows is best-effort — the Git probe already resolves a trusted executable the Windows way (including `PATHEXT`, see [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)), but dynamic verification on a real Windows host has not been completed (not dynamically verified) |
-| Kimi Code host | Verified baseline **0.41.0** | Per-release contract audits with pinned upstream commits live in [CAPABILITIES.md](CAPABILITIES.md) |
+| Kimi Code host | Source/fixture baseline **0.43.1**; live TUI acceptance pending | Per-release contract audits with pinned upstream commits live in [CAPABILITIES.md](CAPABILITIES.md) |
 
 Changes to the CI matrix are changes in test coverage, not in the support contract: adding or removing matrix entries never widens or shrinks the support statements above — this section is the contract. The interactive cross-OS host matrix (real TUI, terminal emulators, plugin lifecycle) is still being filled in (not dynamically verified).
 
@@ -93,7 +93,7 @@ Four data sources: the stdin snapshot and a cross-process cached Git probe (cwd 
 
 ## Capabilities & known issues
 
-- [Capabilities](CAPABILITIES.md): coverage of Kimi Code 0.41.0's line-1 slots, data sources, and readable-but-unrendered Cache/token/goal/task/Git information;
+- [Capabilities](CAPABILITIES.md): coverage of Kimi Code 0.43.1's line-1 slots, data sources, and readable-but-unrendered Cache/token/goal/task/Git information;
 - [Known issues](KNOWN_ISSUES.md): open Git, terminal-width, stale-frame, and fullscreen verification gaps with acceptance criteria.
 
 ## Privacy & security
@@ -111,7 +111,7 @@ Four data sources: the stdin snapshot and a cross-process cached Git probe (cwd 
 
 **No Cache segment?** It stays omitted only while the session has no complete `step.end` usage yet. Once the first valid usage lands, the segment appears and stays on permanently. After upgrades, a bounded restoration (at most 1 MiB of the wire tail) rebuilds the cumulative counters once.
 
-**No quota segment?** First check whether the active model comes from a third-party provider (models added via `/provider` never show quota — the API covers the managed subscription only) and whether its model config resolves explicitly to `managed:kimi-code`; an unknown provider fails closed. For managed models, the whole section is omitted until the first cache exists. Run `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-quota` (silent) and check `~/.kimi-code-hud/quota.json`.
+**No quota segment?** First check whether the active model comes from a third-party provider (models added via `/provider` never show quota — the API covers the managed subscription only) and whether its model config resolves explicitly to `managed:kimi-code`; an unknown provider fails closed. For managed models, the section is omitted until a valid cache exists. The 0.43.1 response serves ratios under `usages`: HUD shows the reported 5h, 7d and Monthly windows, with a kimi/code split when both monthly components are present. Upgrading invalidates old quota caches; the next successful refresh restores the display. Run `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-quota` (silent) and check `~/.kimi-code-hud/quota.json`.
 
 **No DeepSeek balance or Session Cost?** The active supported model must use a provider named `deepseek`, `type = "openai"`, and the official `https://api.deepseek.com` base (optionally `/v1`). Balance additionally requires a valid `api_key`. Before the first detached refresh finishes, neither balance nor cost has a loading placeholder (cost must first learn CNY or USD from the balance response). Once the complete usage ledger is ready, Session Cost can appear alone even when balance is unavailable if its currency is known. Run `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage deepseek` silently and then inspect `~/.kimi-code-hud/provider-usage/`. Compatible proxies are intentionally refused for both.
 
