@@ -1,9 +1,8 @@
 # HUD capabilities
 
 - Last verified: 2026-09-17
-- HUD behavior baseline: `v0.8.2` (`ae66403`)
+- HUD behavior baseline: `v0.8.3` (`1243cf0`)
 - Kimi Code baseline: `2.0.0` (`1b89e4b039f052d10f258464413b2047acca12ba`)
-- Compatibility candidate: main (`227bb74`, merged #29 / #31) plus this branch's 2.0.0 baseline advance; source and synthetic fixtures verified, live TUI acceptance pending. The HUD line above identifies the upstream release, not a HUD release.
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
