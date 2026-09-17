@@ -1,9 +1,8 @@
 # Known issues
 
 - Last verified: 2026-09-17
-- HUD behavior baseline: `v0.8.2` (`ae66403`)
+- HUD behavior baseline: `v0.8.3` (`1243cf0`)
 - Kimi Code baseline: `2.0.0` (`1b89e4b039f052d10f258464413b2047acca12ba`)
-- Compatibility candidate: main (`227bb74`, merged #29 / #31) plus this branch's 2.0.0 baseline advance; source and synthetic fixtures verified, live TUI acceptance pending. The HUD line above identifies the upstream release, not a HUD release.
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -632,7 +631,7 @@ Conditions for reconsidering active-chain support:
 
 ## KI-19: Managed quota payload switched to ratios
 
-Status: fixed on main via PR #32; live account acceptance pending
+Status: fixed in v0.8.3 (PR #32); live account acceptance pending
 
 Upstream #3787 changed `/usages` to `usages.limit_5h`, `limit_7d`,
 `limit_month_total`, and `limit_month_code` entries with `used_ratio` and

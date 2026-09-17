@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-09-17
+
 ### Fixed
 
 - Restore managed-subscription quota display for the ratio-based `/usages`
@@ -13,6 +15,25 @@ The project follows [Semantic Versioning](https://semver.org/).
   Monthly windows, including the monthly kimi/code split. Cache v3 refreshes
   older caches, retains credential-context isolation, and reports migration
   correctly in `--doctor`; legacy API responses remain supported.
+- Fix Windows-only status-line command quoting with a win32 rule set for
+  `quoteCommandArg` (POSIX output byte-for-byte unchanged), classify
+  unreachable UNC paths as missing instead of warning in `--doctor`, and
+  treat `~` in 8.3 short paths as a plain path character (PR #27).
+- Refresh the quota cache one tier ahead of the dim boundary (TTL − 10s) so
+  the segment no longer flashes gray for about a second every minute, and
+  stamp `fetchedAt` when the response lands rather than when the refresh
+  subprocess starts (PR #30).
+- Re-resolve config-derived thinking snapshots when their `config.toml`
+  basis changes, so same-model effort switches are no longer masked until a
+  wire record arrives (PR #30).
+
+### Changed
+
+- Tier the quota staleness display: fresh within the 60s TTL, dimmed past
+  TTL, and an explicit `[stale]` marker only once the figures are more than
+  an hour old (PR #28).
+- Hold settled TPS and generation/compaction durations bright for a 60s
+  grace window instead of dimming immediately (PR #28).
 
 ### Compatibility
 
@@ -593,8 +614,9 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.2...HEAD
-[0.8.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.2
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.3
+[0.8.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.2 https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.2
 [0.8.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.1
 [0.8.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.0
 [0.7.8]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.8
