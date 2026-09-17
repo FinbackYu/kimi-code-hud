@@ -275,6 +275,130 @@ const SCENARIOS = [
       assert.deepEqual(metrics.tasks, { bash: 1, agents: 0 });
     },
   },
+  {
+    /**
+     * Regression fixture for upstream PR #3737 (MoonshotAI/kimi-code, merge
+     * 7d7e8de, unreleased at prep time): undo becomes a branch switch that
+     * appends three records — the new `agent.switched` edge, the legacy
+     * `context.undo` (persisted since 0.41.0, never consumed by the HUD), and
+     * `context.undone`, which only becomes a persisted wire row with this PR.
+     * The physical on-disk schema is unchanged, and the HUD's raw sequential
+     * fold must ignore the whole triple. The raw-journal versus active-chain information boundary is tracked
+     * as KI-18; neutrality alone does not prove live undo parity.
+     */
+    label: 'undo switch triple',
+    fixture: 'wire-events-undo-switch.jsonl',
+    fixtureTitle:
+      'fixture appends the agent.switched / context.undo / context.undone triple to the reference wire',
+    fold: 'noop',
+    foldTitle: 'processWireChunk folds the undo switch triple without touching the state',
+    baselineTitle: 'undo switch records leave metrics, state and render identical to baseline',
+    rowsUnder(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && /"type":"(?:agent\.switched|context\.undo|context\.undone)"/.test(line));
+    },
+    baseline(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && !/"type":"(?:agent\.switched|context\.undo|context\.undone)"/.test(line))
+        .join('\n') + '\n';
+    },
+    fixtureChecks(wireText, baselineText) {
+      const rows = this.rowsUnder(wireText).map((line) => JSON.parse(line));
+      assert.deepEqual(
+        rows.map((row) => row.type),
+        ['agent.switched', 'context.undo', 'context.undone'],
+      );
+      const referenceLines = REFERENCE.split('\n').filter((line) => line).length;
+      // The triple lands contiguously right after the reference wire; wire
+      // line numbers are 1-based and derived from the reference length here,
+      // never hardcoded.
+      assert.equal(wireText.split('\n').filter((line) => line).length, referenceLines + 3);
+      const [switched, undo, undone] = rows;
+      assert.equal(switched.branch, 'b1');
+      assert.equal(switched.reason, 'undo');
+      assert.equal(switched.base.branch, 'main');
+      assert.ok(Number.isInteger(switched.base.line));
+      // base.line references a real physical line of the pre-undo history.
+      assert.ok(switched.base.line >= 1 && switched.base.line <= referenceLines);
+      assert.ok(Number.isInteger(switched.turns));
+      // legacyUndoLine must point at the context.undo row's physical line.
+      assert.equal(switched.legacyUndoLine, referenceLines + 2);
+      assert.equal(undo.count, switched.turns);
+      assert.equal(undone.turns, switched.turns);
+      // Stripping the triple must reproduce the reference wire fixture
+      // byte-identically, so the comparison differs on exactly one axis.
+      assert.equal(baselineText, REFERENCE);
+      assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
+      for (const row of rows) {
+        assert.ok(row.time >= 1785456000000 && row.time <= 1785456060000);
+      }
+    },
+    baselineReadings(metrics) {
+      assert.equal(metrics.tps, 30);
+    },
+  },
+  {
+    /**
+     * Regression fixture for the remaining record classes of upstream PR
+     * #3737 outside the wire manifest's Event2 list: the `agent.turn.started`
+     * / `agent.turn.ended` / `agent.message.appended` projections and one
+     * `human.*` mirror record (isHumanRecordType also claims the whole
+     * `human.` prefix). All of them must fold as no-ops and leave no badge
+     * state behind.
+     */
+    label: 'human mirror records',
+    fixture: 'wire-events-turn-records.jsonl',
+    fixtureTitle:
+      'fixture appends agent turn/message projections and a human.* mirror to the reference wire',
+    fold: 'noop',
+    foldTitle: 'processWireChunk folds human mirror records without touching the state',
+    baselineTitle: 'human mirror records leave metrics, state and render identical to baseline',
+    rowsUnder(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && /"type":"(?:agent\.turn\.started|agent\.turn\.ended|agent\.message\.appended|human\.)/.test(line));
+    },
+    baseline(wireText) {
+      return wireText
+        .split('\n')
+        .filter(
+          (line) =>
+            line &&
+            !/"type":"(?:agent\.turn\.started|agent\.turn\.ended|agent\.message\.appended|human\.)/.test(line),
+        )
+        .join('\n') + '\n';
+    },
+    fixtureChecks(wireText, baselineText) {
+      assert.deepEqual(
+        this.rowsUnder(wireText).map((line) => JSON.parse(line).type),
+        [
+          'agent.turn.started',
+          'agent.turn.ended',
+          'agent.message.appended',
+          'human.agent.turn.started',
+        ],
+      );
+      const referenceLines = REFERENCE.split('\n').filter((line) => line).length;
+      assert.equal(wireText.split('\n').filter((line) => line).length, referenceLines + 4);
+      // Stripping the mirror rows must reproduce the reference wire fixture
+      // byte-identically, so the comparison differs on exactly one axis.
+      assert.equal(baselineText, REFERENCE);
+      assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
+      for (const line of this.rowsUnder(wireText)) {
+        const row = JSON.parse(line);
+        assert.ok(row.time >= 1785456000000 && row.time <= 1785456060000);
+      }
+    },
+    baselineReadings(metrics) {
+      assert.equal(metrics.tps, 30);
+    },
+    renderChecks(rendered) {
+      // The mirror rows must not leak into badge state either: no goal badge.
+      assert.ok(rendered.every((line) => !line.includes('[goal')));
+    },
+  },
 ];
 
 const readFixture = (scenario) => fs.readFileSync(path.join(FIXTURES, scenario.fixture), 'utf8');

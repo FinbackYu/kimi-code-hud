@@ -284,3 +284,28 @@ Baseline delta (0.40.1 → 0.41.0):
   tower-mode fixes under the experimental flag (#3461, plus the #3549 web
   tower UI), and print-mode session records no longer being lost on error
   exits (#3531) (host-owned / not consumed).
+
+
+Baseline delta (0.41.0 → 0.43.1), reviewed 2026-09-17:
+
+- Target: annotated `@moonshot-ai/kimi-code@0.43.1`, tag object
+  `a3c66ba1b019c37e4069c5611266669d0438eb62`, commit
+  `75ac010bcb2050338444455de8328492d152c919`; 107 commits from the HUD
+  baseline, including 52 after 0.42.0.
+- #3787 changes managed quota to ratios. The consumer fix uses schema v3,
+  preserves the old API parser as a fallback, and renders Monthly totals
+  with a correctly derived kimi/code split (#31).
+- #3737 adds wire-layer branch and human records outside Event2's generated
+  manifest. #29 fixtures are retained. The historical 0.38.0 observation
+  above that an unchanged manifest accompanied unchanged consumed semantics
+  must not be used as a general rule: wire-layer writers also define the
+  persisted contract. KI-18 describes the source-verified raw-journal boundary.
+- The Event2 manifest contains 59 entries (was 60): `prompt.accepted` is
+  removed and `turn.prompt.turnId` is optional. Existing consumed step/usage
+  fields remain supported; human mirrors are not counted a second time.
+- The status-line runner is unchanged. The new `ctrl+o expand/collapse`
+  hint moves to host-owned line 2 with a custom command. Permission display
+  names and plugin manifest/SessionStart contracts remain unchanged.
+- This is source and synthetic-fixture verification on an unmerged candidate,
+  not live TUI acceptance or a HUD release. See
+  [the full review](upstream-0.43.1-review.md) for decisions and remaining gates.

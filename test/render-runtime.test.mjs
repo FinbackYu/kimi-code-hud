@@ -75,7 +75,7 @@ test('runtime snapshot reads and parses the four per-frame sources', () => {
   fs.writeFileSync(paths.configTomlPath, '[models."K3"]\nprovider = "anthropic"\n');
   fs.writeFileSync(paths.tuiTomlPath, 'theme = "light"\n');
   fs.writeFileSync(paths.quotaCachePath, JSON.stringify({
-    version: 2,
+    version: 3,
     contextKey: '0123456789abcdef',
     fetchedAt: 1,
     weekly: null,
@@ -94,7 +94,7 @@ test('runtime snapshot skips the remaining sources once the deadline is spent', 
   fs.writeFileSync(paths.configTomlPath, '[models."K3"]\nprovider = "anthropic"\n');
   fs.writeFileSync(paths.tuiTomlPath, 'theme = "light"\n');
   fs.writeFileSync(paths.quotaCachePath, JSON.stringify({
-    version: 2,
+    version: 3,
     contextKey: '0123456789abcdef',
     fetchedAt: 1,
     weekly: null,
@@ -174,7 +174,7 @@ test('runtime passes a context-matching quota cache to render and refresh', asyn
   const configText = '[models."K3"]\nprovider = "managed:kimi-code"\n';
   const contextKey = resolveQuotaContextKey({ env, configText, kimiHome: paths.kimiHome });
   const cachedQuota = {
-    version: 2,
+    version: 3,
     contextKey,
     fetchedAt: now - 1_000,
     weekly: { used: 25, limit: 100 },
@@ -227,7 +227,7 @@ test('runtime hides a cache tagged for another context and refreshes with null',
   // A different (e.g. other-region / other-slot) tag: fresh-looking figures
   // that do not belong to the current context must not render as current.
   const foreignQuota = {
-    version: 2,
+    version: 3,
     contextKey: expectedKey === '0123456789abcdef' ? 'fedcba9876543210' : '0123456789abcdef',
     fetchedAt: now - 1_000,
     weekly: { used: 25, limit: 100 },
@@ -271,7 +271,7 @@ test('a same-slot credential swap hides the cache and reschedules under the new 
   fs.writeFileSync(credPath, JSON.stringify({ access_token: 'account-a-access' }));
   const keyA = resolveQuotaContextKey({ env, configText, kimiHome: paths.kimiHome });
   const cacheA = {
-    version: 2,
+    version: 3,
     contextKey: keyA,
     fetchedAt: now - 1_000,
     weekly: { used: 25, limit: 100 },

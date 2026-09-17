@@ -40,7 +40,10 @@ export const QUOTA_REFRESH_MARGIN_MS = 10_000;
 export const LOCK_STALE_MS = 30_000;
 
 /**
- * On-disk quota cache schema. Version 2 adds the non-reversible context tag
+ * On-disk quota cache schema. Version 3 adds explicit ratio entries and
+ * optional monthly components; legacy payloads retain their absolute counts.
+ * Earlier cache versions are refreshed instead of reinterpreted. Version 2
+ * introduced the non-reversible context tag
  * (`contextKey`, derived from the credential slot + endpoint + the credential
  * file's content digest) that lets the render data plane tell whether the
  * figures still belong to the credentials the config currently points at.
@@ -48,7 +51,7 @@ export const LOCK_STALE_MS = 30_000;
  * as current quota: they cannot be attributed to a context, so they render
  * nothing until the next successful refresh rewrites a tagged cache.
  */
-export const QUOTA_CACHE_VERSION = 2;
+export const QUOTA_CACHE_VERSION = 3;
 
 /**
  * Freshness contract shared by the scheduler and the renderer.
@@ -196,16 +199,38 @@ function quotaValues(detail) {
   return { used, limit };
 }
 
+function ratioEntry(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = raw.used_ratio;
+  if ((typeof value !== 'number' && typeof value !== 'string') || isAbsentLike(value)) return null;
+  const usedRatio = Number(value);
+  if (!Number.isFinite(usedRatio) || usedRatio < 0) return null;
+  return { usedRatio, resetAt: typeof raw.reset_time === 'string' ? raw.reset_time : null };
+}
+
 /**
  * Parse the /usages API response into the cache shape.
- * Lenient: numeric fields may be strings, omitted zero usage is derived from
- * limit - remaining, and detail may live on the item top level.
- * Returns null when nothing usable is present.
+ * The quota model serves ratios, not absolute counts. Only known windows are
+ * modeled, independent of goods_version. An empty usages map is authoritative
+ * and clears previously cached windows. Legacy counters remain a fallback
+ * only when the usages field is absent.
  * @param {object} json
- * @returns {{weekly: object, windows: object[]}|null}
+ * @returns {{weekly: object|null, windows: object[], monthly?: object|null}|null}
  */
 export function parseQuotaPayload(json) {
   if (!json || typeof json !== 'object') return null;
+  if (Object.hasOwn(json, 'usages')) {
+    const raw = json.usages;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const short = ratioEntry(raw.limit_5h);
+    const total = ratioEntry(raw.limit_month_total);
+    const code = ratioEntry(raw.limit_month_code);
+    return {
+      weekly: ratioEntry(raw.limit_7d),
+      windows: short ? [{ label: '5h', ...short }] : [],
+      monthly: total || code ? { total, code } : null,
+    };
+  }
   let weekly = null;
   const u = json.usage;
   if (u && typeof u === 'object') {
@@ -237,11 +262,10 @@ export function parseQuotaPayload(json) {
 /**
  * Read the quota cache file. Never throws.
  *
- * Only schema-version 2 caches — those carrying a `contextKey` tag — are
- * returned. Anything else (legacy version-1 files, hand-written shapes) is
- * treated as absent: it cannot be attributed to the current credential slot
- * and endpoint, so it must never surface as current quota. The first
- * successful refresh rewrites a tagged cache in place.
+ * Only schema-version 3 caches — those carrying a `contextKey` tag — are
+ * returned. Older schema versions are treated as absent until a successful
+ * refresh writes the current schema. A valid context tag is still required;
+ * unattributed figures must never surface as the current account's quota.
  * @param {string} [cachePath]
  * @returns {{fetchedAt: number, contextKey: string, weekly: object|null,
  *   windows: object[]}|null}
@@ -328,7 +352,7 @@ function isQuotaRefreshDue(cache, now = Date.now()) {
 }
 
 /**
- * Atomically write a schema-version-2, context-tagged quota cache (tmp file +
+ * Atomically write a schema-version-3, context-tagged quota cache (tmp file +
  * rename). Refuses to persist an unattributed cache: every on-disk quota file
  * must be able to answer "which credential slot, endpoint and credential
  * content does this belong to?". Never throws.
@@ -416,7 +440,7 @@ export function resolveQuotaContextKey({
 }
 
 /**
- * True when the cache is a schema-version-2 cache tagged for the given
+ * True when the cache is a schema-version-3 cache tagged for the given
  * context. The render data plane calls this before presenting quota figures:
  * a cache from another credential slot, region, or credential content is
  * never shown as the current account's numbers.
