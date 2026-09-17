@@ -399,6 +399,52 @@ const SCENARIOS = [
       assert.ok(rendered.every((line) => !line.includes('[goal')));
     },
   },
+  {
+    /**
+     * Upstream 2.0.0 (#3778) adds the observable Event2 record
+     * `subagent.cancelled` (mirrorAgentRun `SubagentCancelled`) outside the
+     * wire manifest: evicted, interrupted or timed-out subagents now report
+     * as cancelled instead of failed/aborted. Like every unknown record
+     * class it must fold as a no-op.
+     */
+    label: 'subagent cancelled records',
+    fixture: 'wire-events-subagent-cancelled.jsonl',
+    fixtureTitle: 'fixture appends subagent.cancelled rows to the reference wire',
+    fold: 'noop',
+    foldTitle: 'processWireChunk folds subagent.cancelled records without touching the state',
+    baselineTitle: 'subagent.cancelled records leave metrics, state and render identical to baseline',
+    rowsUnder(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && /"type":"subagent\.cancelled"/.test(line));
+    },
+    baseline(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && !/"type":"subagent\.cancelled"/.test(line))
+        .join('\n') + '\n';
+    },
+    fixtureChecks(wireText, baselineText) {
+      assert.deepEqual(
+        this.rowsUnder(wireText).map((line) => JSON.parse(line).type),
+        ['subagent.cancelled', 'subagent.cancelled'],
+      );
+      const referenceLines = REFERENCE.split('\n').filter((line) => line).length;
+      assert.equal(wireText.split('\n').filter((line) => line).length, referenceLines + 2);
+      // Stripping the cancelled rows must reproduce the reference wire fixture
+      // byte-identically, so the comparison differs on exactly one axis.
+      assert.equal(baselineText, REFERENCE);
+      assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
+      for (const line of this.rowsUnder(wireText)) {
+        const row = JSON.parse(line);
+        assert.equal(typeof row.subagentId, 'string');
+        assert.ok(row.time >= 1785456000000 && row.time <= 1785456060000);
+      }
+    },
+    baselineReadings(metrics) {
+      assert.equal(metrics.tps, 30);
+    },
+  },
 ];
 
 const readFixture = (scenario) => fs.readFileSync(path.join(FIXTURES, scenario.fixture), 'utf8');
