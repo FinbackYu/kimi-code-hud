@@ -309,3 +309,29 @@ Baseline delta (0.41.0 → 0.43.1), reviewed 2026-09-17:
 - This is source and synthetic-fixture verification on an unmerged candidate,
   not live TUI acceptance or a HUD release. See
   [the full review](upstream-0.43.1-review.md) for decisions and remaining gates.
+
+Baseline delta (0.43.1 → 2.0.0), reviewed 2026-09-17:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.0.0`, tag object
+  `834bdd50b10b53b90d2ce5d72f5864a8a2309492`, commit
+  `1b89e4b039f052d10f258464413b2047acca12ba`; 29 commits from the HUD
+  baseline, 370 files (+12928/−4380). The upstream marketing major jumped
+  with no breaking or behavioral change on any HUD-consumed surface.
+- `subagent.cancelled` (#3778) is a new observable Event2 mirror outside the
+  Event2 manifest: evicted, interrupted or timed-out subagents report
+  cancelled instead of failed/aborted. Locked as a neutral row class in
+  `test/wire-row-classes.test.mjs`.
+- The Event2 manifest, `StatusLinePayload` (10 fields), the quota endpoint
+  (ratio model of #3787), permission labels and the locked kap
+  subagent/task schemas are unchanged; events-zod only gains
+  `subagentCancelledEventSchema`.
+- #3784 uploads images as file references and drops over-budget media with
+  a warning (`media.budgetDropped` state key): request composition only, no
+  consumed wire or payload surface changes.
+- Additive: `/desktop` (alias `/install-desktop`) with `kimi install-app`,
+  terminal Mermaid rendering (`[markdown] mermaid = "off"`), diff code
+  block highlighting, skill scopes, and the "Kimi Browser Extension"
+  display rename (#3803, host-owned panels). None touch HUD line 1.
+- Source and synthetic-fixture verification on an unmerged branch; the
+  0.43.1 live TUI/managed-account acceptance carries over and remains
+  pending. See [the full review](upstream-2.0.0-review.md).

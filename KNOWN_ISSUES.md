@@ -2,8 +2,8 @@
 
 - Last verified: 2026-09-17
 - HUD behavior baseline: `v0.8.2` (`ae66403`)
-- Kimi Code baseline: `0.43.1` (`75ac010bcb2050338444455de8328492d152c919`)
-- Compatibility candidate: `f7aca7c` plus unmerged #29 / #31 changes; source and synthetic fixtures verified, live TUI acceptance pending. The HUD line above identifies the last release, not a release of this candidate.
+- Kimi Code baseline: `2.0.0` (`1b89e4b039f052d10f258464413b2047acca12ba`)
+- Compatibility candidate: main (`227bb74`, merged #29 / #31) plus this branch's 2.0.0 baseline advance; source and synthetic fixtures verified, live TUI acceptance pending. The HUD line above identifies the upstream release, not a HUD release.
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -133,7 +133,7 @@ Affected upstream slot: `model` / status-line payload
 The built-in footer renders the host's in-memory session state
 (`state.thinkingEffort`), so it always shows the current runtime effort. The
 custom status line has no such field: `StatusLinePayload` (10 fields,
-unchanged through 0.43.1) carries no thinking-effort entry.
+unchanged through 2.0.0) carries no thinking-effort entry.
 
 In-session switches: the original finding, verified against 0.34.0 wires, was
 that a switch emits no local event the HUD could read. That is no longer true:
@@ -632,7 +632,7 @@ Conditions for reconsidering active-chain support:
 
 ## KI-19: Managed quota payload switched to ratios
 
-Status: fixed on the unmerged 0.43.1 compatibility branch; live account acceptance pending
+Status: fixed on main via PR #32; live account acceptance pending
 
 Upstream #3787 changed `/usages` to `usages.limit_5h`, `limit_7d`,
 `limit_month_total`, and `limit_month_code` entries with `used_ratio` and
