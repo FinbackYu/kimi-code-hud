@@ -1,8 +1,9 @@
 # Known issues
 
-- Last verified: 2026-09-14
+- Last verified: 2026-09-17
 - HUD behavior baseline: `v0.8.2` (`ae66403`)
-- Kimi Code baseline: `0.41.0` (`95478e8c7ba248fd2470d5bb151555ec7fedd19d`)
+- Kimi Code baseline: `0.43.1` (`75ac010bcb2050338444455de8328492d152c919`)
+- Compatibility candidate: `f7aca7c` plus unmerged #29 / #31 changes; source and synthetic fixtures verified, live TUI acceptance pending. The HUD line above identifies the last release, not a release of this candidate.
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -132,7 +133,7 @@ Affected upstream slot: `model` / status-line payload
 The built-in footer renders the host's in-memory session state
 (`state.thinkingEffort`), so it always shows the current runtime effort. The
 custom status line has no such field: `StatusLinePayload` (10 fields,
-unchanged through 0.41.0) carries no thinking-effort entry.
+unchanged through 0.43.1) carries no thinking-effort entry.
 
 In-session switches: the original finding, verified against 0.34.0 wires, was
 that a switch emits no local event the HUD could read. That is no longer true:
@@ -359,7 +360,7 @@ Acceptance criteria:
   previous value may remain and is marked stale after the 60s TTL;
 - regression tests cover all of the above (`test/quota.test.mjs`).
 
-Update: the render data plane now compares the cache's schema-v2
+Update: the render data plane now compares the cache's schema-v3
 `contextKey` — covering the credential slot, the region endpoint, and the
 credential file's content fingerprint — with the config's current context
 before showing anything, so region switches, credential-slot switches, and
@@ -518,7 +519,7 @@ from "same account, rotated token" — hashing or comparing tokens to tell them
 apart is exactly what the HUD must not do.
 
 The HUD therefore attributes quota by the credential file's content itself:
-the schema-version-2 `contextKey` that tags the cache and keys the refresh
+the schema-version-3 `contextKey` that tags the cache and keys the refresh
 backoff is a non-reversible digest of the credential slot path, the endpoint,
 and the credential file's content fingerprint. Any content change — another
 account signing into the same slot, a routine token rotation, a logout, even
@@ -569,3 +570,88 @@ Acceptance criteria:
 - a frame without budget for the credential read shows no quota rather than
   unverified quota;
 - no cache, backoff-state, or diagnostics field ever stores a token.
+
+## KI-18: Undo branch records stay in the wire journal; HUD folds the raw stream
+
+Status: documented information boundary; source/fixture review complete, live undo acceptance pending
+
+Affected area: wire reconstruction / undo
+
+Kimi Code 0.43.0 (PR #3737, verified against 0.43.1) rebuilds the session wire
+journal into a single-file logical branch tree. An undo no longer truncates
+anything on disk: `switchBranch` appends a three-record marker —
+
+- `agent.switched` — the branch-switch edge, payload `{ branch, reason,
+  base: { branch, line }, turns, legacyUndoLine }`, where `base` points at the
+  fork line and `legacyUndoLine` at the physical line of the next record;
+- `context.undo` — the legacy marker (persisted since 0.41.0; the HUD has
+  never consumed it);
+- `context.undone` — memory-only before this PR, a persisted wire row from
+  0.43.0 on.
+
+The physical on-disk schema is unchanged — still append-only
+`{type, …payload, time}` lines — so `src/wire-reader.mjs` byte-offset reading
+is unaffected, and every HUD reducer gates on exact known types, so the triple
+folds as a no-op. That neutrality is locked by the `undo switch triple`
+scenario in `test/wire-row-classes.test.mjs`; the same scenario family covers
+the PR's other manifest-external record classes (`agent.turn.started` /
+`agent.turn.ended` / `agent.message.appended`, `human.*` mirrors — see
+[CAPABILITIES.md](CAPABILITIES.md#readable-but-not-rendered)).
+
+The distinction is about rebuild semantics, not parsing. Upstream rebuilds
+undoable state from the restorable chain — `eventDispatcherService` folds
+`wire.readRestorable()` (branch-aware) for `undoable` participants and
+`wire.readJournal()` (the raw sequential stream) for everyone else. The HUD
+folds the raw stream sequentially for every projection, so rows of the
+abandoned branch remain visible to it after an undo, exactly as they are to
+upstream's own non-undoable participants.
+
+The initial prep note overestimated the badge deviation. The 0.43.1 source
+uses non-undoable state for `profileKey`, `swarmKey`, `towerKey`, and `taskKey`,
+and explicitly sets `goal` to `undoable: false`. Retaining their raw history
+is therefore not, by itself, a mismatch with the host. The task notification
+delivery state is undoable, but it is separate from the registry the HUD reads.
+See [the pinned review](docs/upstream-0.43.1-review.md) for source locations.
+
+Consequences, by projection:
+
+| Projection | After undo | Self-heals |
+|---|---|---|
+| model/effort, swarm/tower, goal | retains raw-history state, as upstream non-undoable participants do | no branch rollback required by these source contracts |
+| usage / cost accumulation (`step.end` / `usage.record`) | keeps the abandoned branch's contribution — correct: those tokens were really spent, undo grants no refund | not applicable (by design) |
+| task registry (`task.started` / `task.terminated`) | matches upstream's own raw-fold reading | source-aligned; real task lifecycle still needs manual acceptance |
+| generation timing / TPS | describes the latest attempted work and spent steps, not a rebuilt active conversation | no claim of active-chain parity after undo |
+
+Conditions for reconsidering active-chain support:
+
+- upstream exposes the active branch, or an active-chain snapshot, through a
+  status-line payload field or another explicit interface; or
+- the HUD decides the deviation is worth a branch-aware re-fold and implements
+  `agent.switched` edge handling under the same bounded-read guarantees.
+
+
+## KI-19: Managed quota payload switched to ratios
+
+Status: fixed on the unmerged 0.43.1 compatibility branch; live account acceptance pending
+
+Upstream #3787 changed `/usages` to `usages.limit_5h`, `limit_7d`,
+`limit_month_total`, and `limit_month_code` entries with `used_ratio` and
+`reset_time`. The old HUD parser returned `null`, leaving stale cached values
+and eventually hiding the quota segment (GitHub #31).
+
+The parser now preserves ratios without fabricating absolute counts. Cache
+v3 retains credential-context attribution; old caches are ignored until a
+successful detached refresh. An empty valid map clears obsolete windows.
+Legacy `usage`/`limits` parsing remains available only when `usages` is absent.
+
+Monthly displays total usage and, when both entries exist, `kimi = total -
+code` with the upstream breakdown clamp. A missing component stays unknown;
+weekly-only and code-only responses remain visible even in compact layout.
+The existing HUD rounding and overflow percentage display are retained; this
+is a presentation variant from the host's ceiled, 100%-capped percentage.
+Unknown windows, goods-version labels and booster-wallet monetary facts are
+not rendered. Subscription ratios are not API balances or token costs.
+
+Synthetic regressions cover the HTTP parser, context-tagged cache migration,
+empty-map refresh, normal/compact output, malformed and zero values, reset
+countdowns, freshness and expiry. No real credentials or user data were used.

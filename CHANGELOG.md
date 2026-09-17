@@ -6,6 +6,22 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Restore managed-subscription quota display for the ratio-based `/usages`
+  response shipped with Kimi Code 0.43.1 (#31). Show reported 5h, weekly and
+  Monthly windows, including the monthly kimi/code split. Cache v3 refreshes
+  older caches, retains credential-context isolation, and reports migration
+  correctly in `--doctor`; legacy API responses remain supported.
+
+### Compatibility
+
+- Audit the 0.41.0 → 0.43.1 source range and update pinned references. Carry
+  forward #29's neutral wire-row fixtures, correct the raw-journal parity
+  description, and document the host-owned `ctrl+o` hint. Live TUI/undo and
+  managed-account acceptance remain outstanding; see
+  [the review](docs/upstream-0.43.1-review.md).
+
 ### Changed
 
 - Advance the audited Kimi Code compatibility baseline from 0.40.1 to 0.41.0:

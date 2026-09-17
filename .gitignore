@@ -5,6 +5,7 @@ docs/*
 !docs/media/
 !docs/showcase/
 !docs/capabilities-archive.md
+!docs/upstream-0.43.1-review.md
 docs/showcase/*
 !docs/showcase/README.md
 !docs/showcase/export-assets.py
