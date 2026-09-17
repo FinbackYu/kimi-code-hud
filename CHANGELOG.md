@@ -16,6 +16,11 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ### Compatibility
 
+- Audit the 0.43.1 → 2.0.0 source range: no consumed surface changes. Lock
+  the new `subagent.cancelled` wire record (#3778) as a neutral row class
+  and advance pinned baseline references to 2.0.0. Live TUI and
+  managed-account acceptance remain outstanding; see
+  [the review](docs/upstream-2.0.0-review.md).
 - Audit the 0.41.0 → 0.43.1 source range and update pinned references. Carry
   forward #29's neutral wire-row fixtures, correct the raw-journal parity
   description, and document the host-owned `ctrl+o` hint. Live TUI/undo and
