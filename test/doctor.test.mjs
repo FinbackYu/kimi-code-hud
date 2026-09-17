@@ -246,6 +246,17 @@ test('a legacy untagged quota cache warns until a refresh re-tags it', () => {
   assert.equal(doctorExitCode(report), 1);
 });
 
+test('a tagged v2 quota cache is outdated, not falsely described as unattributed', () => {
+  const env = makeEnv();
+  seedQuotaCache(env.paths, env.kimiHome);
+  const cache = JSON.parse(fs.readFileSync(env.paths.quotaCachePath, 'utf8'));
+  fs.writeFileSync(env.paths.quotaCachePath, JSON.stringify({ ...cache, version: 2 }));
+  const check = one(collect(env).report, 'quota', 'cache');
+  assert.equal(check.level, 'note');
+  assert.match(check.detail, /unsupported quota cache schema/);
+  assert.doesNotMatch(check.detail, /untagged|no context attribution/);
+});
+
 test('corrupt JSON in quota cache, refresh state, git cache and HUD config all warn', () => {
   const env = makeEnv();
   fs.writeFileSync(env.paths.quotaCachePath, '{"version":2,"contextKey":"aaaaaaaa');

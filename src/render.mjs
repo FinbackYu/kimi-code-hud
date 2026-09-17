@@ -209,8 +209,17 @@ function formatElapsed(ms) {
   return `${Math.floor(h / 24)}d${h % 24}h`;
 }
 
-function pctOf(used, limit) {
-  return Math.round((used / limit) * 100);
+function quotaFraction(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  let fraction;
+  if (Object.hasOwn(entry, 'usedRatio')) {
+    fraction = entry.usedRatio;
+  } else {
+    if (!Number.isFinite(entry.used) || !Number.isFinite(entry.limit) || entry.limit <= 0) return null;
+    fraction = entry.used / entry.limit;
+  }
+  return typeof fraction === 'number' && Number.isFinite(fraction)
+    && fraction >= 0 && Number.isFinite(fraction * 100) ? fraction : null;
 }
 
 function stripAnsi(s) {
@@ -473,10 +482,10 @@ function quotaSegment({ layout, quota, color, now, C }) {
   // current.
   const useLevelColor = color && !stale;
   const parts = [];
-  for (const window of quota.windows || []) {
-    const fraction = window.used / window.limit;
-    const pct = `${pctOf(window.used, window.limit)}%`;
-    const label = sanitizeTerminalText(window.label);
+  const formatWindow = (label, entry) => {
+    const fraction = quotaFraction(entry);
+    if (fraction === null) return null;
+    const pct = `${Math.round(fraction * 100)}%`;
     // Compact drops the bar, so the percentage itself takes over the
     // usage-level signal the bar color carries in the normal layout.
     let text;
@@ -486,16 +495,32 @@ function quotaSegment({ layout, quota, color, now, C }) {
     } else {
       text = `${label} ${bar(fraction, useLevelColor, C)} ${pct}`;
     }
-    const countdown = formatCountdown(window.resetAt, now);
+    const countdown = formatCountdown(entry.resetAt, now);
     if (countdown) text += ` ${countdown}`;
-    parts.push(text);
+    return text;
+  };
+  for (const window of Array.isArray(quota.windows) ? quota.windows : []) {
+    const text = formatWindow(sanitizeTerminalText(window?.label), window);
+    if (text) parts.push(text);
   }
-  if (layout !== 'compact' && quota.weekly) {
-    const fraction = quota.weekly.used / quota.weekly.limit;
-    let text = `7d ${bar(fraction, useLevelColor, C)} ${pctOf(quota.weekly.used, quota.weekly.limit)}%`;
-    const countdown = formatCountdown(quota.weekly.resetAt, now);
-    if (countdown) text += ` ${countdown}`;
+  if (layout !== 'compact' || parts.length === 0) {
+    const text = formatWindow('7d', quota.weekly);
+    if (text) parts.push(text);
+  }
+  const total = quotaFraction(quota.monthly?.total);
+  const code = quotaFraction(quota.monthly?.code);
+  if (total !== null) {
+    let text = formatWindow('Monthly', quota.monthly.total);
+    if (code !== null) {
+      // monthCode is a share of monthTotal, not an independent allowance.
+      // Follow the upstream breakdown's subtraction and floating-point clamp.
+      const codeRatio = Math.min(code, 1);
+      const kimiRatio = Math.max(0, Math.min(Math.round((total - codeRatio) * 1e6) / 1e6, 1));
+      text += ` (kimi ${Math.round(kimiRatio * 100)}% · code ${Math.round(codeRatio * 100)}%)`;
+    }
     parts.push(text);
+  } else if (code !== null) {
+    parts.push(formatWindow('Monthly code', quota.monthly.code));
   }
   if (parts.length === 0) return null;
   const text = parts.join(' · ');
@@ -618,7 +643,7 @@ function buildSegments(layout, ctx) {
  * normal -> compact when the line exceeds MAX_WIDTH visible chars.
  * @param {object} ctx
  * @param {object} ctx.payload stdin snapshot from the host
- * @param {object|null} ctx.quota context-verified schema-v2 quota cache
+ * @param {object|null} ctx.quota context-verified schema-v3 quota cache
  *   (weekly/windows plus the fetchedAt the age contract is checked against)
  * @param {object|object[]|null} ctx.providerUsage normalized provider facts
  * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, towerMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, genSettledMs, genSettledAt, compactingSince, compactionMs, compactedAt, tasks}

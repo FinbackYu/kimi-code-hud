@@ -33,6 +33,7 @@ import {
 import {
   LOCK_STALE_MS,
   QUOTA_AGE,
+  QUOTA_CACHE_VERSION,
   quotaAge,
   quotaContextKeyFor,
   credentialFileFingerprint,
@@ -142,7 +143,8 @@ function classifyQuotaCache(filePath) {
   const file = readJsonObject(filePath);
   if (file.state !== 'ok') return file;
   const data = file.data;
-  if (data.version !== 2) return { state: 'legacy', data: null };
+  if (data.version === undefined || data.version === 1) return { state: 'legacy', data: null };
+  if (data.version !== QUOTA_CACHE_VERSION) return { state: 'outdated', data: null };
   if (
     typeof data.contextKey !== 'string'
     || !/^[0-9a-f]{16}$/.test(data.contextKey)
@@ -417,6 +419,10 @@ export function collectDoctorReport({
     add('quota', level, 'cache', detail, { path: p.quotaCachePath });
   } else if (cache.state === 'missing') {
     add('quota', 'note', 'cache', 'no cache yet — the first render spawns a background refresh',
+      { path: p.quotaCachePath });
+  } else if (cache.state === 'outdated') {
+    add('quota', 'note', 'cache',
+      'unsupported quota cache schema — ignored; the next successful refresh writes the current schema',
       { path: p.quotaCachePath });
   } else if (cache.state === 'legacy') {
     add('quota', 'warn', 'cache',

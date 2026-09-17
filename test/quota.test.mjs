@@ -51,6 +51,65 @@ const REAL_RESPONSE = {
 // Any valid 16-hex tag works for shape-level tests.
 const DUMMY_CONTEXT_KEY = '0123456789abcdef';
 
+const RATIO_RESPONSE = JSON.parse(fs.readFileSync(
+  new URL('./fixtures/quota-response-ratio.json', import.meta.url), 'utf8',
+));
+
+test('quota model preserves reported ratios and monthly components without inventing counts', () => {
+  assert.deepEqual(parseQuotaPayload(RATIO_RESPONSE), {
+    weekly: { usedRatio: 0.5, resetAt: '2026-08-02T12:00:00Z' },
+    windows: [{ label: '5h', usedRatio: 0.25, resetAt: '2026-07-30T12:00:00Z' }],
+    monthly: {
+      total: { usedRatio: 0.6, resetAt: '2026-08-01T00:00:00Z' },
+      code: { usedRatio: 0.2, resetAt: null },
+    },
+  });
+});
+
+test('quota model rejects missing or malformed ratios while preserving explicit zero and overflow', () => {
+  for (const used_ratio of [null, undefined, '', ' ', true, [], {}, -0.1, Infinity, 'NaN']) {
+    const parsed = parseQuotaPayload({ usages: { limit_5h: { used_ratio } } });
+    assert.deepEqual(parsed, { weekly: null, windows: [], monthly: null });
+  }
+  assert.equal(parseQuotaPayload({ usages: { limit_5h: { used_ratio: 0 } } }).windows[0].usedRatio, 0);
+  assert.equal(parseQuotaPayload({ usages: { limit_7d: { used_ratio: '1.2' } } }).weekly.usedRatio, 1.2);
+  for (const usages of [null, [], 'bad']) assert.equal(parseQuotaPayload({ usages }), null);
+});
+
+test('quota model presence supersedes legacy counters and an empty map clears old windows', () => {
+  assert.deepEqual(parseQuotaPayload({ ...REAL_RESPONSE, usages: {} }), {
+    weekly: null, windows: [], monthly: null,
+  });
+  const parsed = parseQuotaPayload({ usages: { limit_month_code: { used_ratio: 0.2 } } });
+  assert.equal(parsed.monthly.total, null);
+  assert.equal(parsed.monthly.code.usedRatio, 0.2);
+});
+
+test('ratio cache round-trips with context attribution and rejects the old cache version', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-ratio-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cachePath = path.join(dir, 'quota.json');
+  const parsed = parseQuotaPayload(RATIO_RESPONSE);
+  assert.ok(writeQuotaCache(parsed, cachePath, { contextKey: DUMMY_CONTEXT_KEY, now: 1234 }));
+  const cache = readQuotaCache(cachePath);
+  assert.deepEqual(cache, { version: 3, contextKey: DUMMY_CONTEXT_KEY, fetchedAt: 1234, ...parsed });
+  assert.ok(quotaCacheMatchesContext(cache, DUMMY_CONTEXT_KEY));
+  assert.ok(!quotaCacheMatchesContext(cache, 'fedcba9876543210'));
+  fs.writeFileSync(cachePath, JSON.stringify({ ...cache, version: 2 }));
+  assert.equal(readQuotaCache(cachePath), null);
+  assert.ok(!quotaCacheMatchesContext({ ...cache, version: 2 }, DUMMY_CONTEXT_KEY));
+});
+
+test('quota request accepts a ratio response and ignores unmodeled fields', async () => {
+  const result = await requestQuota({
+    token: 'fixture-token',
+    fetchImpl: async () => new Response(JSON.stringify(RATIO_RESPONSE)),
+  });
+  assert.equal(result.status, QUOTA_RESULT.SUCCESS);
+  assert.equal(result.parsed.monthly.total.usedRatio, 0.6);
+  assert.ok(!JSON.stringify(result.parsed).includes('future'));
+});
+
 // The mainland default slot for a temp kimi-home, keyed the same way the
 // resolver keys it: credential path + endpoint + content fingerprint (the
 // sentinel when the file is absent), so seeded caches share one attributable
@@ -64,7 +123,7 @@ function mainlandContextKey(kimiHome) {
   );
 }
 
-/** Seed a schema-v2 cache tagged for the temp kimi-home's mainland slot. */
+/** Seed a schema-v3 cache tagged for the temp kimi-home's mainland slot. */
 function seedCache(kimiHome, cachePath, parsed = parseQuotaPayload(REAL_RESPONSE)) {
   return writeQuotaCache(parsed, cachePath, {
     contextKey: mainlandContextKey(kimiHome),
@@ -1006,6 +1065,32 @@ const statusResponse = (status, headers) => ({
   ok: status >= 200 && status < 300,
   status,
   ...(headers ? { headers } : {}),
+});
+
+test('refreshQuota replaces a legacy cache with ratios, then clears absent windows', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-quota-migrate-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const env = failureEnv(dir);
+  fs.writeFileSync(env.cachePath, JSON.stringify({
+    version: 2, contextKey: mainlandContextKey(env.kimiHome), fetchedAt: 1,
+    ...parseQuotaPayload(REAL_RESPONSE),
+  }));
+  assert.equal(readQuotaCache(env.cachePath), null);
+  for (const [payload, expected] of [
+    [RATIO_RESPONSE, 0.5],
+    [{ usages: {} }, null],
+  ]) {
+    assert.ok(await refreshQuota({ ...env, fetchImpl: async () => response(200, payload) }));
+    const cache = readQuotaCache(env.cachePath);
+    assert.equal(cache.version, 3);
+    assert.equal(cache.weekly?.usedRatio ?? null, expected);
+    assert.ok(quotaCacheMatchesContext(cache, mainlandContextKey(env.kimiHome)));
+    if (expected === null) {
+      assert.deepEqual(cache.windows, []);
+      assert.equal(cache.monthly, null);
+    }
+    assert.ok(!fs.readFileSync(env.cachePath, 'utf8').includes('fake-access-token'));
+  }
 });
 
 test('refreshQuota persists 429 backoff with Retry-After honored', async () => {

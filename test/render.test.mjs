@@ -6,6 +6,7 @@ import {
   QUOTA_STALE_MARK_MS,
   QUOTA_STALE_MAX_MS,
   QUOTA_CLOCK_SKEW_MS,
+  parseQuotaPayload,
 } from '../src/quota.mjs';
 import { baseCtx as sharedCtx, basePayload as sharedPayload } from './.helpers.mjs';
 
@@ -35,6 +36,53 @@ function baseCtx(overrides = {}) {
 function quotaAt(weekly = null, windows = [{ label: '5h', used: 31, limit: 100, resetAt: '2026-07-30T12:18:00Z' }]) {
   return { fetchedAt: NOW - 30_000, weekly, windows };
 }
+
+test('ratio quota displays monthly total and derives kimi as total minus code', () => {
+  const parsed = parseQuotaPayload({ usages: {
+    limit_5h: { used_ratio: 0.25 },
+    limit_7d: { used_ratio: 0.5 },
+    limit_month_total: { used_ratio: 0.6 },
+    limit_month_code: { used_ratio: 0.2 },
+  } });
+  for (const layout of ['normal', 'compact']) {
+    const [line] = renderHud(baseCtx({ layout, quota: { fetchedAt: NOW, ...parsed } }));
+    assert.match(line, /5h (?:[█░]+ )?25%/);
+    assert.match(line, /Monthly (?:[█░]+ )?60% \(kimi 40% · code 20%\)/);
+    assert.doesNotMatch(line, /kimi 60%|NaN|undefined/);
+  }
+});
+
+test('weekly-only and monthly-only plans remain visible in compact layout', () => {
+  for (const [usages, expected] of [
+    [{ limit_7d: { used_ratio: 0 } }, /7d 0%/],
+    [{ limit_month_total: { used_ratio: 0.6 } }, /Monthly 60%/],
+    [{ limit_month_code: { used_ratio: 0.2 } }, /Monthly code 20%/],
+  ]) {
+    const [line] = renderHud(baseCtx({ layout: 'compact', quota: {
+      fetchedAt: NOW, ...parseQuotaPayload({ usages }),
+    } }));
+    assert.match(line, expected);
+    assert.doesNotMatch(line, /kimi 0%|5h/);
+  }
+});
+
+test('ratio quota keeps freshness, reset countdown and finite display boundaries', () => {
+  const parsed = parseQuotaPayload({ usages: {
+    limit_5h: { used_ratio: 1.2, reset_time: '2026-07-30T12:18:00Z' },
+    limit_month_total: { used_ratio: 0.1 }, limit_month_code: { used_ratio: 0.2 },
+  } });
+  const quota = { ...parsed, fetchedAt: NOW - QUOTA_STALE_MARK_MS - 1 };
+  const [stale] = renderHud(baseCtx({ layout: 'compact', quota }));
+  assert.match(stale, /5h 120% ~2h18m/);
+  assert.match(stale, /kimi 0% · code 20%/);
+  assert.match(stale, /\[stale\]/);
+  const [expired] = renderHud(baseCtx({ quota: { ...quota, fetchedAt: NOW - QUOTA_STALE_MAX_MS - 1 } }));
+  assert.doesNotMatch(expired, /Monthly|120%/);
+  const [invalid] = renderHud(baseCtx({ quota: {
+    fetchedAt: NOW, windows: [{ label: '5h', usedRatio: NaN }], weekly: { usedRatio: null },
+  } }));
+  assert.doesNotMatch(invalid, /5h|7d|NaN/);
+});
 
 test('bar renders 10 cells graded by usage', () => {
   assert.equal(bar(0, false), '░░░░░░░░░░');
