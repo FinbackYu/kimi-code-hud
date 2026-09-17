@@ -2,8 +2,8 @@
 
 - Last verified: 2026-09-17
 - HUD behavior baseline: `v0.8.2` (`ae66403`)
-- Kimi Code baseline: `0.43.1` (`75ac010bcb2050338444455de8328492d152c919`)
-- Compatibility candidate: `f7aca7c` plus unmerged #29 / #31 changes; source and synthetic fixtures verified, live TUI acceptance pending. The HUD line above identifies the last release, not a release of this candidate.
+- Kimi Code baseline: `2.0.0` (`1b89e4b039f052d10f258464413b2047acca12ba`)
+- Compatibility candidate: main (`227bb74`, merged #29 / #31) plus this branch's 2.0.0 baseline advance; source and synthetic fixtures verified, live TUI acceptance pending. The HUD line above identifies the upstream release, not a HUD release.
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
@@ -13,15 +13,15 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/75ac010bcb2050338444455de8328492d152c919/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/75ac010bcb2050338444455de8328492d152c919/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/75ac010bcb2050338444455de8328492d152c919/apps/kimi-code/src/utils/git/git-status.ts)
-- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/75ac010bcb2050338444455de8328492d152c919/packages/agent-core-v2/docs/wire-manifest.d.ts)
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/75ac010bcb2050338444455de8328492d152c919/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/utils/git/git-status.ts)
+- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/docs/wire-manifest.d.ts)
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/tui/commands/registry.ts)
 
-Per-release baseline audit history (0.32.0 → 0.43.1) lives in
+Per-release baseline audit history (0.32.0 → 2.0.0) lives in
 [docs/capabilities-archive.md](docs/capabilities-archive.md). The sections
-below describe the current contract against the pinned 0.43.1 baseline; new
+below describe the current contract against the pinned 2.0.0 baseline; new
 release audits are appended to the archive instead of growing this file.
 
 ## Footer coverage
@@ -31,7 +31,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 0.43.1 | HUD reviewed branch | Status |
+| Official line-1 slot or state | Upstream 2.0.0 | HUD reviewed branch | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
@@ -56,7 +56,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 0.43.1. HUD installation, configuration, and lifecycle
+built into Kimi Code 2.0.0. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 
@@ -105,7 +105,7 @@ Since Kimi Code 0.43.0 (PR #3737, verified in 0.43.1), `wire.jsonl` may
 also carry persisted wire-layer records outside the persisted record manifest:
 `agent.switched` branch-switch edges, `agent.turn.started` /
 `agent.turn.ended` / `agent.message.appended` projections, `human.*` mirror
-records, and `context.undone` (persisted from 0.43.0; memory-only before). The
+records, and `context.undone` (persisted from 0.43.0; memory-only before). Since 2.0.0 (#3778), evicted, interrupted or timed-out subagents also emit the observable `subagent.cancelled` mirror outside the manifest. The
 physical schema stays append-only `{type, …payload, time}` lines, and every
 HUD reducer gates on exact known types, so these records fold as no-ops; the
 raw-journal versus active-chain boundary is tracked in
