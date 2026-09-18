@@ -46,8 +46,8 @@ test('ratio quota displays monthly total and derives kimi as total minus code', 
   } });
   for (const layout of ['normal', 'compact']) {
     const [line] = renderHud(baseCtx({ layout, quota: { fetchedAt: NOW, ...parsed } }));
-    assert.match(line, /5h (?:[█░]+ )?25%/);
-    assert.match(line, /Monthly (?:[█░]+ )?60% \(kimi 40% · code 20%\)/);
+    assert.match(line, /5h (?:█+ +)?25%/);
+    assert.match(line, /Monthly (?:█+ +)?60% \(kimi 40% · code 20%\)/);
     assert.doesNotMatch(line, /kimi 60%|NaN|undefined/);
   }
 });
@@ -85,14 +85,17 @@ test('ratio quota keeps freshness, reset countdown and finite display boundaries
 });
 
 test('bar renders 10 cells graded by usage', () => {
-  assert.equal(bar(0, false), '░░░░░░░░░░');
-  assert.equal(bar(0.31, false), '███░░░░░░░');
-  assert.equal(bar(0.62, false), '██████░░░░');
+  assert.equal(bar(0, false), ' '.repeat(10));
+  assert.equal(bar(0.31, false), `███${' '.repeat(7)}`);
+  assert.equal(bar(0.62, false), `██████${' '.repeat(4)}`);
   assert.equal(bar(1, false), '██████████');
   assert.equal(bar(2, false), '██████████'); // clamped
   assert.ok(bar(0.9, true).includes('\x1b[31m'));  // >=85% red
   assert.ok(bar(0.7, true).includes('\x1b[33m'));  // >=60% yellow
   assert.ok(bar(0.1, true).includes('\x1b[32m'));  // <60% green
+  assert.ok(bar(0.1, true).includes('\x1b[48;5;238m')); // dark empty track
+  assert.ok(!bar(1, true).includes('\x1b[48;5;238m'));  // full bar: no track cells
+  assert.ok(!bar(0.1, false).includes('\x1b['));        // plain stays uncolored
 });
 
 test('formatCountdown formats d/h/m and reset states', () => {
@@ -118,7 +121,7 @@ test('normal layout adds project, t/s+TTFT, countdown and weekly', () => {
   const [line] = renderHud(baseCtx({ layout: 'normal' }));
   assert.equal(
     line,
-    '[Always Ask] K3 │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h',
+    '[Always Ask] K3 │ kimi-code-hud git:(main*) │ ⚡ 47 t/s · TTFT 1.3s │ 5h ███        31% ~2h18m · 7d ██         25% ~3d2h',
   );
 });
 
@@ -130,8 +133,8 @@ test('normal layout shows zero quota usage with its reset countdown', () => {
       [{ label: '5h', used: 0, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
     ),
   }));
-  assert.ok(line.includes('5h ░░░░░░░░░░ 0% ~2h18m'));
-  assert.ok(line.includes('7d ░░░░░░░░░░ 0% ~3d2h'));
+  assert.ok(line.includes(`5h ${' '.repeat(10)} 0% ~2h18m`));
+  assert.ok(line.includes(`7d ${' '.repeat(10)} 0% ~3d2h`));
 });
 
 test('provider balance uses currency-aware compact text instead of a quota bar', () => {
@@ -550,11 +553,11 @@ test('light theme tones the quota bar down to calmer truecolor hues', () => {
   );
   // Dark (and default) bars keep the terminal-remapped ANSI levels.
   const [dark] = renderHud(baseCtx({ color: true, theme: 'dark', quota: hotQuota }));
-  assert.ok(dark.includes('\x1b[31m█████████░\x1b[0m'));
+  assert.ok(dark.includes('\x1b[31m█████████\x1b[0m\x1b[48;5;238m \x1b[0m'));
   // Light swaps the glaring ANSI red for the host's light error hue; the
   // mid-level amber matches the badge amber.
   const [light] = renderHud(baseCtx({ color: true, theme: 'light', quota: hotQuota }));
-  assert.ok(light.includes('\x1b[38;2;185;28;28m█████████░\x1b[0m')); // #B91C1C
+  assert.ok(light.includes('\x1b[38;2;185;28;28m█████████\x1b[0m\x1b[48;5;251m \x1b[0m')); // #B91C1C
   assert.ok(!light.includes('\x1b[31m'));
 });
 
@@ -919,7 +922,7 @@ test('swarm with two subagents renders the fleet style verbatim', () => {
   const [normal] = renderHud(baseCtx({ layout: 'normal', metrics }));
   assert.equal(
     normal,
-    '[Always Ask] [swarm] K3 │ kimi-code-hud git:(main*) │ ⚡ 90 t/s (2 agents @45) · TTFT 1.3s │ 5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h',
+    '[Always Ask] [swarm] K3 │ kimi-code-hud git:(main*) │ ⚡ 90 t/s (2 agents @45) · TTFT 1.3s │ 5h ███        31% ~2h18m · 7d ██         25% ~3d2h',
   );
 });
 
@@ -1034,11 +1037,11 @@ test('quota one tick past the TTL dims without the [stale] marker (aging tier)',
   // no text marker, because the first frame after a few minutes away would
   // otherwise always cry wolf.
   const [plain] = renderHud(baseCtx({ layout: 'normal', color: false, quota: aging }));
-  assert.ok(plain.includes('5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h'));
+  assert.ok(plain.includes('5h ███        31% ~2h18m · 7d ██         25% ~3d2h'));
   assert.ok(!plain.includes('[stale]'));
   // Color: the whole segment is dimmed (muted 90) but unmarked.
   const [ansi] = renderHud(baseCtx({ layout: 'normal', color: true, quota: aging }));
-  assert.match(ansi, /\x1b\[90m5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h\x1b\[0m/);
+  assert.match(ansi, /\x1b\[90m5h ███        31% ~2h18m · 7d ██         25% ~3d2h\x1b\[0m/);
   assert.ok(!ansi.includes('[stale]'));
 });
 
@@ -1050,10 +1053,10 @@ test('quota past the one-hour mark gains the plain [stale] marker', () => {
   };
   // Monochrome: the marker alone tells the reader the figures are old.
   const [plain] = renderHud(baseCtx({ layout: 'normal', color: false, quota: marked }));
-  assert.ok(plain.includes('5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h [stale]'));
+  assert.ok(plain.includes('5h ███        31% ~2h18m · 7d ██         25% ~3d2h [stale]'));
   // Color: the whole stale segment is dimmed (muted 90 / dim hue).
   const [ansi] = renderHud(baseCtx({ layout: 'normal', color: true, quota: marked }));
-  assert.match(ansi, /\x1b\[90m5h ███░░░░░░░ 31% ~2h18m · 7d ██░░░░░░░░ 25% ~3d2h \[stale\]\x1b\[0m/);
+  assert.match(ansi, /\x1b\[90m5h ███        31% ~2h18m · 7d ██         25% ~3d2h \[stale\]\x1b\[0m/);
 });
 
 test('quota age tiers hold at the exact boundaries', () => {
