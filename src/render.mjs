@@ -33,6 +33,9 @@ const DARK = {
   barRed: ANSI.red,
   barYellow: ANSI.yellow,
   barGreen: ANSI.green,
+  barTrack: `${ESC}48;5;238m`, // 256-gray empty track — ░ dithers into dots
+                                // in common fonts (Cascadia Mono renders it
+                                // as sparse halftone, which reads as dirt)
 };
 
 // Light theme: badges go bold — short labels need the extra weight on a
@@ -51,6 +54,7 @@ const LIGHT = {
   barRed: rgb(185, 28, 28), //                #B91C1C — host light error
   barYellow: rgb(217, 119, 6), //             #D97706 — matches the badge amber
   barGreen: rgb(14, 122, 56), //              #0E7A38 — host light success
+  barTrack: `${ESC}48;5;251m`, //             256-gray empty track (see DARK)
 };
 
 const BAR_WIDTH = 10;
@@ -153,7 +157,11 @@ function numberLevelColor(frac, C) {
 }
 
 /**
- * Render a 10-cell progress bar for a 0..1 fraction.
+ * Render a 10-cell progress bar for a 0..1 fraction. Filled cells are solid
+ * blocks in the usage-graded color; the empty track is spaces under a dim
+ * gray background, so the bar reads as one continuous gauge. (The empty
+ * cells used to be ░ light shade, which common fonts — Cascadia Mono among
+ * them — draw as sparse halftone dots.)
  * @param {number} frac
  * @param {boolean} color
  * @param {object} [C] palette (default DARK)
@@ -162,8 +170,10 @@ function numberLevelColor(frac, C) {
 export function bar(frac, color, C = DARK) {
   const clamped = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0;
   const filled = Math.floor(clamped * BAR_WIDTH);
-  const s = '█'.repeat(filled) + '░'.repeat(BAR_WIDTH - filled);
-  return colorize(color, levelColor(clamped, C), s);
+  const solid = '█'.repeat(filled);
+  const track = ' '.repeat(BAR_WIDTH - filled);
+  if (!color || track.length === 0) return colorize(color, levelColor(clamped, C), solid + track);
+  return `${levelColor(clamped, C)}${solid}${RESET}${C.barTrack}${track}${RESET}`;
 }
 
 /**

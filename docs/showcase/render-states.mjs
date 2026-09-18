@@ -245,13 +245,14 @@ const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace
 function ansiToHtml(line) {
   let out = '';
   let color = null;
+  let bg = null;
   let bold = false;
   let open = false;
   const closeSpan = () => {
     if (open) { out += '</span>'; open = false; }
   };
   const openSpan = () => {
-    const style = [color ? `color:${color}` : '', bold ? 'font-weight:700' : '']
+    const style = [color ? `color:${color}` : '', bg ? `background:${bg}` : '', bold ? 'font-weight:700' : '']
       .filter(Boolean).join(';');
     if (style) { out += `<span style="${style}">`; open = true; }
   };
@@ -262,9 +263,14 @@ function ansiToHtml(line) {
     const codes = (m[1] === '' ? '0' : m[1]).split(';');
     if (codes[0] === '38' && codes[1] === '2' && codes.length === 5) {
       color = `rgb(${codes[2]},${codes[3]},${codes[4]})`;
+    } else if (codes[0] === '48' && codes[1] === '5' && codes.length === 3) {
+      // 256 色灰阶轨道（232–255 梯度：8 + 10·(n−232)），即额度柱体的空槽
+      const n = Number.parseInt(codes[2], 10);
+      const g = 8 + (n - 232) * 10;
+      bg = `rgb(${g},${g},${g})`;
     } else {
       for (const c of codes) {
-        if (c === '0') { color = null; bold = false; }
+        if (c === '0') { color = null; bg = null; bold = false; }
         else if (c === '1') bold = true;
         else if (ANSI_COLORS[c]) color = ANSI_COLORS[c];
       }
@@ -278,10 +284,6 @@ function ansiToHtml(line) {
 // eslint-disable-next-line no-control-regex
 const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
-/* 终端字体把 ░ 渲染成实色暗块（见原截图），浏览器等宽字体却是点阵；
- * 换成压暗的 █，未填充段呈现实色暗条，与 CLI 中 HUD 的观感一致 */
-const softenTrack = (html) =>
-  html.replace(/░+/g, (m) => `<span style="opacity:.36">${'█'.repeat(m.length)}</span>`);
 
 /* 终端把 ⚡ 渲染成彩色 emoji 图标，浏览器对裸 U+26A1 用文本呈现（字符样）；
  * 补 VS16（U+FE0F）强制 emoji 呈现，与 CLI 中 HUD 的彩色闪电图标一致 */
@@ -296,7 +298,7 @@ const toRow = ({ id, group, label, note, ctx: stateCtx }) => {
     ? renderHud({ ...stateCtx, layout: 'compact' })[0]
     : null;
   const downgraded = compactLine !== null && line === compactLine;
-  return { id, group, label, note, width, downgraded, html: emojiIcon(softenTrack(ansiToHtml(line))) };
+  return { id, group, label, note, width, downgraded, html: emojiIcon(ansiToHtml(line)) };
 };
 
 const rows = STATES.map(toRow);
