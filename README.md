@@ -29,10 +29,10 @@ Kimi Code CLI 的自定义底部状态栏（HUD）——零依赖 Node.js 脚本
 |---|---|---|
 | 推荐运行时 | 处于上游维护窗口内的 Node.js LTS（撰写本文时为 22 / 24） | 日常开发与发布验证以此为准 |
 | 尽力兼容运行时 | 满足最低要求 **Node.js ≥ 18** 的所有版本（最低要求不变） | 已结束上游官方维护（EOL）的版本（如 18 / 20）不做主动测试；相关问题按尽力兼容处理 |
-| 操作系统 | macOS / Linux / Windows | macOS 是维护者的主要开发与动态验证环境；Linux 由 CI 自动化测试覆盖（实际矩阵以 [`.github/workflows/test.yml`](.github/workflows/test.yml) 为准）；Windows 为尽力兼容——Git 探针已按 Windows 约定做可信可执行解析（含 `PATHEXT`，见 [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)），但真实 Windows 宿主上的动态验证尚未完成（未验证） |
+| 操作系统 | macOS / Linux / Windows | macOS 是维护者的主要开发与动态验证环境；Linux 由 CI 自动化测试覆盖（实际矩阵以 [`.github/workflows/test.yml`](.github/workflows/test.yml) 为准）；Windows 为尽力兼容——Git 探针已按 Windows 约定做可信可执行解析（含 `PATHEXT`，见 [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)），**2026-09-18 已在 Windows 11 + Windows Terminal 真实环境完成 HUD 动态验证**（真实 PTY 下全屏模式的逐帧渲染、行 1 刷新、行 2 归属、额度刷新与冷启动耗时，证据见 [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)）；窗口 resize、`/reload-tui` 热重载与失败回退仍未实测 |
 | Kimi Code 宿主 | 源码与合成 fixture 基线 **2.0.0**；真实 TUI 验收待完成 | 逐版本契约审计与固定的上游提交见 [CAPABILITIES.md](CAPABILITIES.md) |
 
-CI 矩阵的增删是测试覆盖的变化，不构成支持契约的扩张或收缩；支持范围以本节为准。跨操作系统的交互式宿主矩阵（真实 TUI、终端模拟器、插件生命周期）仍在补齐（未验证）。
+CI 矩阵的增删是测试覆盖的变化，不构成支持契约的扩张或收缩；支持范围以本节为准。跨操作系统的交互式宿主矩阵（真实 TUI、终端模拟器、插件生命周期）已补齐 Windows 一行（Windows 11 + Windows Terminal，见 [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)），macOS Terminal 与 Linux PTY 组合仍在补齐。
 
 ## 配置
 
