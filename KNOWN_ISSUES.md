@@ -229,7 +229,7 @@ Resolution:
 
 ## KI-8: Experimental fullscreen mode lacks a live HUD verification
 
-Status: open verification gap
+Status: partially verified (Windows row recorded 2026-09-18)
 
 Affected area: Kimi Code 0.36.0–0.38.0 experimental fullscreen TUI
 
@@ -242,11 +242,42 @@ the first frame with the host error `EMFILE: too many open files, watch`, even
 with isolated `HOME` and `KIMI_CODE_HOME`; this is recorded as unavailable
 evidence, not a HUD pass or failure.
 
+2026-09-18 update — live verification on a real Windows host (criteria 1 and
+the line-refresh/ownership half of criteria 2 are now met):
+
+- Matrix row: Windows 11 (build 26200) · Windows Terminal 1.24 (conpty) ·
+  installed Kimi Code 2.0.0 (`kimi.exe`) · experimental fullscreen mode
+  (`KIMI_CODE_TUI_FULL_SCREEN=1`) — a real PTY, newer than the 0.38.0 the
+  criteria named.
+- Line 1 refresh: observed — the custom line repaints on the host's 1-second
+  cadence with live quota figures and reset countdowns (window captures at
+  several timestamps).
+- Footer line 2 ownership: observed — `context: 0% (0/1M)` renders unchanged
+  below the custom line.
+- Budget: cold spawn of the status command measured at ~240ms inside the
+  host's 300ms ceiling, via a byte-faithful replica of the host's
+  `cmd.exe /d /s /c` + stdin-JSON spawn on this machine.
+- Plugin lifecycle exercised end to end: managed install, `--doctor`, quota
+  cache refresh, and the tui.toml session-start binding semantics (a session
+  started before `[status_line]` existed keeps the built-in footer until
+  restart or `/reload-tui` — host behavior, not a HUD defect).
+- Full suite on this host (Node 25): 585 pass; CI `windows-latest` green.
+  Side finding: `git dirty detection executes the resolved absolute binary`
+  is flaky under parallel load on this machine (fails in the full run,
+  passes in isolation, passes in CI) — environment-specific, not a HUD
+  regression.
+
+Still open: resize behavior, `/reload-tui`, and failure-frame fallback are
+not yet exercised. The classic conhost window could not be produced on this
+host (every console delegates to Windows Terminal, including elevated
+launches), so the row covers Windows Terminal only. macOS Terminal/iTerm2
+and Linux PTY rows remain unrecorded.
+
 Acceptance criteria:
 
-- launch Kimi Code 0.38.0 with the experimental fullscreen mode in a real PTY;
-- verify line 1 refresh, line 2 context ownership, resize, reload, and fallback;
-- record the terminal/OS matrix without weakening the 220ms HUD budget.
+- launch Kimi Code 0.38.0 with the experimental fullscreen mode in a real PTY; ✅ 2026-09-18 (host 2.0.0, WT 1.24, Win11)
+- verify line 1 refresh, line 2 context ownership, resize, reload, and fallback; — line 1 refresh ✅, line 2 ownership ✅; resize/reload/fallback still open
+- record the terminal/OS matrix without weakening the 220ms HUD budget. — Windows row recorded ✅; macOS/Linux rows pending
 
 ## KI-9: Unknown providers could be shown as managed Kimi quota
 
