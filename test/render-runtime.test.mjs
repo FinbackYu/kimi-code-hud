@@ -214,8 +214,8 @@ test('runtime passes a context-matching quota cache to render and refresh', asyn
   assert.equal(gitCachePath, paths.gitStatusCachePath);
   assert.ok(result.line.includes('git:(main*)'));
   // The matching cache is shown as current quota.
-  assert.ok(result.line.includes('5h ███░░░░░░░ 31%'));
-  assert.ok(result.line.includes('7d ██░░░░░░░░ 25%'));
+  assert.ok(result.line.includes('5h ███        31%'));
+  assert.ok(result.line.includes('7d ██         25%'));
 });
 
 test('runtime hides a cache tagged for another context and refreshes with null', async () => {
@@ -301,7 +301,7 @@ test('a same-slot credential swap hides the cache and reschedules under the new 
     return { result, refreshOptions };
   };
   const before = await runFrame();
-  assert.ok(before.result.line.includes('5h ███░░░░░░░ 31%'));
+  assert.ok(before.result.line.includes('5h ███        31%'));
   assert.equal(before.refreshOptions.contextKey, keyA);
   assert.equal(before.refreshOptions.cachedQuota, cacheA);
 
