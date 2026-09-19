@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync, inflateSync } from 'node:zlib';
@@ -14,6 +15,7 @@ const PUBLIC_SHOWCASE_SOURCES = [
   'docs/showcase/render-states.mjs',
   'docs/showcase/startup-page.html',
   'docs/showcase/states-gallery.html',
+  'docs/showcase/hud-states.js',
 ];
 const PUBLIC_SHOWCASE_IMAGES = [
   'docs/media/hud-demo.png',
@@ -247,6 +249,25 @@ test('public showcase source chain is present and contains no private checkout p
   }
   const exporter = fs.readFileSync(path.join(ROOT, 'docs/showcase/export-assets.py'), 'utf8');
   assert.match(exporter, /--metadata-only/, 'public exporter must support metadata-only updates');
+});
+
+test('tracked hud-states.js is byte-identical to a fresh generator run', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-states-'));
+  try {
+    const outPath = path.join(tmp, 'hud-states.js');
+    execFileSync(process.execPath, [
+      path.join(ROOT, 'docs/showcase/render-states.mjs'),
+      '--out',
+      outPath,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    assert.equal(
+      fs.readFileSync(outPath, 'utf8'),
+      fs.readFileSync(path.join(ROOT, 'docs/showcase/hud-states.js'), 'utf8'),
+      'docs/showcase/hud-states.js is stale; regenerate with: node docs/showcase/render-states.mjs',
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('public showcase PNGs carry the plugin author as standard text metadata', () => {

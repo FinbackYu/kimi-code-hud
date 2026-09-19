@@ -57,6 +57,6 @@ commit / tag / push / `gh release create` 均为对外动作，执行前需用�
 
 ## 已知坑
 
-- `docs/showcase/` 的生成脚本与两个 HTML 页面是必要的受跟踪生成源，`docs/media/*.png` 是受跟踪发布产物；生成的 `hud-states.js` 与私有/社媒产物（如 `xhs/`）继续 gitignore。
+- `docs/showcase/` 的生成脚本、两个 HTML 页面与生成的 `hud-states.js` 都是受跟踪文件——release-metadata 测试把生成器跑到临时目录、与已提交的 `hud-states.js` 逐字节比对，改了 STATES 忘重跑（或重跑忘提交）会直接失败；`docs/media/*.png` 是受跟踪发布产物；私有/社媒产物（如 `xhs/`）继续 gitignore。
 - release-metadata 测试会校验两个 showcase 页面中的版本常量；升版本忘同步页面会直接失败。
 - `hud-demo.png` 的静态首帧来自 `startup-page.html` 里手维护的 CONFIG 复刻，不经过 `render-states.mjs`。发布读图时必须同时核对 provisional TPS 与未确认 effort 的暗显；发现漂移就修 CONFIG 重出图，不把手写首帧当成真实渲染的自动产物。
