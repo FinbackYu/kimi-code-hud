@@ -98,6 +98,18 @@ test('bar renders 10 cells graded by usage', () => {
   assert.ok(!bar(0.1, false).includes('\x1b['));        // plain stays uncolored
 });
 
+test('dim bar keeps a muted fill over the visible track for stale gauges', () => {
+  assert.equal(
+    bar(0.31, true, undefined, { dim: true }),
+    `\x1b[90m███\x1b[0m\x1b[48;5;238m${' '.repeat(7)}\x1b[0m`,
+  );
+  // A 0% stale gauge still shows the track strip — with the track gone the
+  // bar used to vanish entirely once the empty cells stopped being ░ glyphs.
+  assert.equal(bar(0, true, undefined, { dim: true }), `\x1b[48;5;238m${' '.repeat(10)}\x1b[0m`);
+  assert.equal(bar(1, true, undefined, { dim: true }), `\x1b[90m${'█'.repeat(10)}\x1b[0m`);
+  assert.equal(bar(0.31, false, undefined, { dim: true }), `███${' '.repeat(7)}`); // NO_COLOR plain
+});
+
 test('formatCountdown formats d/h/m and reset states', () => {
   assert.equal(formatCountdown('2026-07-30T12:18:00Z', NOW), '~2h18m');
   assert.equal(formatCountdown('2026-08-02T12:00:00Z', NOW), '~3d2h');
@@ -1039,9 +1051,13 @@ test('quota one tick past the TTL dims without the [stale] marker (aging tier)',
   const [plain] = renderHud(baseCtx({ layout: 'normal', color: false, quota: aging }));
   assert.ok(plain.includes('5h ███        31% ~2h18m · 7d ██         25% ~3d2h'));
   assert.ok(!plain.includes('[stale]'));
-  // Color: the whole segment is dimmed (muted 90) but unmarked.
+  // Color: the segment dims piecewise — muted label and figures around a
+  // self-styled dim gauge whose track strip stays visible.
   const [ansi] = renderHud(baseCtx({ layout: 'normal', color: true, quota: aging }));
-  assert.match(ansi, /\x1b\[90m5h ███        31% ~2h18m · 7d ██         25% ~3d2h\x1b\[0m/);
+  assert.match(
+    ansi,
+    /\x1b\[90m5h \x1b\[0m\x1b\[90m███\x1b\[0m\x1b\[48;5;238m {7}\x1b\[0m\x1b\[90m 31% ~2h18m\x1b\[0m/,
+  );
   assert.ok(!ansi.includes('[stale]'));
 });
 
@@ -1054,9 +1070,12 @@ test('quota past the one-hour mark gains the plain [stale] marker', () => {
   // Monochrome: the marker alone tells the reader the figures are old.
   const [plain] = renderHud(baseCtx({ layout: 'normal', color: false, quota: marked }));
   assert.ok(plain.includes('5h ███        31% ~2h18m · 7d ██         25% ~3d2h [stale]'));
-  // Color: the whole stale segment is dimmed (muted 90 / dim hue).
+  // Color: same piecewise dim; the marker joins as its own muted tail.
   const [ansi] = renderHud(baseCtx({ layout: 'normal', color: true, quota: marked }));
-  assert.match(ansi, /\x1b\[90m5h ███        31% ~2h18m · 7d ██         25% ~3d2h \[stale\]\x1b\[0m/);
+  assert.match(
+    ansi,
+    /\x1b\[90m7d \x1b\[0m\x1b\[90m██\x1b\[0m\x1b\[48;5;238m {8}\x1b\[0m\x1b\[90m 25% ~3d2h\x1b\[0m\x1b\[90m \[stale\]\x1b\[0m/,
+  );
 });
 
 test('quota age tiers hold at the exact boundaries', () => {
