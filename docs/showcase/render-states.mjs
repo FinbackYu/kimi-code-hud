@@ -49,6 +49,10 @@ const baseMetrics = {
 };
 
 const baseQuota = {
+  // v0.8.3 起渲染端执行新鲜度契约：fetchedAt 缺失/非法按 EXPIRED 处理、整段
+  // 隐藏（src/quota.mjs quotaAge）。fixture 必须带新鲜时间戳，否则状态墙所有
+  // 行静默丢失配额段（v0.8.3–v0.8.4 的 README 图正是这样丢的）。
+  fetchedAt: NOW - 30_000,
   windows: [{ label: '5h', used: 47, limit: 100, resetAt: iso(NOW + 2 * HOUR + 43 * MIN) }],
   weekly: { used: 41, limit: 100, resetAt: iso(NOW + 2 * DAY + 12 * HOUR) },
 };
@@ -71,7 +75,7 @@ const STATES = [
     id: 'startup',
     group: '基线',
     label: '启动页复刻行（states-gallery 的 line 1）',
-    note: '首轮预热（不足 3 个有效样本）：provisional TPS 暗显 + TTFT；未确认 effort high 暗显；配额 47% / 87%',
+    note: '首轮预热（不足 3 个有效样本）：provisional TPS 暗显 + TTFT；未确认 effort high 暗显；配额 47% / 41%',
     ctx: ctx({ metrics: { tps: 52, tpsStale: true, thinkingLevel: 'high', thinkingProvisional: true, cache: { hitRate: 0.98 } } }),
   },
 
@@ -188,8 +192,9 @@ const STATES = [
     id: 'quota-crit',
     group: '配额水位',
     label: '5h 配额 93% · 红条',
-    note: '≥85% 配额条变红',
+    note: '≥85% 配额条变红；速度槽展示任务结束后的冻结 gen 总时长（muted 驻留，60s 亮窗已过）',
     ctx: ctx({
+      metrics: { genSettledMs: 332_000, genSettledAt: NOW - 3 * MIN },
       quota: { windows: [{ label: '5h', used: 93, limit: 100, resetAt: iso(NOW + 21 * MIN) }] },
     }),
   },
