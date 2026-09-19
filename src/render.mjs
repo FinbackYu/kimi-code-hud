@@ -161,18 +161,28 @@ function numberLevelColor(frac, C) {
  * blocks in the usage-graded color; the empty track is spaces under a dim
  * gray background, so the bar reads as one continuous gauge. (The empty
  * cells used to be ░ light shade, which common fonts — Cascadia Mono among
- * them — draw as sparse halftone dots.)
+ * them — draw as sparse halftone dots.) opts.dim is the aged/stale variant:
+ * muted fill over the same track, so the gauge keeps its shape when the
+ * segment is toned down — before the track went backgrounded, the ░ glyphs
+ * carried that shape even uncolored. NO_COLOR output stays plain.
  * @param {number} frac
  * @param {boolean} color
  * @param {object} [C] palette (default DARK)
+ * @param {{dim?: boolean}} [opts]
  * @returns {string}
  */
-export function bar(frac, color, C = DARK) {
+export function bar(frac, color, C = DARK, opts = {}) {
   const clamped = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0;
   const filled = Math.floor(clamped * BAR_WIDTH);
   const solid = '█'.repeat(filled);
   const track = ' '.repeat(BAR_WIDTH - filled);
-  if (!color || track.length === 0) return colorize(color, levelColor(clamped, C), solid + track);
+  if (!color) return solid + track;
+  if (opts.dim) {
+    if (track.length === 0) return colorize(color, C.muted, solid);
+    const fill = filled > 0 ? `${C.muted}${solid}${RESET}` : '';
+    return `${fill}${C.barTrack}${track}${RESET}`;
+  }
+  if (track.length === 0) return colorize(color, levelColor(clamped, C), solid + track);
   return `${levelColor(clamped, C)}${solid}${RESET}${C.barTrack}${track}${RESET}`;
 }
 
@@ -491,23 +501,27 @@ function quotaSegment({ layout, quota, color, now, C }) {
   // aging or stale segment is toned down as a whole so it reads as old, not
   // current.
   const useLevelColor = color && !stale;
+  const dim = (text) => colorize(color, C.muted, text);
   const parts = [];
   const formatWindow = (label, entry) => {
     const fraction = quotaFraction(entry);
     if (fraction === null) return null;
     const pct = `${Math.round(fraction * 100)}%`;
+    const countdown = formatCountdown(entry.resetAt, now);
+    const suffix = countdown ? ` ${countdown}` : '';
     // Compact drops the bar, so the percentage itself takes over the
     // usage-level signal the bar color carries in the normal layout.
-    let text;
     if (layout === 'compact') {
       const level = numberLevelColor(fraction, C);
-      text = `${label} ${level && useLevelColor ? colorize(color, level, pct) : pct}`;
-    } else {
-      text = `${label} ${bar(fraction, useLevelColor, C)} ${pct}`;
+      const text = `${label} ${level && useLevelColor ? colorize(color, level, pct) : pct}${suffix}`;
+      return stale ? dim(text) : text;
     }
-    const countdown = formatCountdown(entry.resetAt, now);
-    if (countdown) text += ` ${countdown}`;
-    return text;
+    if (stale) {
+      // The dim gauge is self-styled, so its resets cut a whole-segment
+      // wrap short — label and trailing figures dim around it instead.
+      return `${dim(`${label} `)}${bar(fraction, color, C, { dim: true })}${dim(` ${pct}${suffix}`)}`;
+    }
+    return `${label} ${bar(fraction, useLevelColor, C)} ${pct}${suffix}`;
   };
   for (const window of Array.isArray(quota.windows) ? quota.windows : []) {
     const text = formatWindow(sanitizeTerminalText(window?.label), window);
@@ -533,15 +547,13 @@ function quotaSegment({ layout, quota, color, now, C }) {
     parts.push(formatWindow('Monthly code', quota.monthly.code));
   }
   if (parts.length === 0) return null;
-  const text = parts.join(' · ');
+  const text = parts.join(stale ? dim(' · ') : ' · ');
   if (!stale) return text;
   // Dimmed in color either way. The literal marker only joins past the mark
   // age, and keeps the genuinely-stale state readable when colors are
   // disabled (NO_COLOR / KIMI_HUD_NO_COLOR); the aging tier deliberately
   // carries no text marker — the dim alone reads as "old, not current".
-  return markStale
-    ? colorize(color, C.muted, `${text} [stale]`)
-    : colorize(color, C.muted, text);
+  return markStale ? `${text}${dim(' [stale]')}` : text;
 }
 
 function providerBalanceText(balance) {
