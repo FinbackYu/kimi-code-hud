@@ -1,0 +1,3 @@
+# hud-states.js 是生成物（LF），Windows 检出不得转 CRLF，
+# 否则 release-metadata 的逐字节新鲜度门禁在 autocrlf=true 环境下必挂。
+docs/showcase/hud-states.js text eol=lf
