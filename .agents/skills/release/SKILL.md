@@ -35,7 +35,7 @@ description: 在 kimi-code-hud 仓库执行一次完整发布——版本位判�
 4. **读回核验（不能省）**：用读图工具查看 `docs/media/hud-states.png` 与 `docs/media/hud-demo.png`：
    - 标题栏 = `Kimi Code Hud <新版本>`；
    - 欢迎框 `Version:` = CAPABILITIES 基线；
-   - 顺带核对内容保真：HUD 行展示是否与当前渲染行为一致（如 startup 行应有暗显 provisional TPS、effort 未确认应置灰）。发现漂移见「已知坑」。
+   - 顺带核对内容保真：HUD 行展示是否与当前渲染行为一致（如 startup 行应有暗显 provisional TPS、effort 未确认应置灰、配额段应存在——fixture 缺 `fetchedAt` 会让状态墙整面丢柱体，v0.8.3–v0.8.4 的图即此回归）。发现漂移见「已知坑」。
    - 两个 PNG 的 `Author` 元数据 = `FinbackYu`；必须用元数据读取工具读回确认，不能只假定导出脚本已写入。
 5. **门禁**：先运行 `KIMI_HUD_RELEASE_CHECK=1 node --test test/release-metadata.test.mjs`，再确认 `npm test` 全绿 + `git diff --check`。仓内门禁会验证 behavior commit 可达对应 release tag；新版本 tag 尚未创建时以当前 HEAD 作为 release candidate，并在第 9 步 tag 创建后重新跑同一检查、落定到精确 tag。严格 metadata 检查还会阻止两份文档版本不一致、HUD behavior baseline 未前移或 closed issue 区块仍写 working-tree / pending-release（含连字符和跨行写法）。
 6. **提交**：`chore: release vX.Y.Z`，只含发布元数据、受跟踪生成源与产物：`package.json`、`kimi.plugin.json`、`CHANGELOG.md`、必要的 `docs/showcase/` 生成源、`docs/media/*.png`，以及本次需要收口发布状态时的 `CAPABILITIES.md` / `KNOWN_ISSUES.md`。
