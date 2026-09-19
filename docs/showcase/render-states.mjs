@@ -109,6 +109,13 @@ const STATES = [
     ctx: ctx({ metrics: { swarmMode: true, tps: 52, tpsTotal: 156, tpsAgents: 3, activeAgents: 3, ttftMs: undefined } }),
   },
   {
+    id: 'tower',
+    group: '权限与模式徽标',
+    label: '[tower] 多智能体编排',
+    note: '青色徽标，与 [swarm] 同槽位；wire tower_mode.enter/exit 驱动（v0.8.4），速度槽不做舰队聚合时维持原样',
+    ctx: ctx({ metrics: { towerMode: true } }),
+  },
+  {
     id: 'goal-active',
     group: '权限与模式徽标',
     label: '[goal] 目标进行中',
@@ -245,7 +252,13 @@ const ANSI_COLORS = {
   93: '#ffe3ae', // bright yellow
 };
 
-const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/* 浏览器会把连续空格折叠成一个：额度柱体的空槽是「背景色 + 6 个空格」，
+ * 不转 &nbsp; 柱体就被压缩（10 格只剩 5 格宽），这里把所有空格固化 */
+const escapeHtml = (s) => s
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/ /g, '&nbsp;');
 
 function ansiToHtml(line) {
   let out = '';
@@ -308,25 +321,29 @@ const toRow = ({ id, group, label, note, ctx: stateCtx }) => {
 
 const rows = STATES.map(toRow);
 
-/* states-gallery 状态示例堆叠专用徽标变体：共 5 行——yolo / auto 组各有一行
- * 用新官方称呼（[Ask When Needed] / [Never Ask]），其余三行经 permissionNames:
- * 'short' 覆盖保留旧短徽标（[yolo] / [auto]），两种措辞同图对照。
+/* states-gallery 状态示例堆叠专用徽标变体：共 6 行——yolo / auto 组各有一行
+ * 用新官方称呼（[Ask When Needed] / [Never Ask]），其余四行经 permissionNames:
+ * 'short' 覆盖保留旧短徽标（[yolo] / [auto]），两种措辞同图对照。配额条颜色
+ * 与行序同步递进：yolo 组四行全部绿条，auto 组两行顺次黄条（5h 72%）、
+ * 红条（5h 93%）。
  * 以 原id@模式 为 id 追加生成，startup-page 轮播引用的原始状态不受影响；
- * 条目可写成 { id, ctx } 在徽标之外做额外覆盖（此处只给 gen 行换黄条配额） */
+ * 条目可写成 { id, ctx } 在徽标之外做额外覆盖 */
 const GALLERY_BADGES = {
   yolo: [
-    // 官方称呼行（组内第一）：gen 计时 + 脏工作区，顺路展示黄条（5h 72%）
-    { id: 'gen', ctx: { quota: { windows: [{ label: '5h', used: 72, limit: 100, resetAt: iso(NOW + 58 * MIN) }] } } },
-    // 短徽标行：唯一的红条（5h 93%）
-    { id: 'quota-crit', ctx: { permissionNames: 'short' } },
+    // 短徽标行：冻结 gen 总时长 5m32s；额度覆盖回绿条（5h 47%），红条让给末行
+    { id: 'quota-crit', ctx: { permissionNames: 'short', quota: { windows: [{ label: '5h', used: 47, limit: 100, resetAt: iso(NOW + 2 * HOUR + 43 * MIN) }] } } },
+    // 短徽标行：compacted 8s（与上行同宽，前两段边界完全对齐）
+    { id: 'compacted', ctx: { permissionNames: 'short' } },
+    // 短徽标行 + [tower] 徽标：徽标槽亮出 tower，速度槽维持单人 TTFT
+    { id: 'tower', ctx: { permissionNames: 'short' } },
+    // 官方称呼行：gen 45s + 脏工作区，yolo 组收尾
+    'gen',
   ],
   auto: [
-    // 官方称呼行（组内第一）：[swarm] 徽标 + 舰队总速
-    'swarm',
-    // 短徽标行：compacted 状态 + 绿条
-    { id: 'compacted', ctx: { permissionNames: 'short' } },
-    // 短徽标行：[goal] 长徽标
-    { id: 'goal-active', ctx: { permissionNames: 'short' } },
+    // 官方称呼行：[swarm] 徽标 + 舰队总速；顺路展示黄条（5h 72%）
+    { id: 'swarm', ctx: { quota: { windows: [{ label: '5h', used: 72, limit: 100, resetAt: iso(NOW + 58 * MIN) }] } } },
+    // 短徽标行：[goal] 长徽标 + 全图唯一红条（5h 93%）收尾
+    { id: 'goal-active', ctx: { permissionNames: 'short', quota: { windows: [{ label: '5h', used: 93, limit: 100, resetAt: iso(NOW + 21 * MIN) }] } } },
   ],
 };
 for (const [mode, items] of Object.entries(GALLERY_BADGES)) {
