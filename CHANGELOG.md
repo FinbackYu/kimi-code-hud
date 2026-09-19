@@ -6,6 +6,20 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-09-19
+
+### Fixed
+
+- Render the quota bar's empty track as spaces under a 256-gray background
+  instead of ░ light shade, which common monospace fonts (Cascadia Mono among
+  them) draw as sparse halftone dots. Usage-level colors, the 10-cell width
+  and NO_COLOR output are unchanged (PR #36).
+- Keep aging and stale quota gauges shaped: after the track change they
+  collapsed to a short floating block of bare `█` cells, and a 0% window's
+  bar vanished entirely. Stale gauges now render a muted fill over the same
+  visible track, and the segment dims piecewise so the gauge's internal
+  resets no longer cut the muted wrap short (PR #38).
+
 ## [0.8.3] - 2026-09-17
 
 ### Fixed
@@ -614,9 +628,10 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.4
 [0.8.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.3
-[0.8.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.2 https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.2
+[0.8.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.2
 [0.8.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.1
 [0.8.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.0
 [0.7.8]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.7.8
