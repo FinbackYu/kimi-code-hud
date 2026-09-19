@@ -5,7 +5,7 @@
 | `startup-page.html` | Kimi Code 启动页 1:1 像素复刻；加载 2s 后 HUD 行按真实 `renderHud()` 输出轮播（`?static` 关闭，点击状态栏暂停/继续） |
 | `states-gallery.html` | 展示页：启动页 1:1 复刻（含对话与输入框），line 3 起堆叠核心 HUD 状态（`GALLERY_IDS` 挑选，无文字说明） |
 | `render-states.mjs` | 状态定义 + 生成器；把各状态 ctx 喂给真实 `src/render.mjs`，ANSI 转 HTML |
-| `hud-states.js` | 本地生成产物（勿手改、不入库），上面两个页面都从这里取 HUD 行 |
+| `hud-states.js` | 生成产物（勿手改，随库跟踪），上面两个页面都从这里取 HUD 行；release-metadata 测试逐字节校验它与生成器输出一致 |
 
 ## 更新流程
 
@@ -16,6 +16,8 @@ node docs/showcase/render-states.mjs
 ```
 
 脚本会打印每行可见字符数；normal 布局行超 200 字符会被 `renderHud` 自动降级为 compact，脚本以非零退出码报警。新增/调整状态：编辑 `STATES` 数组后重跑。
+
+`hud-states.js` 受 git 跟踪：重跑生成器后必须把刷新后的文件与本次改动一并提交；`test/release-metadata.test.mjs` 会把生成器跑到临时目录（`--out`）与已提交副本逐字节比对，漂移即测试失败。
 
 每次发布（bump `package.json`、`kimi.plugin.json` 与 `CHANGELOG.md`）必须重跑整条导出管线：
 

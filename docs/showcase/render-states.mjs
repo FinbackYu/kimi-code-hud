@@ -14,13 +14,16 @@
  * compact，并让脚本以非零退出码报警。
  */
 import { writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { renderHud } from '../../src/render.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const OUT = join(HERE, 'hud-states.js');
+/* --out <path> 把产物写到指定位置（新鲜度门禁用它生成到临时目录做逐字节比对），
+ * 缺省写回本目录的 hud-states.js（受跟踪，重跑后需一并提交）。 */
+const outFlag = process.argv.indexOf('--out');
+const OUT = outFlag === -1 ? join(HERE, 'hud-states.js') : resolve(process.argv[outFlag + 1]);
 
 /** 固定时钟，保证每次生成的文案（~2h43m、gen 45s 等）完全一致。 */
 const NOW = Date.parse('2026-08-01T09:30:00.000Z');

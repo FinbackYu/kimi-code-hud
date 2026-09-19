@@ -13,6 +13,6 @@ docs/showcase/*
 !docs/showcase/render-states.mjs
 !docs/showcase/startup-page.html
 !docs/showcase/states-gallery.html
-docs/showcase/hud-states.js
+!docs/showcase/hud-states.js
 docs/showcase/xhs/
 docs/superpowers/
