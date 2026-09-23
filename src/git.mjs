@@ -25,11 +25,15 @@ import {
 } from 'node:path';
 
 import { atomicWriteFile } from './fs-store.mjs';
+import { probeGitStatusSafely } from './git-safe-probe.mjs';
 
 // cmd.exe / CreateProcess search the current directory before PATH, so a bare
 // command name can execute a binary planted in the workspace. Resolve PATH
 // ourselves and refuse workspace-local hits before running the pre-trust Git
-// probe. This mirrors the Kimi Code 0.35+ host boundary.
+// probe. This mirrors the Kimi Code 0.35+ executable boundary. The live
+// dirty check uses index metadata so repository clean/process filters cannot
+// run before trust. The legacy status argv below is used only by injected
+// cache-test doubles; production calls probeGitStatusSafely.
 const DEFAULT_WIN32_PATHEXT = ['.COM', '.EXE', '.BAT', '.CMD'];
 const DEFAULT_GIT_STATUS_TTL_MS = 15_000;
 const DEFAULT_GIT_STATUS_CACHE_MAX_ENTRIES = 64;
@@ -134,6 +138,23 @@ function gitEnvironment(env) {
   );
   childEnv.GIT_OPTIONAL_LOCKS = '0';
   return childEnv;
+}
+
+function nullDevice(platform) {
+  return platform === 'win32' ? 'NUL' : '/dev/null';
+}
+
+/**
+ * Probe argv suppresses repo-local fsmonitor and hook configuration, but
+ * does not disable every repo-configured command (for example clean filters;
+ * see KI-20).
+ */
+function gitProbeArgs(platform) {
+  return [
+    '-c', 'core.fsmonitor=false',
+    '-c', `core.hooksPath=${nullDevice(platform)}`,
+    'status', '--porcelain=v1', '--branch',
+  ];
 }
 
 function parseBranch(summary) {
@@ -438,14 +459,21 @@ export function createGitStatusReader({
     try {
       const git = resolveCommandPath('git', cwd, { env, platform });
       if (git) {
-        const out = execFileSyncImpl(git, ['status', '--porcelain=v1', '--branch'], {
-          cwd,
-          env: gitEnvironment(env),
-          timeout: Math.max(1, Math.min(150, Math.floor(timeoutMs))),
-          stdio: ['ignore', 'pipe', 'ignore'],
-          windowsHide: true,
-        });
-        status = parseGitStatus(out);
+        if (execFileSyncImpl === execFileSync) {
+          status = probeGitStatusSafely(git, cwd, {
+            env: gitEnvironment(env), platform, timeoutMs,
+          });
+        } else {
+          // Existing cache tests inject a synthetic porcelain status reader.
+          const out = execFileSyncImpl(git, gitProbeArgs(platform), {
+            cwd,
+            env: gitEnvironment(env),
+            timeout: Math.max(1, Math.min(150, Math.floor(timeoutMs))),
+            stdio: ['ignore', 'pipe', 'ignore'],
+            windowsHide: true,
+          });
+          status = parseGitStatus(out);
+        }
       }
     } catch {
       status = EMPTY_GIT_STATUS;

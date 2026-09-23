@@ -2,7 +2,7 @@
 
 - Last verified: 2026-09-23
 - HUD behavior baseline: `v0.8.4` (`711d54e`)
-- Kimi Code baseline: `2.0.2` (`9d07f634be94ebeb1deba2f55d247807cf729315`)
+- Kimi Code baseline: `2.1.0` (`52437299ff78de3d0aff7f38f054e5eb20c512e5`)
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -227,11 +227,21 @@ Resolution:
 - preserve the existing silent `false` fallback when no trusted executable is
   available or the bounded status command fails.
 
+Extension (upstream PR #3964, first released in 2.1.0; HUD prep issue #44): the status
+probe adds `-c core.fsmonitor=false` and redirects `core.hooksPath` to the null
+device (`NUL` on Windows, `/dev/null` elsewhere). These suppress two
+mechanisms, but a 2026-09-23 isolated repository showed that a clean filter
+still ran through `git status`. The review branch now reads index metadata and
+uses safe Git plumbing without worktree conversion; clean/process-filter
+regressions leave no marker. See [KI-20](#ki-20-git-status-probe-still-runs-repository-configured-clean-filters).
+The replacement uses `--no-ext-diff` / `--no-textconv` only with its cached
+diff call; `git status` itself rejects those options.
+
 ## KI-8: Experimental fullscreen mode lacks a live HUD verification
 
 Status: partially verified (Windows row recorded 2026-09-18)
 
-Affected area: Kimi Code 0.36.0–0.38.0 experimental fullscreen TUI
+Affected area: Kimi Code experimental fullscreen TUI (first reviewed at 0.36.0–0.38.0; 2.1.0 adds `tui_mode` in `/settings`)
 
 Static release review through 0.38.0 confirms that fullscreen mode does not
 change the 10-field status-line payload, the first-stdout-line contract, the 300ms host
@@ -266,6 +276,11 @@ the line-refresh/ownership half of criteria 2 are now met):
   is flaky under parallel load on this machine (fails in the full run,
   passes in isolation, passes in CI) — environment-specific, not a HUD
   regression.
+
+2.1.0 review: upstream added a persistent `tui_mode` selector and clickable
+fullscreen controls. The status-line payload is unchanged, but no live HUD
+frame has been exercised on the 2.1.0 build; the earlier Windows 2.0.0 row
+does not establish 2.1.0 fullscreen behavior.
 
 Still open: resize behavior, `/reload-tui`, and failure-frame fallback are
 not yet exercised. The classic conhost window could not be produced on this
@@ -689,44 +704,53 @@ countdowns, freshness and expiry. No real credentials or user data were used.
 
 ## KI-20: Git status probe still runs repository-configured clean filters
 
-Status: open — P1 security boundary gap on `main` and `upstream/2.0.3-prep`
+Status: open — synthetic fix verified; real 2.1.0 host acceptance pending
 
 Affected area: Git dirty probe / untrusted workspace execution
 
-A tracked `.gitattributes` entry can select `filter.<driver>.clean` or
-`filter.<driver>.process` while the HUD runs `git status`. The `main` probe
-uses `git status --porcelain=v1 --branch`; the prep probe adds fsmonitor and
-hooks overrides, but neither path disables clean filters.
+Before the fix, the prep probe passed `-c core.fsmonitor=false` and redirected
+`core.hooksPath`, but a local `filter.<driver>.clean` command selected by a
+tracked `.gitattributes` entry was executable during `git status`.
 
-Evidence (2026-09-23): an isolated synthetic repository reproduced the clean
-command through the exact prep probe argv and `readGitStatus` call. Source
-inspection confirms that `main` uses the same status argv without additional
-config suppression; the main-specific path was not separately executed, so
-that branch attribution is an inference from the shared Git behavior and
-source, not a second reproduction. No user repository or settings were used.
+Evidence (2026-09-23): in an isolated temporary repository, a modified tracked
+file matched `*.txt filter=probe`; `.git/config` mapped `filter.probe.clean`
+to a marker-writing script. The exact probe argv and `GIT_OPTIONAL_LOCKS=0`
+executed that script. Calling the HUD's `readGitStatus` with its 150ms timeout
+also returned `{ branch: 'main', dirty: true }` and left the marker. No user
+repository or configuration was used. Upstream PR #3964 has an automated review
+comment describing the same clean/process-filter path.
+
+Branch resolution: the production probe no longer calls `git status`,
+`diff-index`, `diff-files` or `ls-files --modified`, all of which can inspect
+working-tree content and launch filters. It reads untracked paths, index
+metadata and cached diffs through bounded Git commands; it compares tracked
+file size, mode and timestamps with `lstat`. On an unfamiliar index format or
+timeout, it may conservatively show a dirty marker. Nested submodule dirtiness
+is not fully inspected. Isolated clean and process filter regressions both
+verify that no marker command runs, while preserving branch and dirty output.
 
 Acceptance criteria:
 
-- a status probe on an untrusted repository cannot execute a command configured
-  by that repository through `filter.<driver>.clean` or `filter.<driver>.process`;
-- add an isolated regression fixture that would fail if either filter runs;
-- retain the bounded, silent fallback and 150ms child-process ceiling.
+- [x] pre-trust probe cannot invoke repository clean/process filters;
+- [x] isolated regression fails if either filter runs;
+- [x] bounded, silent fallback and a shared 150ms probe budget;
+- [ ] trigger the relevant paths in a real 2.1.0 host session and record the result.
 
 ## KI-21: Provider balance does not resolve `api_key_env`
 
-Status: fixed for `main` by PR #46 (unreleased HUD change); the reviewed
-`upstream/2.0.3-prep` branch still needs to sync from `main`
+Status: fixed by PR #46 with synthetic coverage; live DeepSeek smoke pending
 
 Affected area: DeepSeek provider balance and doctor diagnostics
 
 Kimi Code 2.0.1 added provider credentials through `api_key_env`. At the
-2.0.2 baseline review, the HUD parsed only literal `api_key`, so an env-only
-provider configuration hid the DeepSeek balance. PR #46 resolves the named
-variable on each request, rejects simultaneous `api_key` and `api_key_env`
-declarations, and fails closed for an unset or empty variable. Its doctor
-messages distinguish those cases, and the secret value stays out of targets,
-cache files and output. Synthetic regressions and CI cover these behaviors.
+2.0.2 baseline review, HUD resolved only literal `api_key`, so an env-only
+provider configuration hid the DeepSeek balance. PR #46 merged the fix into
+`main` at `fc2d519`: it resolves the named variable on every request,
+rejects simultaneous `api_key` and `api_key_env`, and fails closed for an
+unset or empty variable. Its doctor messages distinguish those cases; secret
+values do not enter cache files, targets, logs or output. The reviewed 2.1.0
+integration includes the same fix and synthetic regressions.
 
-A real Kimi Code 2.0.2 DeepSeek account smoke remains unverified. The prep
-branch reviewed on 2026-09-23 did not contain this fix; sync it from `main`
-before any future merge.
+A real Kimi Code 2.1.0 DeepSeek account smoke remains unverified. Seeing a
+balance in one configuration validates that path only; the other failure
+branches remain covered by synthetic tests.

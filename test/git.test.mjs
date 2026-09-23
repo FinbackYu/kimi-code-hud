@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import {
   createGitStatusReader,
   isGitDirty,
+  readGitStatus,
   resolveCommandPath,
 } from '../src/git.mjs';
 
@@ -142,6 +143,43 @@ test('git dirty detection executes the resolved absolute binary', (t) => {
   assert.equal(isGitDirty(cwd), true);
 });
 
+test('status probe suppresses repo-local fsmonitor and diff driver config', (t) => {
+  if (process.platform === 'win32') {
+    t.skip('driver scripts are POSIX shell scripts');
+    return;
+  }
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-git-hostile-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const git = resolveCommandPath('git', cwd);
+  if (!git) {
+    t.skip('git is unavailable on trusted PATH');
+    return;
+  }
+  execFileSync(git, ['init', '--quiet', '-b', 'main'], { cwd, stdio: 'ignore' });
+  execFileSync(git, [
+    '-c', 'user.name=test', '-c', 'user.email=test@example',
+    'commit', '--quiet', '--allow-empty', '-m', 'init',
+  ], { cwd, stdio: 'ignore' });
+
+  // Command-shaped repo-local config: if the probe let any of these execute
+  // during the status read, the driver would leave its marker behind.
+  const driver = path.join(cwd, 'driver.sh');
+  const marker = `${driver}.marker`;
+  fs.writeFileSync(driver, '#!/bin/sh\ntouch "$0.marker"\n');
+  fs.chmodSync(driver, 0o755);
+  execFileSync(git, ['config', 'core.fsmonitor', driver], { cwd, stdio: 'ignore' });
+  execFileSync(git, ['config', 'diff.external', driver], { cwd, stdio: 'ignore' });
+  execFileSync(git, ['config', 'diff.hostile.command', driver], { cwd, stdio: 'ignore' });
+  fs.writeFileSync(path.join(cwd, '.gitattributes'), '* diff=hostile\n');
+  fs.writeFileSync(path.join(cwd, 'untracked.txt'), 'dirty');
+
+  const status = readGitStatus(cwd);
+  assert.equal(typeof status.branch, 'string');
+  assert.ok(status.branch.length > 0, `expected a branch, got ${status.branch}`);
+  assert.equal(status.dirty, true);
+  assert.equal(fs.existsSync(marker), false);
+});
+
 test('independent readers share branch and dirty results through the disk cache', (t) => {
   let now = 1_000;
   let calls = 0;
@@ -155,7 +193,11 @@ test('independent readers share branch and dirty results through the disk cache'
       calls += 1;
       childOptions = options;
       assert.equal(path.isAbsolute(git), true);
-      assert.deepEqual(args, ['status', '--porcelain=v1', '--branch']);
+      assert.deepEqual(args, [
+        '-c', 'core.fsmonitor=false',
+        '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
+        'status', '--porcelain=v1', '--branch',
+      ]);
       return Buffer.from('## main...origin/main [ahead 1]\n M tracked.txt\n');
     },
   });
