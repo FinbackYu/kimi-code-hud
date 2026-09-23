@@ -42,14 +42,24 @@ for (const kind of ['clean', 'process']) {
       return;
     }
     const { cwd, git } = repository(t);
-    const driver = path.join(cwd, 'driver.sh');
+    const driverDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-filter-'));
+    t.after(() => fs.rmSync(driverDir, { recursive: true, force: true }));
+    const driver = path.join(driverDir, 'driver.sh');
     const marker = `${driver}.marker`;
     fs.writeFileSync(driver, '#!/bin/sh\nprintf ran >> "$0.marker"\ncat\n');
     fs.chmodSync(driver, 0o755);
     fs.writeFileSync(path.join(cwd, '.gitattributes'), '*.txt filter=probe\n');
+    git(['add', '.gitattributes']);
+    git(['commit', '--quiet', '-m', 'attributes']);
     git(['config', `filter.probe.${kind}`, driver]);
     fs.writeFileSync(path.join(cwd, 'tracked.txt'), 'changed\n');
 
+    assert.deepEqual(readGitStatus(cwd), { branch: 'main', dirty: true });
+    assert.equal(fs.existsSync(marker), false);
+
+    git(['add', 'tracked.txt']);
+    assert.equal(fs.existsSync(marker), true, 'fixture must select the configured filter');
+    fs.rmSync(marker, { force: true });
     assert.deepEqual(readGitStatus(cwd), { branch: 'main', dirty: true });
     assert.equal(fs.existsSync(marker), false);
   });
