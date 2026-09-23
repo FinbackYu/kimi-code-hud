@@ -227,6 +227,15 @@ Resolution:
 - preserve the existing silent `false` fallback when no trusted executable is
   available or the bounded status command fails.
 
+Extension (v2.0.3 baseline): the host widened the same boundary in upstream
+PR #3964 to suppress repo-local Git config execution, after background Git
+invocations were shown to run repo-local `core.fsmonitor`, `core.hooksPath`,
+and diff/textconv drivers. HUD's status probe now carries the same config
+suppressions — `-c core.fsmonitor=false` and `-c core.hooksPath` pointed at
+the null device (`NUL` on Windows, `/dev/null` elsewhere). `--no-ext-diff` /
+`--no-textconv` have no counterpart here because the probe runs
+`git status` only and never diffs.
+
 ## KI-8: Experimental fullscreen mode lacks a live HUD verification
 
 Status: partially verified (Windows row recorded 2026-09-18)

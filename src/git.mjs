@@ -29,7 +29,11 @@ import { atomicWriteFile } from './fs-store.mjs';
 // cmd.exe / CreateProcess search the current directory before PATH, so a bare
 // command name can execute a binary planted in the workspace. Resolve PATH
 // ourselves and refuse workspace-local hits before running the pre-trust Git
-// probe. This mirrors the Kimi Code 0.35+ host boundary.
+// probe. This mirrors the Kimi Code 0.35+ host boundary, extended with the
+// host's repo-local Git config suppression: the probe disables core.fsmonitor
+// and redirects core.hooksPath to the null device so a repo-local config
+// cannot spawn commands during a status read. (Diff-driver flags have no
+// counterpart here: the probe runs `git status` only and never diffs.)
 const DEFAULT_WIN32_PATHEXT = ['.COM', '.EXE', '.BAT', '.CMD'];
 const DEFAULT_GIT_STATUS_TTL_MS = 15_000;
 const DEFAULT_GIT_STATUS_CACHE_MAX_ENTRIES = 64;
@@ -134,6 +138,23 @@ function gitEnvironment(env) {
   );
   childEnv.GIT_OPTIONAL_LOCKS = '0';
   return childEnv;
+}
+
+function nullDevice(platform) {
+  return platform === 'win32' ? 'NUL' : '/dev/null';
+}
+
+/**
+ * Probe argv with repo-local Git config suppressed the way the hardened host
+ * runs its background Git: no fsmonitor daemon/hook and no hooks path can be
+ * seeded by an untrusted workspace's checked-in config.
+ */
+function gitProbeArgs(platform) {
+  return [
+    '-c', 'core.fsmonitor=false',
+    '-c', `core.hooksPath=${nullDevice(platform)}`,
+    'status', '--porcelain=v1', '--branch',
+  ];
 }
 
 function parseBranch(summary) {
@@ -438,7 +459,7 @@ export function createGitStatusReader({
     try {
       const git = resolveCommandPath('git', cwd, { env, platform });
       if (git) {
-        const out = execFileSyncImpl(git, ['status', '--porcelain=v1', '--branch'], {
+        const out = execFileSyncImpl(git, gitProbeArgs(platform), {
           cwd,
           env: gitEnvironment(env),
           timeout: Math.max(1, Math.min(150, Math.floor(timeoutMs))),

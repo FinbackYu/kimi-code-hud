@@ -53,6 +53,12 @@ Baseline delta (0.34.0 → 0.35.0):
 - The host hardens its pre-trust Git and GitHub CLI probes by resolving bare
   commands through PATH to absolute paths and refusing workspace-local hits.
   HUD now applies the same boundary to its synchronous `git status` probe.
+  When the host later extended this boundary to suppress repo-local Git config
+  execution (upstream PR #3964, v2.0.3 cycle), HUD matched it: every probe
+  runs with `core.fsmonitor=false` and `core.hooksPath` redirected to the null
+  device, so a checked-in config cannot spawn commands during a status read.
+  The diff-driver flags (`--no-ext-diff --no-textconv`) have no counterpart in
+  HUD because the probe never diffs.
 
 Baseline delta (0.35.0 → 0.36.0):
 
