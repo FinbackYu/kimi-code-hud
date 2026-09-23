@@ -29,11 +29,10 @@ import { atomicWriteFile } from './fs-store.mjs';
 // cmd.exe / CreateProcess search the current directory before PATH, so a bare
 // command name can execute a binary planted in the workspace. Resolve PATH
 // ourselves and refuse workspace-local hits before running the pre-trust Git
-// probe. This mirrors the Kimi Code 0.35+ host boundary, extended with the
-// host's repo-local Git config suppression: the probe disables core.fsmonitor
-// and redirects core.hooksPath to the null device so a repo-local config
-// cannot spawn commands during a status read. (Diff-driver flags have no
-// counterpart here: the probe runs `git status` only and never diffs.)
+// probe. This mirrors the Kimi Code 0.35+ executable boundary and adds the
+// fsmonitor/hooks suppression from upstream PR #3964. Other repo-configured
+// commands such as clean filters can still run during status; see KI-20.
+// Diff-driver flags have no counterpart because the probe never diffs.
 const DEFAULT_WIN32_PATHEXT = ['.COM', '.EXE', '.BAT', '.CMD'];
 const DEFAULT_GIT_STATUS_TTL_MS = 15_000;
 const DEFAULT_GIT_STATUS_CACHE_MAX_ENTRIES = 64;
@@ -145,9 +144,9 @@ function nullDevice(platform) {
 }
 
 /**
- * Probe argv with repo-local Git config suppressed the way the hardened host
- * runs its background Git: no fsmonitor daemon/hook and no hooks path can be
- * seeded by an untrusted workspace's checked-in config.
+ * Probe argv suppresses repo-local fsmonitor and hook configuration, but
+ * does not disable every repo-configured command (for example clean filters;
+ * see KI-20).
  */
 function gitProbeArgs(platform) {
   return [

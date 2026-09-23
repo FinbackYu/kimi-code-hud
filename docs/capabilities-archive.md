@@ -53,12 +53,13 @@ Baseline delta (0.34.0 → 0.35.0):
 - The host hardens its pre-trust Git and GitHub CLI probes by resolving bare
   commands through PATH to absolute paths and refusing workspace-local hits.
   HUD now applies the same boundary to its synchronous `git status` probe.
-  When the host later extended this boundary to suppress repo-local Git config
-  execution (upstream PR #3964, v2.0.3 cycle), HUD matched it: every probe
-  runs with `core.fsmonitor=false` and `core.hooksPath` redirected to the null
-  device, so a checked-in config cannot spawn commands during a status read.
+  When the host later extended this boundary (upstream PR #3964, v2.0.3
+  cycle), HUD added `core.fsmonitor=false` and a null `core.hooksPath`. These
+  suppress those two mechanisms, but do not block a clean filter selected by
+  `.gitattributes`: the 2026-09-23 synthetic probe reproduced that command
+  running through HUD's exact `git status` call. See [KI-20](../KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters).
   The diff-driver flags (`--no-ext-diff --no-textconv`) have no counterpart in
-  HUD because the probe never diffs.
+  HUD because the probe never diffs; they do not disable clean filters either.
 
 Baseline delta (0.35.0 → 0.36.0):
 
@@ -344,7 +345,38 @@ Baseline delta (0.43.1 → 2.0.0), reviewed 2026-09-17:
   0.43.1 live TUI/managed-account acceptance carries over and remains
   pending. See [the full review](upstream-2.0.0-review.md).
 
-Baseline delta (2.0.0 → v2.0.3 candidate), prepped 2026-09-23:
+
+
+Baseline delta (2.0.0 → 2.0.2), reviewed 2026-09-23:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.0.2`, tag object
+  `c98339a1867e0843d192b8f7454d7ae3dcd5d8d8`, peeled commit
+  `9d07f634be94ebeb1deba2f55d247807cf729315`; 33 commits after 2.0.0.
+  The official release was published 2026-09-19.
+- 2.0.1 adds `api_key_env` provider credentials (upstream #3762); 2.0.2 fixes
+  resumed-message ordering, compaction after switching to a smaller context
+  window, project-root assumptions, duplicate in-flight messages and web UI
+  interactions. These do not change the HUD status-line payload.
+- `StatusLinePayload` remains the same 10 fields; `footer.ts`,
+  `status-line-command.ts` and `git-status.ts` are unchanged in the range.
+  The wire manifest remains 59 record types with no additions or removals;
+  additive optional fields include `prompt.steered.messageId`,
+  `turn.ended.traceId`, and `turn.steer.messageId` / `promptIds` / `turnId`.
+  State snapshots add optional `reasoningKey` and `origin.inTurn`; KAP adds
+  optional `turn.ended.traceId`. Neither consumer derives behavior from them.
+- DeepSeek `api_key_env` is a HUD P2 gap on `main` and the prep branch; the
+  fix exists separately on `fix/35-provider-api-key-env` and awaits merge.
+- The #44 Git-probe prep was re-audited: `core.fsmonitor=false` and the null
+  hooks path do not prevent `.gitattributes`-selected clean filters from
+  running. A temporary synthetic repository reproduced execution through the
+  exact HUD probe. This remains an open P1 in [KI-20](../KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters).
+- Upstream PR #3970's five durable `subagent.*` records remain a 2.0.3
+  candidate, not part of 2.0.2. The HUD prep fixture covers all five; both HUD
+  and usage token ledgers continue to count `usage.record` only.
+- The full evidence and verification limits are in
+  [the 2.0.2 review](upstream-2.0.2-review.md).
+
+v2.0.3 candidate prep (initially scoped from 2.0.0 on 2026-09-23; stable baseline later advanced to 2.0.2):
 
 - Target: upstream PR #3970 (merge
   `895e9d9b868cf9899e444784130fa1946c6cef6c`), carried on the
@@ -366,7 +398,8 @@ Baseline delta (2.0.0 → v2.0.3 candidate), prepped 2026-09-23:
   classes.
 - Replacing the KI-15 lost-then-resumed heuristic with the durable
   `subagent.*` lifecycle stays an open option, deferred to the 2.0.3
-  baseline review.
+  baseline review. Revalidate this prep against the 2.0.2 stable tag before
+  release-day acceptance.
 - Documentation and fixture prep only; no HUD runtime behavior change. The
   branch merges to `main` only after the upstream release ships and the
   issue #45 checklist passes locally against the released build.

@@ -2,7 +2,7 @@
 
 - Last verified: 2026-09-23
 - HUD behavior baseline: `v0.8.4` (`711d54e`)
-- Kimi Code baseline: `2.0.0` (`1b89e4b039f052d10f258464413b2047acca12ba`)
+- Kimi Code baseline: `2.0.2` (`9d07f634be94ebeb1deba2f55d247807cf729315`)
 - v2.0.3 candidate (prep): the Event2 manifest link below is pinned to PR
   #3970 (merge `895e9d9b`), which grows the manifest from 59 to 64 durable
   entries; re-pin it to the released 2.0.3 tag during release-day acceptance.
@@ -15,16 +15,16 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/utils/git/git-status.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/9d07f634be94ebeb1deba2f55d247807cf729315/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/9d07f634be94ebeb1deba2f55d247807cf729315/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/9d07f634be94ebeb1deba2f55d247807cf729315/apps/kimi-code/src/utils/git/git-status.ts)
 - [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/895e9d9b868cf9899e444784130fa1946c6cef6c/packages/agent-core-v2/docs/wire-manifest.d.ts) — v2.0.3-candidate pin (PR #3970, 64 entries)
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/tui/commands/registry.ts)
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/9d07f634be94ebeb1deba2f55d247807cf729315/apps/kimi-code/src/tui/commands/registry.ts)
 
-Per-release baseline audit history (0.32.0 → 2.0.0, plus the v2.0.3
+Per-release baseline audit history (0.32.0 → 2.0.2, plus the v2.0.3
 candidate prep) lives in
 [docs/capabilities-archive.md](docs/capabilities-archive.md). The sections
-below describe the current contract against the pinned 2.0.0 baseline; new
+below describe the current contract against the pinned 2.0.2 baseline; new
 release audits are appended to the archive instead of growing this file.
 
 ## Footer coverage
@@ -34,7 +34,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 2.0.0 | HUD reviewed branch | Status |
+| Official line-1 slot or state | Upstream 2.0.2 | HUD reviewed branch | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
@@ -45,7 +45,7 @@ does not need to be redrawn by the command.
 | background Shell | `[N task(s) running]` for running `process` / `bash-*` tasks | Reduces main-wire `task.started` / `task.terminated` and reconciles `tasks/<taskId>.json` sidecars; renders the same badge between model and cwd | covered — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) closed |
 | background Agent | `[N agent(s) running]` for running `agent` tasks | Same reducer; `agent` kind is counted and badged separately; a lost-then-resumed agent counts while its own wire stays fresh — [KI-15](KNOWN_ISSUES.md#ki-15-a-resumed-background-agent-was-invisible-to-the-task-badges) | covered — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) closed |
 | cwd | home-aware path shortened to at most three segments | Normal shows only `basename(cwd)`; compact omits cwd | intentional degradation |
-| Git | branch, diff `+N/-N` or `±`, ahead/behind, and linked PR number | Payload branch plus synchronous dirty check, rendered as `git:(branch*)` | degraded — [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer) |
+| Git | branch, diff `+N/-N` or `±`, ahead/behind, and linked PR number | Payload branch plus synchronous dirty check, rendered as `git:(branch*)` | degraded — [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer); current prep probe still runs a repo-configured clean filter ([KI-20](KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters)) |
 | rotating tips | width-aware, weighted 10-second rotation | omitted | intentional omission |
 | tool-output shortcut | fixed `ctrl+o expand` / `ctrl+o collapse` moves to line 2 when a custom command owns line 1 | host draws it subject to width and higher-priority hints | host-owned, preserved |
 | Context and transient hint | context percentage and exact current/max tokens; transient hint at left | still rendered by the host on line 2 | host-owned, preserved; the reported value follows `[token_counting]` strategy |
@@ -59,7 +59,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 2.0.0. HUD installation, configuration, and lifecycle
+built into Kimi Code 2.0.2. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 

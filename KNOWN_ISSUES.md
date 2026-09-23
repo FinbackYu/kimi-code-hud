@@ -2,7 +2,7 @@
 
 - Last verified: 2026-09-23
 - HUD behavior baseline: `v0.8.4` (`711d54e`)
-- Kimi Code baseline: `2.0.0` (`1b89e4b039f052d10f258464413b2047acca12ba`)
+- Kimi Code baseline: `2.0.2` (`9d07f634be94ebeb1deba2f55d247807cf729315`)
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -132,7 +132,7 @@ Affected upstream slot: `model` / status-line payload
 The built-in footer renders the host's in-memory session state
 (`state.thinkingEffort`), so it always shows the current runtime effort. The
 custom status line has no such field: `StatusLinePayload` (10 fields,
-unchanged through 2.0.0) carries no thinking-effort entry.
+unchanged through 2.0.2) carries no thinking-effort entry.
 
 In-session switches: the original finding, verified against 0.34.0 wires, was
 that a switch emits no local event the HUD could read. That is no longer true:
@@ -227,14 +227,15 @@ Resolution:
 - preserve the existing silent `false` fallback when no trusted executable is
   available or the bounded status command fails.
 
-Extension (v2.0.3 baseline): the host widened the same boundary in upstream
-PR #3964 to suppress repo-local Git config execution, after background Git
-invocations were shown to run repo-local `core.fsmonitor`, `core.hooksPath`,
-and diff/textconv drivers. HUD's status probe now carries the same config
-suppressions — `-c core.fsmonitor=false` and `-c core.hooksPath` pointed at
-the null device (`NUL` on Windows, `/dev/null` elsewhere). `--no-ext-diff` /
-`--no-textconv` have no counterpart here because the probe runs
-`git status` only and never diffs.
+Extension (upstream PR #3964, 2.0.3 cycle; HUD prep issue #44): the status
+probe adds `-c core.fsmonitor=false` and redirects `core.hooksPath` to the null
+device (`NUL` on Windows, `/dev/null` elsewhere). This suppresses those two
+mechanisms, but does not prevent every repository-configured command. A
+synthetic repository selected a `filter.<driver>.clean` command through
+`.gitattributes`; the exact HUD `git status` invocation, including
+`GIT_OPTIONAL_LOCKS=0`, executed it. See the open P1 [KI-20](#ki-20-git-status-probe-still-runs-repository-configured-clean-filters).
+The probe never diffs, so `--no-ext-diff` / `--no-textconv` are not applicable;
+those flags also do not disable clean filters.
 
 ## KI-8: Experimental fullscreen mode lacks a live HUD verification
 
@@ -694,3 +695,53 @@ not rendered. Subscription ratios are not API balances or token costs.
 Synthetic regressions cover the HTTP parser, context-tagged cache migration,
 empty-map refresh, normal/compact output, malformed and zero values, reset
 countdowns, freshness and expiry. No real credentials or user data were used.
+
+
+## KI-20: Git status probe still runs repository-configured clean filters
+
+Status: open — P1 security boundary gap on `upstream/2.0.3-prep`
+
+Affected area: Git dirty probe / untrusted workspace execution
+
+The prep probe passes `-c core.fsmonitor=false` and redirects
+`core.hooksPath`, but a local `filter.<driver>.clean` command selected by a
+tracked `.gitattributes` entry remains executable during `git status`.
+
+Evidence (2026-09-23): in an isolated temporary repository, a modified tracked
+file matched `*.txt filter=probe`; `.git/config` mapped `filter.probe.clean`
+to a marker-writing script. The exact probe argv and `GIT_OPTIONAL_LOCKS=0`
+executed that script. Calling the HUD's `readGitStatus` with its 150ms timeout
+also returned `{ branch: 'main', dirty: true }` and left the marker. No user
+repository or configuration was used. Upstream PR #3964 has an automated review
+comment describing the same clean/process-filter path.
+
+Acceptance criteria:
+
+- a status probe on an untrusted repository cannot execute a command configured
+  by that repository through `filter.<driver>.clean` or `filter.<driver>.process`;
+- add an isolated regression fixture that would fail if either filter runs;
+- retain the bounded, silent fallback and 150ms child-process ceiling.
+
+## KI-21: Provider balance does not resolve `api_key_env`
+
+Status: open — P2 compatibility gap on `main` and `upstream/2.0.3-prep`
+
+Affected area: DeepSeek provider balance and doctor diagnostics
+
+Kimi Code 2.0.1 added provider credentials through `api_key_env`. The HUD
+branches reviewed here only parse `api_key` and require a resolved literal key,
+so an env-only provider configuration fails closed and the balance stays
+hidden. The local `fix/35-provider-api-key-env` branch at `a22b6f3` implements
+the variable-name resolution, mutual-exclusion checks, per-request environment
+lookup, doctor messages and regression coverage; it is not an ancestor of the
+reviewed prep branch. The earlier task report identifies PR #46 as awaiting
+merge approval. A real Kimi Code 2.0.2 DeepSeek smoke remains unverified.
+
+Acceptance criteria:
+
+- resolve the named environment variable on each request without persisting or
+  logging its value;
+- match upstream mutual-exclusion and missing/empty-variable fail-closed
+  behavior;
+- merge and verify the existing fix branch before claiming this baseline is
+  covered.
