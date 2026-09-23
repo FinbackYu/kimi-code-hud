@@ -22,11 +22,19 @@ function repository(t) {
 
 test('safe probe detects clean, tracked, staged and untracked states', (t) => {
   const { cwd, git } = repository(t);
+  const startedAt = Date.now();
   const clean = readGitStatus(cwd);
   if (clean.dirty && process.platform === 'win32') {
     const indexed = git(['ls-files', '--cached', '--stage', '--debug', '-z']).toString();
+    const others = git(['ls-files', '--others', '--exclude-standard', '-z']).toString();
+    let staged;
+    try {
+      staged = git(['diff', '--cached', '--name-only', '--no-ext-diff', '--no-textconv', 'HEAD', '--']).toString();
+    } catch (error) {
+      staged = `ERROR ${error.status}: ${error.stderr?.toString()}`;
+    }
     const stat = fs.lstatSync(path.join(cwd, 'tracked.txt'), { bigint: true });
-    assert.fail(`clean Windows probe was dirty; index=${JSON.stringify(indexed)}; file size=${stat.size} ctimeNs=${stat.ctimeNs} mtimeNs=${stat.mtimeNs}`);
+    assert.fail(`clean Windows probe was dirty after ${Date.now() - startedAt}ms; others=${JSON.stringify(others)}; staged=${JSON.stringify(staged)}; index=${JSON.stringify(indexed)}; file size=${stat.size} ctimeNs=${stat.ctimeNs} mtimeNs=${stat.mtimeNs}`);
   }
   assert.deepEqual(clean, { branch: 'main', dirty: false });
 
