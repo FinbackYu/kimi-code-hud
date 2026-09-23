@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { lstatSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { lstatSync, readFileSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 
 const EMPTY = Object.freeze({ branch: null, dirty: false });
@@ -14,7 +14,9 @@ function readIndexEntries(output) {
     const nul = output.indexOf('\0', offset);
     if (nul < 0) throw new Error('invalid Git index listing');
     const header = INDEX_ENTRY.exec(output.slice(offset, nul));
-    if (!header) throw new Error('unsupported Git index entry');
+    // With --cached --others, an untracked path has no stage header or debug
+    // metadata. Its presence is enough to mark the worktree dirty.
+    if (!header) return { entries, untracked: true };
     offset = nul + 1;
     const stat = INDEX_STAT.exec(output.slice(offset));
     if (!stat) throw new Error('unsupported Git index metadata');
@@ -28,7 +30,38 @@ function readIndexEntries(output) {
       size: BigInt(stat[5]),
     });
   }
-  return entries;
+  return { entries, untracked: false };
+}
+
+function readBranch(cwd, env) {
+  try {
+    const override = Object.entries(env).find(([key]) => key.toUpperCase() === 'GIT_DIR')?.[1];
+    let gitDir = typeof override === 'string' && override
+      ? resolve(cwd, override)
+      : null;
+    if (!gitDir) {
+      let current = resolve(cwd);
+      for (;;) {
+        const candidate = join(current, '.git');
+        try {
+          const stat = statSync(candidate);
+          if (stat.isDirectory()) gitDir = candidate;
+          else if (stat.isFile() && stat.size <= 4096) {
+            const pointer = /^gitdir: ([^\r\n]+)\s*$/i.exec(readFileSync(candidate, 'utf8'));
+            if (pointer) gitDir = resolve(current, pointer[1]);
+          }
+        } catch { /* no repository marker here */ }
+        if (gitDir || dirname(current) === current) break;
+        current = dirname(current);
+      }
+    }
+    if (!gitDir || statSync(join(gitDir, 'HEAD')).size > 4096) return null;
+    const head = readFileSync(join(gitDir, 'HEAD'), 'utf8');
+    const branch = /^ref: refs\/heads\/([^\r\n]+)\r?\n?$/.exec(head)?.[1];
+    return branch && branch.length <= 1024 ? branch : null;
+  } catch {
+    return null;
+  }
 }
 
 function changedOnDisk(cwd, entry, platform) {
@@ -85,19 +118,12 @@ export function probeGitStatusSafely(git, cwd, {
     });
   };
 
-  let branch = null;
-  try {
-    branch = run(['symbolic-ref', '--quiet', '--short', 'HEAD']).toString().trim() || null;
-  } catch {
-    // A detached HEAD has no branch; the dirty check can still run.
-  }
+  const branch = readBranch(cwd, env);
 
   try {
-    const untracked = run(['ls-files', '--others', '--exclude-standard', '-z']);
-    if (untracked.length > 0) return Object.freeze({ branch, dirty: true });
-
-    const raw = run(['ls-files', '--cached', '--stage', '--debug', '-z']).toString('utf8');
-    const entries = readIndexEntries(raw);
+    const raw = run(['ls-files', '--cached', '--others', '--exclude-standard', '--stage', '--debug', '-z']).toString('utf8');
+    const { entries, untracked } = readIndexEntries(raw);
+    if (untracked) return Object.freeze({ branch, dirty: true });
     for (const entry of entries) {
       if (performance.now() >= deadline || changedOnDisk(cwd, entry, platform)) {
         return Object.freeze({ branch, dirty: true });
