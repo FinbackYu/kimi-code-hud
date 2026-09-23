@@ -1,6 +1,6 @@
 # Known issues
 
-- Last verified: 2026-09-19
+- Last verified: 2026-09-23
 - HUD behavior baseline: `v0.8.4` (`711d54e`)
 - Kimi Code baseline: `2.0.0` (`1b89e4b039f052d10f258464413b2047acca12ba`)
 

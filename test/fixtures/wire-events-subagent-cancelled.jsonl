@@ -7,5 +7,12 @@
 {"type":"llm.request","kind":"loop","time":1785456006000}
 {"type":"context.append_loop_event","event":{"type":"step.end","turnId":"redacted","usage":{"inputOther":100,"output":40,"inputCacheRead":300,"inputCacheCreation":100},"finishReason":"tool_use","llmFirstTokenLatencyMs":700,"llmStreamDurationMs":1000},"time":1785456007000}
 {"type":"llm.request","kind":"loop","time":1785456008000}
-{"type":"subagent.cancelled","agentId":"redacted","subagentId":"sub-redacted-1","time":1785456009300}
-{"type":"subagent.cancelled","agentId":"redacted","subagentId":"sub-redacted-2","time":1785456009400}
+{"type":"subagent.spawned","agentId":"redacted","subagentId":"sub-redacted-1","subagentName":"explorer","parentToolCallId":"call-redacted-1","parentToolCallUuid":"uuid-redacted-1","parentAgentId":"agent-main","callerAgentId":"agent-main","description":"redacted","swarmIndex":0,"runInBackground":false,"model":"k3","thinkingEffort":"high","taskId":"task-redacted-1","time":1785456009000}
+{"type":"subagent.started","agentId":"redacted","subagentId":"sub-redacted-1","time":1785456009100}
+{"type":"subagent.completed","agentId":"redacted","subagentId":"sub-redacted-1","resultSummary":"redacted","usage":{"inputOther":100,"output":20,"inputCacheRead":300,"inputCacheCreation":100},"contextTokens":52000,"time":1785456009200}
+{"type":"subagent.spawned","agentId":"redacted","subagentId":"sub-redacted-2","subagentName":"coder","parentToolCallId":"call-redacted-2","runInBackground":true,"time":1785456009250}
+{"type":"subagent.failed","agentId":"redacted","subagentId":"sub-redacted-2","error":"redacted","time":1785456009350}
+{"type":"subagent.spawned","agentId":"redacted","subagentId":"sub-redacted-3","subagentName":"explorer","parentToolCallId":"call-redacted-3","runInBackground":false,"time":1785456009450}
+{"type":"subagent.cancelled","agentId":"redacted","subagentId":"sub-redacted-3","time":1785456009500}
+{"type":"subagent.spawned","agentId":"redacted","subagentId":"sub-redacted-4","subagentName":"coder","parentToolCallId":"call-redacted-4","runInBackground":false,"time":1785456009550}
+{"type":"subagent.cancelled","agentId":"redacted","subagentId":"sub-redacted-4","time":1785456009600}

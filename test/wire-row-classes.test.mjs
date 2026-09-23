@@ -401,37 +401,53 @@ const SCENARIOS = [
   },
   {
     /**
-     * Upstream 2.0.0 (#3778) adds the observable Event2 record
-     * `subagent.cancelled` (mirrorAgentRun `SubagentCancelled`) outside the
-     * wire manifest: evicted, interrupted or timed-out subagents now report
-     * as cancelled instead of failed/aborted. Like every unknown record
-     * class it must fold as a no-op.
+     * Upstream 2.0.0 (#3778) added the observable Event2 mirror
+     * `subagent.cancelled` (mirrorAgentRun `SubagentCancelled`); upstream PR
+     * #3970 (v2.0.3 candidate, merge 895e9d9b) promotes all five subagent.*
+     * mirror records — spawned / started / completed / failed / cancelled —
+     * to durable, manifest-registered records (59 → 64 entries), so they now
+     * survive session resume. Like every non-reduced record class they must
+     * fold as no-ops: the HUD has no subagent-lifecycle projection, and the
+     * usage block `subagent.completed` now carries durably must never enter
+     * the session usage ledger (only `usage.record` feeds it).
      */
-    label: 'subagent cancelled records',
+    label: 'subagent lifecycle records',
     fixture: 'wire-events-subagent-cancelled.jsonl',
-    fixtureTitle: 'fixture appends subagent.cancelled rows to the reference wire',
+    fixtureTitle:
+      'fixture appends the five durable subagent.* record classes to the reference wire',
     fold: 'noop',
-    foldTitle: 'processWireChunk folds subagent.cancelled records without touching the state',
-    baselineTitle: 'subagent.cancelled records leave metrics, state and render identical to baseline',
+    foldTitle: 'processWireChunk folds durable subagent.* records without touching the state',
+    baselineTitle:
+      'durable subagent.* records leave metrics, state and render identical to baseline',
     rowsUnder(wireText) {
       return wireText
         .split('\n')
-        .filter((line) => line && /"type":"subagent\.cancelled"/.test(line));
+        .filter((line) => line && /"type":"subagent\./.test(line));
     },
     baseline(wireText) {
       return wireText
         .split('\n')
-        .filter((line) => line && !/"type":"subagent\.cancelled"/.test(line))
+        .filter((line) => line && !/"type":"subagent\./.test(line))
         .join('\n') + '\n';
     },
     fixtureChecks(wireText, baselineText) {
       assert.deepEqual(
         this.rowsUnder(wireText).map((line) => JSON.parse(line).type),
-        ['subagent.cancelled', 'subagent.cancelled'],
+        [
+          'subagent.spawned',
+          'subagent.started',
+          'subagent.completed',
+          'subagent.spawned',
+          'subagent.failed',
+          'subagent.spawned',
+          'subagent.cancelled',
+          'subagent.spawned',
+          'subagent.cancelled',
+        ],
       );
       const referenceLines = REFERENCE.split('\n').filter((line) => line).length;
-      assert.equal(wireText.split('\n').filter((line) => line).length, referenceLines + 2);
-      // Stripping the cancelled rows must reproduce the reference wire fixture
+      assert.equal(wireText.split('\n').filter((line) => line).length, referenceLines + 9);
+      // Stripping the subagent rows must reproduce the reference wire fixture
       // byte-identically, so the comparison differs on exactly one axis.
       assert.equal(baselineText, REFERENCE);
       assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
@@ -440,6 +456,19 @@ const SCENARIOS = [
         assert.equal(typeof row.subagentId, 'string');
         assert.ok(row.time >= 1785456000000 && row.time <= 1785456060000);
       }
+      // The spawned/completed/failed payload shapes mirror the PR #3970
+      // manifest entries: optional linkages on spawned, the four-counter
+      // usage block plus contextTokens on completed, error on failed.
+      const rows = this.rowsUnder(wireText).map((line) => JSON.parse(line));
+      const spawned = rows.find((row) => row.type === 'subagent.spawned');
+      assert.equal(spawned.runInBackground, false);
+      assert.equal(typeof spawned.parentToolCallId, 'string');
+      assert.equal(typeof spawned.model, 'string');
+      const completed = rows.find((row) => row.type === 'subagent.completed');
+      assert.equal(typeof completed.resultSummary, 'string');
+      assert.ok(Number.isFinite(completed.usage?.inputOther));
+      assert.ok(Number.isFinite(completed.contextTokens));
+      assert.equal(typeof rows.find((row) => row.type === 'subagent.failed').error, 'string');
     },
     baselineReadings(metrics) {
       assert.equal(metrics.tps, 30);
@@ -524,6 +553,23 @@ const baselineWithoutTerminal = (wireText) => TERMINAL.baseline(wireText);
 test('terminal step.end rows never fold into the session usage ledger', () => {
   const agentUsage = { reader: {}, byModel: {} };
   for (const line of terminalRows(terminalWireText)) {
+    assert.equal(applySessionUsageRow(agentUsage, JSON.parse(line)), false);
+  }
+  assert.deepEqual(agentUsage.byModel, {});
+});
+
+// --- durable subagent usage, beyond the shared baseline comparison ---------
+
+const SUBAGENT = SCENARIOS.find((scenario) => scenario.label === 'subagent lifecycle records');
+const subagentWireText = readFixture(SUBAGENT);
+const subagentRows = (wireText) => SUBAGENT.rowsUnder(wireText);
+
+test('durable subagent.completed usage never folds into the session usage ledger', () => {
+  // PR #3970 makes subagent.completed persist a four-counter usage block and
+  // contextTokens. The ledger's only key is `usage.record`; the subagent
+  // mirror must stay outside it even though the shapes now overlap.
+  const agentUsage = { reader: {}, byModel: {} };
+  for (const line of subagentRows(subagentWireText)) {
     assert.equal(applySessionUsageRow(agentUsage, JSON.parse(line)), false);
   }
   assert.deepEqual(agentUsage.byModel, {});

@@ -326,7 +326,9 @@ Baseline delta (0.43.1 → 2.0.0), reviewed 2026-09-17:
 - `subagent.cancelled` (#3778) is a new observable Event2 mirror outside the
   Event2 manifest: evicted, interrupted or timed-out subagents report
   cancelled instead of failed/aborted. Locked as a neutral row class in
-  `test/wire-row-classes.test.mjs`.
+  `test/wire-row-classes.test.mjs`. (Range-scoped: the v2.0.3 candidate PR
+  #3970 later registers all five `subagent.*` mirrors as durable manifest
+  entries — see the v2.0.3 candidate delta below.)
 - The Event2 manifest, `StatusLinePayload` (10 fields), the quota endpoint
   (ratio model of #3787), permission labels and the locked kap
   subagent/task schemas are unchanged; events-zod only gains
@@ -341,3 +343,30 @@ Baseline delta (0.43.1 → 2.0.0), reviewed 2026-09-17:
 - Source and synthetic-fixture verification on an unmerged branch; the
   0.43.1 live TUI/managed-account acceptance carries over and remains
   pending. See [the full review](upstream-2.0.0-review.md).
+
+Baseline delta (2.0.0 → v2.0.3 candidate), prepped 2026-09-23:
+
+- Target: upstream PR #3970 (merge
+  `895e9d9b868cf9899e444784130fa1946c6cef6c`), carried on the
+  `upstream/2.0.3-prep` branch until `@moonshot-ai/kimi-code@2.0.3` ships;
+  range facts (tag object, exact commit count) are filled in at release-day
+  acceptance.
+- PR #3970 promotes the five `subagent.*` mirror records — `spawned`,
+  `started`, `completed`, `failed`, `cancelled` — from observable-only to
+  durable, manifest-registered records: the Event2 manifest grows 59 → 64
+  entries, reversing the 2.0.0 observation that these records live outside
+  the manifest. Persistence makes them a stable post-resume input; the HUD
+  keeps folding them as no-ops.
+- `subagent.completed` now persists a four-counter `usage` block and
+  `contextTokens`. The session usage ledger stays keyed on `usage.record`
+  only; the boundary is locked by the renamed `subagent lifecycle records`
+  scenario plus a dedicated ledger regression in
+  `test/wire-row-classes.test.mjs`, with
+  `test/fixtures/wire-events-subagent-cancelled.jsonl` covering all five
+  classes.
+- Replacing the KI-15 lost-then-resumed heuristic with the durable
+  `subagent.*` lifecycle stays an open option, deferred to the 2.0.3
+  baseline review.
+- Documentation and fixture prep only; no HUD runtime behavior change. The
+  branch merges to `main` only after the upstream release ships and the
+  issue #45 checklist passes locally against the released build.

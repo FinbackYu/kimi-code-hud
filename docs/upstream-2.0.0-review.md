@@ -37,13 +37,18 @@ interrupted or timed-out subagents now report cancelled instead of
 failed/aborted. Like `subagent.spawned` / `subagent.failed`, it lives outside
 the generated wire manifest, so rows of this class may now appear in
 `wire.jsonl`. Every HUD reducer gates on exact known types, so they fold as
-no-ops; locked by the `subagent cancelled records` scenario in
-`test/wire-row-classes.test.mjs` (`test/fixtures/wire-events-subagent-cancelled.jsonl`).
+no-ops; locked by the `subagent lifecycle records` scenario in
+`test/wire-row-classes.test.mjs` (`test/fixtures/wire-events-subagent-cancelled.jsonl`;
+renamed and extended when PR #3970 made these records durable in the v2.0.3
+candidate). The "outside the generated wire manifest" statement is
+range-scoped: true for 0.43.1 → 2.0.0, superseded by PR #3970 (59 → 64
+manifest entries).
 
 ### 2. Surfaces verified unchanged across the range
 
-- The Event2 persisted manifest `wire-manifest.d.ts` is unchanged: no record
-  type added, removed, or renamed.
+- The Event2 persisted manifest `wire-manifest.d.ts` is unchanged across this
+  range: no record type added, removed, or renamed. (Superseded for later
+  ranges by PR #3970 in the v2.0.3 candidate.)
 - `StatusLinePayload` keeps its 10 fields;
   `apps/kimi-code/src/tui/utils/status-line-command.ts` is byte-identical to
   0.43.1.
@@ -102,7 +107,9 @@ kimi-code-usage do not consume the kap WebSocket, so this is informational.
   `SubagentSpawnedPayload` field-by-field equality,
   `subagent.cancelled`'s absence from the manifest, the ratio field names
   and endpoint marker in `managed-usage.ts`, and the
-  `parentToolCallId: toolCallId` count.
+  `parentToolCallId: toolCallId` count. These are pinned-commit facts for
+  this range; the manifest ones no longer hold on later `main` — PR #3970
+  in the v2.0.3 candidate registers the five `subagent.*` records.
 
 ## Remaining gates
 
