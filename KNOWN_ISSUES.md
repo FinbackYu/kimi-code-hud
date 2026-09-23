@@ -714,24 +714,19 @@ Acceptance criteria:
 
 ## KI-21: Provider balance does not resolve `api_key_env`
 
-Status: open — P2 compatibility gap on `main` and `upstream/2.0.3-prep`
+Status: fixed for `main` by PR #46 (unreleased HUD change); the reviewed
+`upstream/2.0.3-prep` branch still needs to sync from `main`
 
 Affected area: DeepSeek provider balance and doctor diagnostics
 
-Kimi Code 2.0.1 added provider credentials through `api_key_env`. The HUD
-branches reviewed here only parse `api_key` and require a resolved literal key,
-so an env-only provider configuration fails closed and the balance stays
-hidden. The local `fix/35-provider-api-key-env` branch at `a22b6f3` implements
-the variable-name resolution, mutual-exclusion checks, per-request environment
-lookup, doctor messages and regression coverage; it is not an ancestor of the
-reviewed prep branch. The earlier task report identifies PR #46 as awaiting
-merge approval. A real Kimi Code 2.0.2 DeepSeek smoke remains unverified.
+Kimi Code 2.0.1 added provider credentials through `api_key_env`. At the
+2.0.2 baseline review, the HUD parsed only literal `api_key`, so an env-only
+provider configuration hid the DeepSeek balance. PR #46 resolves the named
+variable on each request, rejects simultaneous `api_key` and `api_key_env`
+declarations, and fails closed for an unset or empty variable. Its doctor
+messages distinguish those cases, and the secret value stays out of targets,
+cache files and output. Synthetic regressions and CI cover these behaviors.
 
-Acceptance criteria:
-
-- resolve the named environment variable on each request without persisting or
-  logging its value;
-- match upstream mutual-exclusion and missing/empty-variable fail-closed
-  behavior;
-- merge and verify the existing fix branch before claiming this baseline is
-  covered.
+A real Kimi Code 2.0.2 DeepSeek account smoke remains unverified. The prep
+branch reviewed on 2026-09-23 did not contain this fix; sync it from `main`
+before any future merge.

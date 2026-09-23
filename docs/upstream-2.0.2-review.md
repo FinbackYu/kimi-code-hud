@@ -31,9 +31,9 @@ and [upstream changelog](https://github.com/MoonshotAI/kimi-code/blob/main/docs/
   State snapshots add optional `reasoningKey` and optional `origin.inTurn`.
   KAP adds optional `turn.ended.traceId`. The HUD does not currently consume
   these fields, so no display change follows from them.
-- 2.0.1 adds provider `api_key_env`; the HUD's current `main` and
-  `upstream/2.0.3-prep` branches still resolve only literal `api_key` for
-  provider balance. See P2 finding below.
+- 2.0.1 adds provider `api_key_env`; at this review, the HUD's `main` and
+  `upstream/2.0.3-prep` branches still resolved only literal `api_key` for
+  provider balance. See the P2 finding below and its follow-up in KI-21.
 - 2.0.1 renames the CLI installer command to `install-desktop` while retaining
   hidden `install-app` as an alias. The HUD does not own these CLI commands;
   searches of its README, capability/issue documents, changelog, source and
@@ -64,12 +64,13 @@ No probe behavior change was made in this review.
 
 ### P2 — provider balance does not resolve `api_key_env`
 
-The 2.0.1 release notes include upstream #3762's `api_key_env` support. The
-reviewed HUD `main` and prep branches parse `api_key` only, so an env-only
-provider credential fails closed and the DeepSeek balance stays hidden. The
-fix is present at `a22b6f3` on `fix/35-provider-api-key-env`, outside the prep
-branch. The task report identifies PR #46 as awaiting merge approval. A real
-2.0.2 DeepSeek smoke remains unverified; tracked as [KI-21](../KNOWN_ISSUES.md#ki-21-provider-balance-does-not-resolve-api_key_env).
+The 2.0.1 release notes include upstream #3762's `api_key_env` support. At
+the time of this review, the HUD `main` and prep branches parsed `api_key`
+only, so an env-only provider credential failed closed and hid the DeepSeek
+balance. The fix was present at `a22b6f3` on `fix/35-provider-api-key-env`,
+outside the prep branch; PR #46 then awaited merge approval. A real 2.0.2
+DeepSeek smoke remains unverified. The current resolution status is in
+[KI-21](../KNOWN_ISSUES.md#ki-21-provider-balance-does-not-resolve-api_key_env).
 
 ### 2.0.3 candidate — subagent durable records
 

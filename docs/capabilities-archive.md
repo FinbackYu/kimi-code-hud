@@ -354,7 +354,8 @@ Baseline delta (2.0.0 → 2.0.2), reviewed 2026-09-23:
   `turn.ended.traceId`, and `turn.steer.messageId` / `promptIds` / `turnId`.
   State snapshots add optional `reasoningKey` and `origin.inTurn`; KAP adds
   optional `turn.ended.traceId`. Neither consumer derives behavior from them.
-- DeepSeek `api_key_env` is a HUD P2 gap on `main`; see KI-21.
+- DeepSeek `api_key_env` was a HUD P2 gap at review time; PR #46 addresses it.
+  See KI-21 for the current status and verification limit.
 - The clean-filter risk is outside the 2.0.2 release delta. It was reproduced
   on the prep probe and is tracked as KI-20; no probe behavior change was made
   in this baseline update.
