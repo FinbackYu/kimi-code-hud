@@ -150,28 +150,45 @@ function providerUsageAdapter(provider) {
   return null;
 }
 
+/**
+ * Resolve the request credential the way the host does since Kimi Code
+ * 2.0.1: a provider declares either a literal `api_key` or an `api_key_env`
+ * variable name — the two are mutually exclusive — and the variable is read
+ * fresh per request. An unset or empty variable fails closed without
+ * falling back to any other credential, mirroring the host's `config.invalid`.
+ * @param {{apiKey: string|null, apiKeyEnv: string|null}} config
+ * @param {NodeJS.ProcessEnv|object} env
+ * @returns {string|null}
+ */
+function resolveCredential(config, env) {
+  const declared = [config.apiKey, config.apiKeyEnv].filter(
+    (value) => typeof value === 'string' && value.length > 0,
+  );
+  if (declared.length !== 1) return null;
+  if (declared[0] === config.apiKey) return declared[0];
+  const value = env?.[declared[0]];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
 function resolveProviderUsageContext({
   provider,
   configText,
+  env = process.env,
   providerUsageDir = PROVIDER_USAGE_DIR,
 } = {}) {
   const adapter = providerUsageAdapter(provider);
   if (!adapter) return null;
   const config = resolveProviderConfig({ provider, configText });
-  if (
-    !config
-    || typeof config.apiKey !== 'string'
-    || config.apiKey.length === 0
-    || !adapter.accepts(config)
-  ) {
+  const apiKey = config ? resolveCredential(config, env) : null;
+  if (!apiKey || !adapter.accepts(config)) {
     return null;
   }
-  const fingerprint = credentialFingerprint(provider, config.apiKey);
+  const fingerprint = credentialFingerprint(provider, apiKey);
   const paths = providerUsagePaths({ provider, credentialFingerprint: fingerprint, providerUsageDir });
   if (!paths) return null;
   return {
     adapter,
-    apiKey: config.apiKey,
+    apiKey,
     target: {
       provider,
       adapter: adapter.id,
@@ -185,6 +202,8 @@ function resolveProviderUsageContext({
  * Resolve an active provider into a supported, secret-free usage target.
  * A provider name alone is insufficient: DeepSeek also requires its official
  * base URL so an API key is never forwarded to a compatible third-party proxy.
+ * The credential may be a literal `api_key` or an `api_key_env` variable read
+ * from `env` (default `process.env`) at resolution time.
  */
 export function resolveProviderUsageTarget(options = {}) {
   return resolveProviderUsageContext(options)?.target || null;
@@ -422,6 +441,7 @@ export async function refreshProviderUsage({
   provider,
   expectedFingerprint = null,
   configPath = CONFIG_TOML_PATH,
+  env = process.env,
   providerUsageDir = PROVIDER_USAGE_DIR,
   timeoutMs = 8000,
   fetchImpl = globalThis.fetch,
@@ -439,7 +459,7 @@ export async function refreshProviderUsage({
   try {
     let configText = '';
     try { configText = fs.readFileSync(configPath, 'utf8'); } catch { /* missing config */ }
-    const context = resolveProviderUsageContext({ provider, configText, providerUsageDir });
+    const context = resolveProviderUsageContext({ provider, configText, env, providerUsageDir });
     if (!context || (expectedFingerprint && context.target.credentialFingerprint !== expectedFingerprint)) {
       if (expectedPaths) {
         removeFile(expectedPaths.cachePath);
