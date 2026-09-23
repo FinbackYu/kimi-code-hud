@@ -25,7 +25,7 @@ description: 审查一个新发布或指定的 stable Kimi Code release 对 kimi
 
 - 完整 tag 名来自官方 Release 元数据或实际 tag 列表，不按版本号拼接 `vX.Y.Z`。
 - 记录：tag 类型、peeled commit、previous 是否 target 祖先、`previous..target` 提交数与 changed paths。
-- 用 `git show '<target>:<path>'` / `git grep <pattern> <commit>` 读 target 源码，保持纯只读；不得 fetch、checkout、merge、patch 上游仓（`git ls-remote` 等不写本地对象的远端只读查询可用）；target 对象本地缺失时停下请用户更新 checkout，不得代为执行。
+- 用 `git show '<target>:<path>'` / `git grep <pattern> <commit>` 读 target 源码，保持纯只读；不得 fetch、checkout、merge、patch 上游仓（`git ls-remote` 等不写本地对象的远端只读查询可用）；target 对象本地缺失时不要要求用户手动更新 checkout：工作区级 `baseline` 审查会按根仓保护规则 fetch 精确官方 release tag；本 consumer skill 只消费已核验的本地 tag/commit 对象。若当前不是该工作区级 baseline 流程，标记对象缺失并交回协调层处理，不自行 fetch。
 
 ### 2. 比较精确 range 并收集必审输入
 
