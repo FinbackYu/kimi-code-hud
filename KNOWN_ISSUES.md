@@ -227,7 +227,7 @@ Resolution:
 - preserve the existing silent `false` fallback when no trusted executable is
   available or the bounded status command fails.
 
-Extension (upstream PR #3964, 2.0.3 cycle; HUD prep issue #44): the status
+Extension (upstream PR #3964, first released in 2.1.0; HUD prep issue #44): the status
 probe adds `-c core.fsmonitor=false` and redirects `core.hooksPath` to the null
 device (`NUL` on Windows, `/dev/null` elsewhere). This suppresses those two
 mechanisms, but does not prevent every repository-configured command. A
@@ -724,18 +724,18 @@ Acceptance criteria:
 
 ## KI-21: Provider balance does not resolve `api_key_env`
 
-Status: open — P2 compatibility gap on `main` and `upstream/2.0.3-prep`
+Status: open on `upstream/2.0.3-prep`; fixed on `main` by PR #46 (unreleased HUD change)
 
 Affected area: DeepSeek provider balance and doctor diagnostics
 
-Kimi Code 2.0.1 added provider credentials through `api_key_env`. The HUD
-branches reviewed here only parse `api_key` and require a resolved literal key,
-so an env-only provider configuration fails closed and the balance stays
-hidden. The local `fix/35-provider-api-key-env` branch at `a22b6f3` implements
-the variable-name resolution, mutual-exclusion checks, per-request environment
-lookup, doctor messages and regression coverage; it is not an ancestor of the
-reviewed prep branch. The earlier task report identifies PR #46 as awaiting
-merge approval. A real Kimi Code 2.0.2 DeepSeek smoke remains unverified.
+Kimi Code 2.0.1 added provider credentials through `api_key_env`. This
+prep branch still parses only literal `api_key`, so an env-only provider
+configuration fails closed and hides the balance. PR #46 merged the
+variable-name resolution, mutual-exclusion checks, per-request environment
+lookup, doctor messages and regression coverage into `main` on 2026-09-23
+(`fc2d519`); its former fix branch was deleted after merge. The prep branch
+has not incorporated that fix. A real Kimi Code 2.0.2 DeepSeek smoke remains
+unverified.
 
 Acceptance criteria:
 
@@ -743,5 +743,5 @@ Acceptance criteria:
   logging its value;
 - match upstream mutual-exclusion and missing/empty-variable fail-closed
   behavior;
-- merge and verify the existing fix branch before claiming this baseline is
-  covered.
+- sync the merged `main` fix into this prep branch and verify the combined
+  branch before claiming its `api_key_env` path is covered.

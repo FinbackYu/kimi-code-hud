@@ -3,9 +3,10 @@
 - Last verified: 2026-09-23
 - HUD behavior baseline: `v0.8.4` (`711d54e`)
 - Kimi Code baseline: `2.0.2` (`9d07f634be94ebeb1deba2f55d247807cf729315`)
-- v2.0.3 candidate (prep): the Event2 manifest link below is pinned to PR
-  #3970 (merge `895e9d9b`), which grows the manifest from 59 to 64 durable
-  entries; re-pin it to the released 2.0.3 tag during release-day acceptance.
+- Release status (2026-09-23): upstream 2.1.0 shipped with PRs #3964 and
+  #3970. The audited HUD contract baseline remains 2.0.2; the Event2 link
+  below is still pinned to the #3970 merge for prep evidence. Audit the
+  2.0.2→2.1.0 range and re-pin to the release tag before claiming coverage.
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
@@ -18,11 +19,11 @@ cannot silently change the baseline:
 - [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/9d07f634be94ebeb1deba2f55d247807cf729315/apps/kimi-code/src/tui/components/chrome/footer.ts)
 - [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/9d07f634be94ebeb1deba2f55d247807cf729315/apps/kimi-code/src/tui/utils/status-line-command.ts)
 - [Git status model](https://github.com/MoonshotAI/kimi-code/blob/9d07f634be94ebeb1deba2f55d247807cf729315/apps/kimi-code/src/utils/git/git-status.ts)
-- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/895e9d9b868cf9899e444784130fa1946c6cef6c/packages/agent-core-v2/docs/wire-manifest.d.ts) — v2.0.3-candidate pin (PR #3970, 64 entries)
+- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/895e9d9b868cf9899e444784130fa1946c6cef6c/packages/agent-core-v2/docs/wire-manifest.d.ts) — prep pin at PR #3970, not a 2.1.0 release-baseline pin
 - [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/9d07f634be94ebeb1deba2f55d247807cf729315/apps/kimi-code/src/tui/commands/registry.ts)
 
-Per-release baseline audit history (0.32.0 → 2.0.2, plus the v2.0.3
-candidate prep) lives in
+Per-release baseline audit history (0.32.0 → 2.0.2, plus the #3970
+prep) lives in
 [docs/capabilities-archive.md](docs/capabilities-archive.md). The sections
 below describe the current contract against the pinned 2.0.2 baseline; new
 release audits are appended to the archive instead of growing this file.
@@ -110,8 +111,8 @@ also carry persisted wire-layer records outside the persisted record manifest:
 `agent.turn.ended` / `agent.message.appended` projections, `human.*` mirror
 records, and `context.undone` (persisted from 0.43.0; memory-only before).
 Since 2.0.0 (#3778), evicted, interrupted or timed-out subagents also emit
-the observable `subagent.cancelled` mirror, and in the v2.0.3 candidate (PR
-#3970) all five `subagent.spawned` / `subagent.started` / `subagent.completed`
+the observable `subagent.cancelled` mirror, and in PR
+#3970 (included in upstream 2.1.0, pending baseline audit) all five `subagent.spawned` / `subagent.started` / `subagent.completed`
 / `subagent.failed` / `subagent.cancelled` mirror records become durable,
 manifest-registered entries (59 → 64), so they survive session resume;
 `subagent.completed` thereby persists a `usage` block and `contextTokens`,

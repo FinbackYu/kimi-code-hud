@@ -6,6 +6,11 @@ HUD behavior baseline: `v0.8.4` (`711d54e`)
 
 Upstream range: `@moonshot-ai/kimi-code@2.0.0` → `@moonshot-ai/kimi-code@2.0.2`
 
+Post-review status (2026-09-23): HUD PR #46 merged the `api_key_env` fix
+into `main` at `fc2d519`; this prep branch still needs to sync from `main`.
+Upstream 2.1.0 subsequently shipped with #3964 and #3970. The audited HUD
+baseline here remains 2.0.2; the findings below describe that range.
+
 ## Release identity
 
 | | Previous | Target |
@@ -31,8 +36,8 @@ and [upstream changelog](https://github.com/MoonshotAI/kimi-code/blob/main/docs/
   State snapshots add optional `reasoningKey` and optional `origin.inTurn`.
   KAP adds optional `turn.ended.traceId`. The HUD does not currently consume
   these fields, so no display change follows from them.
-- 2.0.1 adds provider `api_key_env`; the HUD's current `main` and
-  `upstream/2.0.3-prep` branches still resolve only literal `api_key` for
+- 2.0.1 adds provider `api_key_env`; at this review, the HUD `main` and
+  `upstream/2.0.3-prep` branches still resolved only literal `api_key` for
   provider balance. See P2 finding below.
 - 2.0.1 renames the CLI installer command to `install-desktop` while retaining
   hidden `install-app` as an alias. The HUD does not own these CLI commands;
@@ -71,15 +76,16 @@ fix is present at `a22b6f3` on `fix/35-provider-api-key-env`, outside the prep
 branch. The task report identifies PR #46 as awaiting merge approval. A real
 2.0.2 DeepSeek smoke remains unverified; tracked as [KI-21](../KNOWN_ISSUES.md#ki-21-provider-balance-does-not-resolve-api_key_env).
 
-### 2.0.3 candidate — subagent durable records
+### Post-2.0.2 change — subagent durable records
 
-Upstream [PR #3970](https://github.com/MoonshotAI/kimi-code/pull/3970) remains
-unmerged as of this review. It promotes five `subagent.*` records to durable
-wire records and includes usage/context fields on completion. It is not part
-of the 2.0.2 stable range. The HUD prep branch has fixtures for all five
+Upstream [PR #3970](https://github.com/MoonshotAI/kimi-code/pull/3970) merged
+on 2026-09-23 at 06:25 UTC, before this review, but was not in the 2.0.2
+release. It promotes five `subagent.*` records to durable wire records and
+includes usage/context fields on completion. Upstream 2.1.0 subsequently
+shipped the PR; that release is not audited here. The HUD prep branch has fixtures for all five
 record classes and keeps `subagent.completed.usage` / `contextTokens` out of
 its session usage ledger; `kimi-code-usage` likewise recognizes `usage.record`
-for Kimi token facts. This is candidate prep, not 2.0.2 coverage.
+for Kimi token facts. This is prep evidence, not 2.0.2 coverage or a 2.1.0 baseline audit.
 
 ## Verification and limits
 

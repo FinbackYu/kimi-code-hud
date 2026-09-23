@@ -53,8 +53,7 @@ Baseline delta (0.34.0 → 0.35.0):
 - The host hardens its pre-trust Git and GitHub CLI probes by resolving bare
   commands through PATH to absolute paths and refusing workspace-local hits.
   HUD now applies the same boundary to its synchronous `git status` probe.
-  When the host later extended this boundary (upstream PR #3964, v2.0.3
-  cycle), HUD added `core.fsmonitor=false` and a null `core.hooksPath`. These
+  When the host later extended this boundary (upstream PR #3964, first released in 2.1.0), HUD added `core.fsmonitor=false` and a null `core.hooksPath`. These
   suppress those two mechanisms, but do not block a clean filter selected by
   `.gitattributes`: the 2026-09-23 synthetic probe reproduced that command
   running through HUD's exact `git status` call. See [KI-20](../KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters).
@@ -327,9 +326,9 @@ Baseline delta (0.43.1 → 2.0.0), reviewed 2026-09-17:
 - `subagent.cancelled` (#3778) is a new observable Event2 mirror outside the
   Event2 manifest: evicted, interrupted or timed-out subagents report
   cancelled instead of failed/aborted. Locked as a neutral row class in
-  `test/wire-row-classes.test.mjs`. (Range-scoped: the v2.0.3 candidate PR
-  #3970 later registers all five `subagent.*` mirrors as durable manifest
-  entries — see the v2.0.3 candidate delta below.)
+  `test/wire-row-classes.test.mjs`. (Range-scoped: PR #3970 later registers all five `subagent.*` mirrors
+  as durable manifest entries; it first shipped in 2.1.0 — see the prep delta
+  below.)
 - The Event2 manifest, `StatusLinePayload` (10 fields), the quota endpoint
   (ratio model of #3787), permission labels and the locked kap
   subagent/task schemas are unchanged; events-zod only gains
@@ -364,25 +363,27 @@ Baseline delta (2.0.0 → 2.0.2), reviewed 2026-09-23:
   `turn.ended.traceId`, and `turn.steer.messageId` / `promptIds` / `turnId`.
   State snapshots add optional `reasoningKey` and `origin.inTurn`; KAP adds
   optional `turn.ended.traceId`. Neither consumer derives behavior from them.
-- DeepSeek `api_key_env` is a HUD P2 gap on `main` and the prep branch; the
-  fix exists separately on `fix/35-provider-api-key-env` and awaits merge.
+- DeepSeek `api_key_env` was a HUD P2 gap on both branches at review time.
+  PR #46 merged the fix into `main` on 2026-09-23; this prep branch still
+  needs to sync that fix. See [KI-21](../KNOWN_ISSUES.md#ki-21-provider-balance-does-not-resolve-api_key_env).
 - The #44 Git-probe prep was re-audited: `core.fsmonitor=false` and the null
   hooks path do not prevent `.gitattributes`-selected clean filters from
   running. A temporary synthetic repository reproduced execution through the
   exact HUD probe. This remains an open P1 in [KI-20](../KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters).
-- Upstream PR #3970's five durable `subagent.*` records remain a 2.0.3
-  candidate, not part of 2.0.2. The HUD prep fixture covers all five; both HUD
-  and usage token ledgers continue to count `usage.record` only.
+- Upstream PR #3970's five durable `subagent.*` records are outside
+  2.0.2 and first shipped in 2.1.0. The HUD prep fixture covers all five;
+  both HUD and usage token ledgers continue to count `usage.record` only.
+  The 2.1.0 release contract remains unaudited by the HUD.
 - The full evidence and verification limits are in
   [the 2.0.2 review](upstream-2.0.2-review.md).
 
-v2.0.3 candidate prep (initially scoped from 2.0.0 on 2026-09-23; stable baseline later advanced to 2.0.2):
+PR #3970 prep (branch retains the `upstream/2.0.3-prep` name; upstream first shipped it in 2.1.0):
 
 - Target: upstream PR #3970 (merge
   `895e9d9b868cf9899e444784130fa1946c6cef6c`), carried on the
-  `upstream/2.0.3-prep` branch until `@moonshot-ai/kimi-code@2.0.3` ships;
-  range facts (tag object, exact commit count) are filled in at release-day
-  acceptance.
+  `upstream/2.0.3-prep` branch. Upstream 2.1.0 shipped with #3970 on
+  2026-09-23; exact tag/range contract evidence still needs a 2.1.0 baseline
+  audit. The branch name is historical and has not been changed.
 - PR #3970 promotes the five `subagent.*` mirror records — `spawned`,
   `started`, `completed`, `failed`, `cancelled` — from observable-only to
   durable, manifest-registered records: the Event2 manifest grows 59 → 64
@@ -397,9 +398,9 @@ v2.0.3 candidate prep (initially scoped from 2.0.0 on 2026-09-23; stable baselin
   `test/fixtures/wire-events-subagent-cancelled.jsonl` covering all five
   classes.
 - Replacing the KI-15 lost-then-resumed heuristic with the durable
-  `subagent.*` lifecycle stays an open option, deferred to the 2.0.3
-  baseline review. Revalidate this prep against the 2.0.2 stable tag before
-  release-day acceptance.
+  `subagent.*` lifecycle stays an open option, deferred to the 2.1.0
+  baseline review. Revalidate this prep against the released 2.1.0 tag
+  before acceptance.
 - Documentation and fixture prep only; no HUD runtime behavior change. The
-  branch merges to `main` only after the upstream release ships and the
-  issue #45 checklist passes locally against the released build.
+  branch remains unmerged until the 2.1.0 range audit and issue #45
+  checklist pass locally against the released build.
