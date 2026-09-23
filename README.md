@@ -30,7 +30,7 @@ Kimi Code CLI 的自定义底部状态栏（HUD）——零依赖 Node.js 脚本
 | 推荐运行时 | 处于上游维护窗口内的 Node.js LTS（撰写本文时为 22 / 24） | 日常开发与发布验证以此为准 |
 | 尽力兼容运行时 | 满足最低要求 **Node.js ≥ 18** 的所有版本（最低要求不变） | 已结束上游官方维护（EOL）的版本（如 18 / 20）不做主动测试；相关问题按尽力兼容处理 |
 | 操作系统 | macOS / Linux / Windows | macOS 是维护者的主要开发与动态验证环境；Linux 由 CI 自动化测试覆盖（实际矩阵以 [`.github/workflows/test.yml`](.github/workflows/test.yml) 为准）；Windows 为尽力兼容——Git 探针已按 Windows 约定做可信可执行解析（含 `PATHEXT`，见 [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)），**2026-09-18 已在 Windows 11 + Windows Terminal 真实环境完成 HUD 动态验证**（真实 PTY 下全屏模式的逐帧渲染、行 1 刷新、行 2 归属、额度刷新与冷启动耗时，证据见 [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)）；窗口 resize、`/reload-tui` 热重载与失败回退仍未实测 |
-| Kimi Code 宿主 | 源码与合成 fixture 基线 **2.0.0**；真实 TUI 验收待完成 | 逐版本契约审计与固定的上游提交见 [CAPABILITIES.md](CAPABILITIES.md) |
+| Kimi Code 宿主 | 源码与合成 fixture 基线 **2.0.2**；真实 TUI 验收待完成 | 逐版本契约审计与固定的上游提交见 [CAPABILITIES.md](CAPABILITIES.md) |
 
 CI 矩阵的增删是测试覆盖的变化，不构成支持契约的扩张或收缩；支持范围以本节为准。跨操作系统的交互式宿主矩阵（真实 TUI、终端模拟器、插件生命周期）已补齐 Windows 一行（Windows 11 + Windows Terminal，见 [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)），macOS Terminal 与 Linux PTY 组合仍在补齐。
 
@@ -93,7 +93,7 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 
 ## 能力与已知问题
 
-- [能力清单](CAPABILITIES.md)：Kimi Code 2.0.0 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
+- [能力清单](CAPABILITIES.md)：Kimi Code 2.0.2 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
 - [已知问题](KNOWN_ISSUES.md)：Git、终端宽度、失败帧与全屏动态验证缺口及验收条件。
 
 ## 隐私与安全
@@ -113,7 +113,7 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 
 **没有配额段？** 先确认当前模型不是第三方 provider（`/provider` 接入的模型本就不显示配额，接口只覆盖托管订阅），并且其模型配置能明确解析到 `managed:kimi-code`；provider 未知时按安全边界失败关闭。managed 模型下，缓存首次生成前整段省略。0.43.1 的新响应使用 `usages` 中的比例字段；HUD 按返回内容显示 5h、7d 和 Monthly，月度同时有总量与 code 时显示 kimi/code 拆分。升级会使旧配额缓存失效，首次成功刷新后恢复。可手动 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-quota` 后重试。
 
-**没有 DeepSeek 余额或 Session Cost？** 必须正在使用 provider 名为 `deepseek` 的支持模型，且其 `type = "openai"`、`base_url` 是官方 `https://api.deepseek.com`（可带 `/v1`）。余额还要求有效 `api_key`；首次后台刷新完成前不显示占位（成本必须先从余额响应确认币种）。完整用量 ledger 就绪后，即使余额不可用也可按已知币种单独显示 Session Cost。可静默运行 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage deepseek` 后检查 `~/.kimi-code-hud/provider-usage/`。兼容代理会按安全设计拒绝余额请求和成本估算。
+**没有 DeepSeek 余额或 Session Cost？** 必须正在使用 provider 名为 `deepseek` 的支持模型，且其 `type = "openai"`、`base_url` 是官方 `https://api.deepseek.com`（可带 `/v1`）。余额还要求有效 `api_key`；Kimi Code 2.0.1+ 新增的 `api_key_env` 当前尚未被 HUD main/prep 分支识别，env-only 凭证会 fail closed 并隐藏余额（见 [KI-21](KNOWN_ISSUES.md#ki-21-provider-balance-does-not-resolve-api_key_env)）。首次后台刷新完成前不显示占位（成本必须先从余额响应确认币种）。完整用量 ledger 就绪后，即使余额不可用也可按已知币种单独显示 Session Cost。可静默运行 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage deepseek` 后检查 `~/.kimi-code-hud/provider-usage/`。兼容代理会按安全设计拒绝余额请求和成本估算。
 
 **没有 DeepSeek / OpenAI / Anthropic Session Cost？** 当前模型必须使用对应官方直连服务，且模型 ID 位于内置价格表。所有日志追平前不显示不完整数字；同一会话只要存在其他 provider 或无法解析模型的非零用量，整项隐藏。该值是本次会话的本地估算，不是 API 余额，也与 ChatGPT / Claude 订阅额度无关。
 
