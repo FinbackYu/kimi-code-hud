@@ -56,9 +56,10 @@ Baseline delta (0.34.0 → 0.35.0):
   When the host later extended this boundary (upstream PR #3964, first released in 2.1.0), HUD added `core.fsmonitor=false` and a null `core.hooksPath`. These
   suppress those two mechanisms, but do not block a clean filter selected by
   `.gitattributes`: the 2026-09-23 synthetic probe reproduced that command
-  running through HUD's exact `git status` call. See [KI-20](../KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters).
-  The diff-driver flags (`--no-ext-diff --no-textconv`) have no counterpart in
-  HUD because the probe never diffs; they do not disable clean filters either.
+  running through HUD's former `git status` call. The later 2.1.0 review
+  replaces that call with index inspection; see [KI-20](../KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters).
+  The old status call rejected `--no-ext-diff --no-textconv`; the replacement
+  uses these options on its cached diff call.
 
 Baseline delta (0.35.0 → 0.36.0):
 
@@ -373,7 +374,8 @@ Baseline delta (2.0.0 → 2.0.2), reviewed 2026-09-23:
 - Upstream PR #3970's five durable `subagent.*` records are outside
   2.0.2 and first shipped in 2.1.0. The HUD prep fixture covers all five;
   both HUD and usage token ledgers continue to count `usage.record` only.
-  The 2.1.0 release contract remains unaudited by the HUD.
+  At this 2.0.2 review point, the 2.1.0 release contract had not yet been
+  audited by the HUD; the 2.1.0 delta below supersedes that status.
 - The full evidence and verification limits are in
   [the 2.0.2 review](upstream-2.0.2-review.md).
 
@@ -382,8 +384,8 @@ PR #3970 prep (branch retains the `upstream/2.0.3-prep` name; upstream first shi
 - Target: upstream PR #3970 (merge
   `895e9d9b868cf9899e444784130fa1946c6cef6c`), carried on the
   `upstream/2.0.3-prep` branch. Upstream 2.1.0 shipped with #3970 on
-  2026-09-23; exact tag/range contract evidence still needs a 2.1.0 baseline
-  audit. The branch name is historical and has not been changed.
+  2026-09-23. At prep time, exact tag/range evidence was pending; the 2.1.0
+  delta below records its later audit. The branch name remains historical.
 - PR #3970 promotes the five `subagent.*` mirror records — `spawned`,
   `started`, `completed`, `failed`, `cancelled` — from observable-only to
   durable, manifest-registered records: the Event2 manifest grows 59 → 64
@@ -398,9 +400,32 @@ PR #3970 prep (branch retains the `upstream/2.0.3-prep` name; upstream first shi
   `test/fixtures/wire-events-subagent-cancelled.jsonl` covering all five
   classes.
 - Replacing the KI-15 lost-then-resumed heuristic with the durable
-  `subagent.*` lifecycle stays an open option, deferred to the 2.1.0
-  baseline review. Revalidate this prep against the released 2.1.0 tag
-  before acceptance.
+  `subagent.*` lifecycle was deferred to the 2.1.0 baseline review below;
+  that review leaves the optional runtime change open and validates the fixture
+  against the released tag.
 - Documentation and fixture prep only; no HUD runtime behavior change. The
-  branch remains unmerged until the 2.1.0 range audit and issue #45
-  checklist pass locally against the released build.
+  branch remained unmerged pending the released-range audit and issue #45
+  checklist. After that audit, KI-20 and main/prep divergence still block a
+  blanket merge of this branch.
+
+Baseline delta (2.0.2 → 2.1.0), reviewed 2026-09-23:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.1.0`, tag object
+  `93a83aafacf91cc595a7b66f0ecb637f23859f77`, peeled commit
+  `52437299ff78de3d0aff7f38f054e5eb20c512e5`; exact range contains
+  24 commits and 319 changed paths. [Full review](upstream-2.1.0-review.md).
+- PR #3970 first ships five durable `subagent.*` lifecycle records; the
+  Event2 manifest grows 59 → 64. The prep fixture covers all five and
+  explicitly excludes `subagent.completed.usage`/`contextTokens` from the
+  session usage ledger. The manifest link in `CAPABILITIES.md` now targets
+  the release commit.
+- PR #3964 delays the built-in footer Git probe until `getStatus()` and
+  injects background Git config/diff safeguards. The HUD's existing prep
+  probe initially covered `core.fsmonitor` and hooks but still executed a
+  clean filter. This review branch replaces status with index metadata and
+  cached diff inspection; isolated clean/process-filter regressions pass.
+  KI-20 and issue #44 remain open until main acceptance.
+- `status_line.command` payload and 300 ms host timeout, the managed usage
+  endpoint, and `usage.record` remain contract-compatible. Fullscreen's new
+  `tui_mode` setting and interactive controls are host-owned; 2.1.0 live
+  HUD acceptance is still unverified.
