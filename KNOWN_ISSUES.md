@@ -704,13 +704,13 @@ countdowns, freshness and expiry. No real credentials or user data were used.
 
 ## KI-20: Git status probe still runs repository-configured clean filters
 
-Status: open — fix verified on review branch; main acceptance pending
+Status: open — synthetic fix verified; real 2.1.0 host acceptance pending
 
 Affected area: Git dirty probe / untrusted workspace execution
 
 Before the fix, the prep probe passed `-c core.fsmonitor=false` and redirected
 `core.hooksPath`, but a local `filter.<driver>.clean` command selected by a
-tracked `.gitattributes` entry remains executable during `git status`.
+tracked `.gitattributes` entry was executable during `git status`.
 
 Evidence (2026-09-23): in an isolated temporary repository, a modified tracked
 file matched `*.txt filter=probe`; `.git/config` mapped `filter.probe.clean`
@@ -734,11 +734,11 @@ Acceptance criteria:
 - [x] pre-trust probe cannot invoke repository clean/process filters;
 - [x] isolated regression fails if either filter runs;
 - [x] bounded, silent fallback and a shared 150ms probe budget;
-- [ ] verify the combined branch against the released 2.1.0 build and merge to main.
+- [ ] trigger the relevant paths in a real 2.1.0 host session and record the result.
 
 ## KI-21: Provider balance does not resolve `api_key_env`
 
-Status: fixed on the combined review branch by PR #46; live DeepSeek smoke pending
+Status: fixed by PR #46 with synthetic coverage; live DeepSeek smoke pending
 
 Affected area: DeepSeek provider balance and doctor diagnostics
 
@@ -748,8 +748,8 @@ provider configuration hid the DeepSeek balance. PR #46 merged the fix into
 `main` at `fc2d519`: it resolves the named variable on every request,
 rejects simultaneous `api_key` and `api_key_env`, and fails closed for an
 unset or empty variable. Its doctor messages distinguish those cases; secret
-values do not enter cache files, targets, logs or output. The combined branch
-includes the same fix and synthetic regressions.
+values do not enter cache files, targets, logs or output. The reviewed 2.1.0
+integration includes the same fix and synthetic regressions.
 
 A real Kimi Code 2.1.0 DeepSeek account smoke remains unverified. Seeing a
 balance in one configuration validates that path only; the other failure

@@ -424,7 +424,7 @@ Baseline delta (2.0.2 → 2.1.0), reviewed 2026-09-23:
   probe initially covered `core.fsmonitor` and hooks but still executed a
   clean filter. This review branch replaces status with index metadata and
   cached diff inspection; isolated clean/process-filter regressions pass.
-  KI-20 and issue #44 remain open until main acceptance.
+  KI-20 and issue #44 remain open for real 2.1.0 host acceptance.
 - `status_line.command` payload and 300 ms host timeout, the managed usage
   endpoint, and `usage.record` remain contract-compatible. Fullscreen's new
   `tui_mode` setting and interactive controls are host-owned; 2.1.0 live
