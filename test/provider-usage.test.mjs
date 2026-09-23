@@ -35,13 +35,16 @@ const RESPONSE = {
   ],
 };
 
-function config({ apiKey = API_KEY, baseUrl = 'https://api.deepseek.com/v1' } = {}) {
+function config({
+  apiKey = API_KEY,
+  apiKeyEnv = null,
+  baseUrl = 'https://api.deepseek.com/v1',
+} = {}) {
   return `
 [providers.deepseek]
 type = "openai"
 base_url = "${baseUrl}"
-api_key = "${apiKey}"
-`;
+${apiKey === null ? '' : `api_key = "${apiKey}"\n`}${apiKeyEnv === null ? '' : `api_key_env = "${apiKeyEnv}"\n`}`;
 }
 
 function tempPaths() {
@@ -52,11 +55,12 @@ function tempPaths() {
   };
 }
 
-function targetFor(paths, configText = config()) {
+function targetFor(paths, configText = config(), env = undefined) {
   return resolveProviderUsageTarget({
     provider: 'deepseek',
     configText,
     providerUsageDir: paths.providerUsageDir,
+    ...(env === undefined ? {} : { env }),
   });
 }
 
@@ -105,6 +109,69 @@ test('target resolution requires the exact provider and official DeepSeek base U
   assert.equal(resolveProviderUsageTarget({
     provider: 'deepseek-main', configText: config(), providerUsageDir: paths.providerUsageDir,
   }), null);
+});
+
+test('api_key_env resolves the credential from the environment and shares the account cache', () => {
+  const paths = tempPaths();
+  const literalTarget = targetFor(paths);
+  const envTarget = targetFor(
+    paths,
+    config({ apiKey: null, apiKeyEnv: 'DEEPSEEK_TEST_KEY' }),
+    { DEEPSEEK_TEST_KEY: API_KEY },
+  );
+  assert.ok(envTarget);
+  assert.equal(Object.hasOwn(envTarget, 'apiKey'), false);
+  assert.doesNotMatch(JSON.stringify(envTarget), new RegExp(API_KEY));
+  // Same secret, same account: the env channel reuses the literal key's
+  // fingerprint, cache and backoff state instead of forking them.
+  assert.equal(envTarget.credentialFingerprint, literalTarget.credentialFingerprint);
+  assert.equal(envTarget.cachePath, literalTarget.cachePath);
+});
+
+test('api_key_env fails closed on unset or empty variables without fallback', () => {
+  const paths = tempPaths();
+  const text = config({ apiKey: null, apiKeyEnv: 'DEEPSEEK_TEST_KEY' });
+  assert.equal(targetFor(paths, text, {}), null);
+  assert.equal(targetFor(paths, text, { DEEPSEEK_TEST_KEY: '' }), null);
+});
+
+test('declaring api_key and api_key_env together fails closed', () => {
+  const paths = tempPaths();
+  assert.equal(
+    targetFor(paths, config({ apiKeyEnv: 'DEEPSEEK_TEST_KEY' }), { DEEPSEEK_TEST_KEY: API_KEY }),
+    null,
+  );
+});
+
+test('refresh re-resolves api_key_env per request and never persists the secret', async () => {
+  const paths = tempPaths();
+  const text = config({ apiKey: null, apiKeyEnv: 'DEEPSEEK_TEST_KEY' });
+  fs.writeFileSync(paths.configPath, text);
+  const env = { DEEPSEEK_TEST_KEY: API_KEY };
+  const target = targetFor(paths, text, env);
+  const refreshed = await refreshProviderUsage({
+    provider: 'deepseek',
+    configPath: paths.configPath,
+    env,
+    providerUsageDir: paths.providerUsageDir,
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => RESPONSE }),
+  });
+  assert.equal(refreshed, true);
+  assert.equal(readProviderUsageCache(target).balances[0].total, 110);
+  assert.doesNotMatch(fs.readFileSync(target.cachePath, 'utf8'), new RegExp(API_KEY));
+
+  // The variable is read again on every resolution: clearing it makes the
+  // next refresh fail closed without a request, and drops the account cache.
+  const afterClear = await refreshProviderUsage({
+    provider: 'deepseek',
+    expectedFingerprint: target.credentialFingerprint,
+    configPath: paths.configPath,
+    env: {},
+    providerUsageDir: paths.providerUsageDir,
+    fetchImpl: async () => { throw new Error('must not request without a credential'); },
+  });
+  assert.equal(afterClear, false);
+  assert.equal(fs.existsSync(target.cachePath), false);
 });
 
 test('cache is atomic, secret-free, stale-aware, and isolated across key switches', () => {

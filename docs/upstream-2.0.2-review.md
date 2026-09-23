@@ -7,7 +7,7 @@ HUD behavior baseline: `v0.8.4` (`711d54e`)
 Upstream range: `@moonshot-ai/kimi-code@2.0.0` → `@moonshot-ai/kimi-code@2.0.2`
 
 Post-review status (2026-09-23): HUD PR #46 merged the `api_key_env` fix
-into `main` at `fc2d519`; this prep branch still needs to sync from `main`.
+into `main` at `fc2d519`; the later 2.1.0 integration also includes it.
 Upstream 2.1.0 subsequently shipped with #3964 and #3970. The audited HUD
 baseline here remains 2.0.2; the findings below describe that range.
 

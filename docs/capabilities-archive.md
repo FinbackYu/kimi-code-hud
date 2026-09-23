@@ -365,8 +365,8 @@ Baseline delta (2.0.0 → 2.0.2), reviewed 2026-09-23:
   State snapshots add optional `reasoningKey` and `origin.inTurn`; KAP adds
   optional `turn.ended.traceId`. Neither consumer derives behavior from them.
 - DeepSeek `api_key_env` was a HUD P2 gap on both branches at review time.
-  PR #46 merged the fix into `main` on 2026-09-23; this prep branch still
-  needs to sync that fix. See [KI-21](../KNOWN_ISSUES.md#ki-21-provider-balance-does-not-resolve-api_key_env).
+  PR #46 merged the fix into `main` on 2026-09-23; the later 2.1.0
+  review branch integrates it. See [KI-21](../KNOWN_ISSUES.md#ki-21-provider-balance-does-not-resolve-api_key_env).
 - The #44 Git-probe prep was re-audited: `core.fsmonitor=false` and the null
   hooks path do not prevent `.gitattributes`-selected clean filters from
   running. A temporary synthetic repository reproduced execution through the
@@ -405,8 +405,8 @@ PR #3970 prep (branch retains the `upstream/2.0.3-prep` name; upstream first shi
   against the released tag.
 - Documentation and fixture prep only; no HUD runtime behavior change. The
   branch remained unmerged pending the released-range audit and issue #45
-  checklist. After that audit, KI-20 and main/prep divergence still block a
-  blanket merge of this branch.
+  checklist. The subsequent integration brought main onto this branch and
+  addressed KI-20; release-day acceptance remains separate.
 
 Baseline delta (2.0.2 → 2.1.0), reviewed 2026-09-23:
 

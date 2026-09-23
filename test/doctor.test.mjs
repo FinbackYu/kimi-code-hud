@@ -464,6 +464,39 @@ test('deepseek balance: official target with a fresh cache is ok; unusable confi
   assert.match(one(collect(noKey).report, 'providers', 'deepseek').detail, /balance stays hidden by design/);
 });
 
+test('deepseek balance names an unset api_key_env variable instead of a missing key', () => {
+  const env = makeEnv();
+  seedConfigToml(env.paths, [
+    '',
+    '[providers.deepseek]',
+    'type = "openai"',
+    'base_url = "https://api.deepseek.com/v1"',
+    'api_key_env = "DEEPSEEK_SYNTH_KEY"',
+    '',
+  ].join('\n'));
+  const { report } = collect(env);
+  const check = one(report, 'providers', 'deepseek');
+  assert.equal(check.level, 'note');
+  assert.match(check.detail, /api_key_env "DEEPSEEK_SYNTH_KEY" is unset or empty/);
+  assert.match(check.detail, /balance stays hidden by design/);
+  assert.equal(/sk-/.test(check.detail), false, 'no key material in doctor output');
+});
+
+test('mutually exclusive api_key and api_key_env are reported as such', () => {
+  const env = makeEnv();
+  seedConfigToml(env.paths, [
+    '',
+    '[providers.deepseek]',
+    'type = "openai"',
+    'base_url = "https://api.deepseek.com/v1"',
+    'api_key = "sk-synth-deepseek-key"',
+    'api_key_env = "DEEPSEEK_SYNTH_KEY"',
+    '',
+  ].join('\n'));
+  const { report } = collect(env);
+  assert.match(one(report, 'providers', 'deepseek').detail, /api_key and api_key_env are mutually exclusive/);
+});
+
 test('stale deepseek cache and its backoff are reported', () => {
   const env = makeEnv();
   seedConfigToml(env.paths, [

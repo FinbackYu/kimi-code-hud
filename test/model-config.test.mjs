@@ -76,8 +76,25 @@ test('provider config resolves quoted and bare tables with decoded credentials',
     type: 'openai',
     baseUrl: 'https://api.deepseek.com/v1',
     apiKey: 'redacted\\value',
+    apiKeyEnv: null,
   });
   assert.equal(resolveProviderConfig({ provider: 'missing', configText: CONFIG }), null);
+});
+
+test('provider config reports the api_key_env credential variable name', () => {
+  const text = `
+[providers.deepseek]
+type = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+`;
+  assert.deepEqual(resolveProviderConfig({ provider: 'deepseek', configText: text }), {
+    provider: 'deepseek',
+    type: 'openai',
+    baseUrl: 'https://api.deepseek.com/v1',
+    apiKey: null,
+    apiKeyEnv: 'DEEPSEEK_API_KEY',
+  });
 });
 
 test('stringArrayValue parses inline arrays and reports absent keys as null', () => {

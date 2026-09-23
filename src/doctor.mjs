@@ -29,6 +29,7 @@ import {
   MANAGED_KIMI_PROVIDER,
   decodedStringValue,
   findProviderTable,
+  resolveProviderConfig,
 } from './model-config.mjs';
 import {
   LOCK_STALE_MS,
@@ -54,6 +55,26 @@ const PROVIDER_GROUP_RE = /^([a-z0-9][a-z0-9_-]{0,63})-([0-9a-f]{16})\.(state\.j
 const METRICS_STATE_RE = /^metrics-[A-Za-z0-9_-]+\.json$/;
 
 const GIT_STATUS_CACHE_VERSION = 1;
+
+/**
+ * Explain the credential side of an unusable DeepSeek balance target, or
+ * return null when the credential is not the blocker. Only variable NAMES
+ * are reported — the doctor never prints key values.
+ */
+function deepSeekCredentialNote(configText) {
+  const config = resolveProviderConfig({ provider: DEEPSEEK_PROVIDER, configText });
+  if (!config) return 'missing api_key or api_key_env';
+  const declared = [config.apiKey, config.apiKeyEnv].filter(
+    (value) => typeof value === 'string' && value.length > 0,
+  );
+  if (declared.length === 0) return 'missing api_key or api_key_env';
+  if (declared.length === 2) return 'api_key and api_key_env are mutually exclusive';
+  if (declared[0] === config.apiKey) return null;
+  const value = process.env[config.apiKeyEnv];
+  return typeof value === 'string' && value.length > 0
+    ? null
+    : `api_key_env "${config.apiKeyEnv}" is unset or empty`;
+}
 
 /**
  * Human-readable duration ("40s", "2m 05s", "3h 12m", "9d 02h").
@@ -491,9 +512,13 @@ export function collectDoctorReport({
     let currentStem = null;
     if (findProviderTable(configToml.text, DEEPSEEK_PROVIDER) !== null) {
       if (target === null) {
+        const reasons = [
+          deepSeekCredentialNote(configToml.text),
+          'base_url is not the official endpoint',
+        ].filter(Boolean).join(', or ');
         add('providers', 'note', DEEPSEEK_PROVIDER,
-          'provider table present but unusable for balance (missing api_key, or base_url is '
-          + 'not the official endpoint) — the balance stays hidden by design');
+          `provider table present but unusable for balance (${reasons}) — the balance `
+          + 'stays hidden by design');
       } else {
         currentStem = `${target.provider}-${target.credentialFingerprint}`;
         const group = groups.find((g) => g.provider === target.provider

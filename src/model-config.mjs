@@ -152,10 +152,13 @@ export function findProviderTable(text, name) {
 /**
  * Resolve the small provider-config subset needed by usage adapters. The
  * returned object is deliberately never persisted or logged by this module.
+ * `apiKeyEnv` carries the NAME of the environment variable a provider reads
+ * its credential from (Kimi Code 2.0.1+ `api_key_env`) — never the secret,
+ * which stays outside the config file by design and is resolved per request.
  * @param {object} opts
  * @param {string} opts.provider exact provider table name
  * @param {string} opts.configText complete config.toml text
- * @returns {{provider: string, type: string|null, baseUrl: string|null, apiKey: string|null}|null}
+ * @returns {{provider: string, type: string|null, baseUrl: string|null, apiKey: string|null, apiKeyEnv: string|null}|null}
  */
 export function resolveProviderConfig({ provider, configText } = {}) {
   const table = findProviderTable(configText, provider);
@@ -165,6 +168,7 @@ export function resolveProviderConfig({ provider, configText } = {}) {
     type: decodedStringValue(table, 'type'),
     baseUrl: decodedStringValue(table, 'base_url'),
     apiKey: decodedStringValue(table, 'api_key'),
+    apiKeyEnv: decodedStringValue(table, 'api_key_env'),
   };
 }
 

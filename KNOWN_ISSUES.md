@@ -708,7 +708,7 @@ Status: open — fix verified on review branch; main acceptance pending
 
 Affected area: Git dirty probe / untrusted workspace execution
 
-The prep probe passes `-c core.fsmonitor=false` and redirects
+Before the fix, the prep probe passed `-c core.fsmonitor=false` and redirected
 `core.hooksPath`, but a local `filter.<driver>.clean` command selected by a
 tracked `.gitattributes` entry remains executable during `git status`.
 
@@ -738,24 +738,19 @@ Acceptance criteria:
 
 ## KI-21: Provider balance does not resolve `api_key_env`
 
-Status: open on `upstream/2.0.3-prep`; fixed on `main` by PR #46 (unreleased HUD change)
+Status: fixed on the combined review branch by PR #46; live DeepSeek smoke pending
 
 Affected area: DeepSeek provider balance and doctor diagnostics
 
-Kimi Code 2.0.1 added provider credentials through `api_key_env`. This
-prep branch still parses only literal `api_key`, so an env-only provider
-configuration fails closed and hides the balance. PR #46 merged the
-variable-name resolution, mutual-exclusion checks, per-request environment
-lookup, doctor messages and regression coverage into `main` on 2026-09-23
-(`fc2d519`); its former fix branch was deleted after merge. The prep branch
-has not incorporated that fix. A real Kimi Code 2.1.0 DeepSeek smoke remains
-unverified.
+Kimi Code 2.0.1 added provider credentials through `api_key_env`. At the
+2.0.2 baseline review, HUD resolved only literal `api_key`, so an env-only
+provider configuration hid the DeepSeek balance. PR #46 merged the fix into
+`main` at `fc2d519`: it resolves the named variable on every request,
+rejects simultaneous `api_key` and `api_key_env`, and fails closed for an
+unset or empty variable. Its doctor messages distinguish those cases; secret
+values do not enter cache files, targets, logs or output. The combined branch
+includes the same fix and synthetic regressions.
 
-Acceptance criteria:
-
-- resolve the named environment variable on each request without persisting or
-  logging its value;
-- match upstream mutual-exclusion and missing/empty-variable fail-closed
-  behavior;
-- sync the merged `main` fix into this prep branch and verify the combined
-  branch before claiming its `api_key_env` path is covered.
+A real Kimi Code 2.1.0 DeepSeek account smoke remains unverified. Seeing a
+balance in one configuration validates that path only; the other failure
+branches remain covered by synthetic tests.
