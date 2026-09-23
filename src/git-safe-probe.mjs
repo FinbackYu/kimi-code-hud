@@ -44,6 +44,12 @@ function changedOnDisk(cwd, entry, platform) {
       const executable = (stat.mode & 0o111n) !== 0n;
       if (executable !== (entry.mode === 0o100755)) return true;
     }
+    // Git for Windows and Node can disagree on creation/change time for the
+    // same clean file. Git's content check uses size and mtime there; do not
+    // turn a clean Windows worktree into a permanent dirty indicator.
+    if (platform === 'win32') {
+      return stat.size !== entry.size || stat.mtimeNs !== entry.mtimeNs;
+    }
     return stat.size !== entry.size
       || stat.ctimeNs !== entry.ctimeNs
       || stat.mtimeNs !== entry.mtimeNs;

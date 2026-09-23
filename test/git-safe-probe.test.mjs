@@ -22,7 +22,13 @@ function repository(t) {
 
 test('safe probe detects clean, tracked, staged and untracked states', (t) => {
   const { cwd, git } = repository(t);
-  assert.deepEqual(readGitStatus(cwd), { branch: 'main', dirty: false });
+  const clean = readGitStatus(cwd);
+  if (clean.dirty && process.platform === 'win32') {
+    const indexed = git(['ls-files', '--cached', '--stage', '--debug', '-z']).toString();
+    const stat = fs.lstatSync(path.join(cwd, 'tracked.txt'), { bigint: true });
+    assert.fail(`clean Windows probe was dirty; index=${JSON.stringify(indexed)}; file size=${stat.size} ctimeNs=${stat.ctimeNs} mtimeNs=${stat.mtimeNs}`);
+  }
+  assert.deepEqual(clean, { branch: 'main', dirty: false });
 
   fs.writeFileSync(path.join(cwd, 'tracked.txt'), 'second\n');
   assert.deepEqual(readGitStatus(cwd), { branch: 'main', dirty: true });
