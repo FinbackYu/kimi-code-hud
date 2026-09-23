@@ -30,7 +30,7 @@ In the Kimi Code TUI, run:
 | Recommended runtimes | Node.js LTS lines inside their upstream maintenance window (at the time of writing, 22 / 24) | The target of day-to-day development and release verification |
 | Best-effort runtimes | Every version meeting the **Node.js ≥ 18** minimum (the minimum is unchanged) | Releases past their upstream End-of-Life (e.g. 18 / 20) are not proactively tested; issues there are handled on a best-effort basis |
 | Operating systems | macOS / Linux / Windows | macOS is the maintainer's primary development and dynamic-verification environment; Linux is covered by the automated CI suite (actual matrix: [`.github/workflows/test.yml`](.github/workflows/test.yml)); Windows is best-effort — the Git probe already resolves a trusted executable the Windows way (including `PATHEXT`, see [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)), and **the HUD was dynamically verified on a real Windows 11 + Windows Terminal host on 2026-09-18** (per-frame rendering, line 1 refresh, footer line 2 ownership, quota refresh, and cold-start latency under fullscreen mode in a real PTY; evidence in [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)); window resize, `/reload-tui`, and failure-frame fallback are still unverified |
-| Kimi Code host | Source/fixture baseline **2.0.0**; live TUI acceptance pending | Per-release contract audits with pinned upstream commits live in [CAPABILITIES.md](CAPABILITIES.md) |
+| Kimi Code host | Source/fixture baseline **2.0.2**; live TUI acceptance pending | Per-release contract audits with pinned upstream commits live in [CAPABILITIES.md](CAPABILITIES.md) |
 
 Changes to the CI matrix are changes in test coverage, not in the support contract: adding or removing matrix entries never widens or shrinks the support statements above — this section is the contract. The interactive cross-OS host matrix (real TUI, terminal emulators, plugin lifecycle) now has its Windows row (Windows 11 + Windows Terminal, see [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)); macOS Terminal and Linux PTY rows are still being filled in.
 
@@ -93,7 +93,7 @@ Four data sources: the stdin snapshot and a cross-process cached Git probe (cwd 
 
 ## Capabilities & known issues
 
-- [Capabilities](CAPABILITIES.md): coverage of Kimi Code 2.0.0's line-1 slots, data sources, and readable-but-unrendered Cache/token/goal/task/Git information;
+- [Capabilities](CAPABILITIES.md): coverage of Kimi Code 2.0.2's line-1 slots, data sources, and readable-but-unrendered Cache/token/goal/task/Git information;
 - [Known issues](KNOWN_ISSUES.md): open Git, terminal-width, stale-frame, and fullscreen verification gaps with acceptance criteria.
 
 ## Privacy & security

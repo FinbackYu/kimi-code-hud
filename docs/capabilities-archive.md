@@ -335,3 +335,29 @@ Baseline delta (0.43.1 → 2.0.0), reviewed 2026-09-17:
 - Source and synthetic-fixture verification on an unmerged branch; the
   0.43.1 live TUI/managed-account acceptance carries over and remains
   pending. See [the full review](upstream-2.0.0-review.md).
+
+
+Baseline delta (2.0.0 → 2.0.2), reviewed 2026-09-23:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.0.2`, tag object
+  `c98339a1867e0843d192b8f7454d7ae3dcd5d8d8`, peeled commit
+  `9d07f634be94ebeb1deba2f55d247807cf729315`; 33 commits after 2.0.0.
+  The official release was published 2026-09-19.
+- 2.0.1 adds `api_key_env` provider credentials (upstream #3762); 2.0.2 fixes
+  resumed-message ordering, compaction after switching to a smaller context
+  window, project-root assumptions, duplicate in-flight messages and web UI
+  interactions. These do not change the HUD status-line payload.
+- `StatusLinePayload` remains the same 10 fields; `footer.ts`,
+  `status-line-command.ts` and `git-status.ts` are unchanged in the range.
+  The wire manifest remains 59 record types with no additions or removals;
+  additive optional fields include `prompt.steered.messageId`,
+  `turn.ended.traceId`, and `turn.steer.messageId` / `promptIds` / `turnId`.
+  State snapshots add optional `reasoningKey` and `origin.inTurn`; KAP adds
+  optional `turn.ended.traceId`. Neither consumer derives behavior from them.
+- DeepSeek `api_key_env` was a HUD P2 gap at review time; PR #46 addresses it.
+  See KI-21 for the current status and verification limit.
+- The clean-filter risk is outside the 2.0.2 release delta. It was reproduced
+  on the prep probe and is tracked as KI-20; no probe behavior change was made
+  in this baseline update.
+- The full evidence and verification limits are in
+  [the 2.0.2 review](upstream-2.0.2-review.md).

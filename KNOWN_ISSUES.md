@@ -1,8 +1,8 @@
 # Known issues
 
-- Last verified: 2026-09-19
+- Last verified: 2026-09-23
 - HUD behavior baseline: `v0.8.4` (`711d54e`)
-- Kimi Code baseline: `2.0.0` (`1b89e4b039f052d10f258464413b2047acca12ba`)
+- Kimi Code baseline: `2.0.2` (`9d07f634be94ebeb1deba2f55d247807cf729315`)
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -132,7 +132,7 @@ Affected upstream slot: `model` / status-line payload
 The built-in footer renders the host's in-memory session state
 (`state.thinkingEffort`), so it always shows the current runtime effort. The
 custom status line has no such field: `StatusLinePayload` (10 fields,
-unchanged through 2.0.0) carries no thinking-effort entry.
+unchanged through 2.0.2) carries no thinking-effort entry.
 
 In-session switches: the original finding, verified against 0.34.0 wires, was
 that a switch emits no local event the HUD could read. That is no longer true:
@@ -685,3 +685,48 @@ not rendered. Subscription ratios are not API balances or token costs.
 Synthetic regressions cover the HTTP parser, context-tagged cache migration,
 empty-map refresh, normal/compact output, malformed and zero values, reset
 countdowns, freshness and expiry. No real credentials or user data were used.
+
+
+## KI-20: Git status probe still runs repository-configured clean filters
+
+Status: open — P1 security boundary gap on `main` and `upstream/2.0.3-prep`
+
+Affected area: Git dirty probe / untrusted workspace execution
+
+A tracked `.gitattributes` entry can select `filter.<driver>.clean` or
+`filter.<driver>.process` while the HUD runs `git status`. The `main` probe
+uses `git status --porcelain=v1 --branch`; the prep probe adds fsmonitor and
+hooks overrides, but neither path disables clean filters.
+
+Evidence (2026-09-23): an isolated synthetic repository reproduced the clean
+command through the exact prep probe argv and `readGitStatus` call. Source
+inspection confirms that `main` uses the same status argv without additional
+config suppression; the main-specific path was not separately executed, so
+that branch attribution is an inference from the shared Git behavior and
+source, not a second reproduction. No user repository or settings were used.
+
+Acceptance criteria:
+
+- a status probe on an untrusted repository cannot execute a command configured
+  by that repository through `filter.<driver>.clean` or `filter.<driver>.process`;
+- add an isolated regression fixture that would fail if either filter runs;
+- retain the bounded, silent fallback and 150ms child-process ceiling.
+
+## KI-21: Provider balance does not resolve `api_key_env`
+
+Status: fixed for `main` by PR #46 (unreleased HUD change); the reviewed
+`upstream/2.0.3-prep` branch still needs to sync from `main`
+
+Affected area: DeepSeek provider balance and doctor diagnostics
+
+Kimi Code 2.0.1 added provider credentials through `api_key_env`. At the
+2.0.2 baseline review, the HUD parsed only literal `api_key`, so an env-only
+provider configuration hid the DeepSeek balance. PR #46 resolves the named
+variable on each request, rejects simultaneous `api_key` and `api_key_env`
+declarations, and fails closed for an unset or empty variable. Its doctor
+messages distinguish those cases, and the secret value stays out of targets,
+cache files and output. Synthetic regressions and CI cover these behaviors.
+
+A real Kimi Code 2.0.2 DeepSeek account smoke remains unverified. The prep
+branch reviewed on 2026-09-23 did not contain this fix; sync it from `main`
+before any future merge.
