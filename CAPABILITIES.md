@@ -3,6 +3,9 @@
 - Last verified: 2026-09-23
 - HUD behavior baseline: `v0.8.4` (`711d54e`)
 - Kimi Code baseline: `2.0.2` (`9d07f634be94ebeb1deba2f55d247807cf729315`)
+- Post-baseline status (2026-09-23): upstream 2.1.0 shipped with PRs #3964
+  and #3970; the 2.0.2→2.1.0 contract range and release-day acceptance of
+  HUD prep remain pending.
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
