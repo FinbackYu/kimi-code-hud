@@ -403,10 +403,12 @@ const SCENARIOS = [
     /**
      * Upstream 2.0.0 (#3778) added the observable Event2 mirror
      * `subagent.cancelled` (mirrorAgentRun `SubagentCancelled`); upstream PR
-     * #3970 (v2.0.3 candidate, merge 895e9d9b) promotes all five subagent.*
+     * #3970 promotes all five subagent.*
      * mirror records — spawned / started / completed / failed / cancelled —
      * to durable, manifest-registered records (59 → 64 entries), so they now
-     * survive session resume. Like every non-reduced record class they must
+     * survive session resume. The PR first shipped in the 2.1.0 release tag
+     * (peeled `52437299ff78`) and the count is unchanged at the 2.2.0 baseline
+     * (peeled `472192c34c`). Like every non-reduced record class they must
      * fold as no-ops: the HUD has no subagent-lifecycle projection, and the
      * usage block `subagent.completed` now carries durably must never enter
      * the session usage ledger (only `usage.record` feeds it).
