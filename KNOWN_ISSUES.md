@@ -1,7 +1,7 @@
 # Known issues
 
 - Last verified: 2026-10-15
-- HUD behavior baseline: `v0.8.4` (`711d54e`)
+- HUD behavior baseline: `v0.8.5` (`bd18368`)
 - Kimi Code baseline: `2.2.0` (`472192c34c1efad89a369870eff0da0b708ce9bb`)
 
 This file tracks open footer parity problems, information boundaries, and
@@ -755,7 +755,7 @@ countdowns, freshness and expiry. No real credentials or user data were used.
 
 ## KI-20: Git status probe still runs repository-configured clean filters
 
-Status: open — synthetic fix verified; real 2.2.0 host acceptance pending
+Status: fixed in v0.8.5 (PR #50); real 2.2.0 host acceptance pending
 
 Affected area: Git dirty probe / untrusted workspace execution
 
@@ -801,7 +801,7 @@ Acceptance criteria:
 
 ## KI-21: Provider balance does not resolve `api_key_env`
 
-Status: fixed by PR #46 with synthetic coverage; live DeepSeek smoke pending
+Status: fixed in v0.8.5 (PR #46); live DeepSeek smoke pending
 
 Affected area: DeepSeek provider balance and doctor diagnostics
 
