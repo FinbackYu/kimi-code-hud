@@ -30,7 +30,9 @@ import { probeGitStatusSafely } from './git-safe-probe.mjs';
 // cmd.exe / CreateProcess search the current directory before PATH, so a bare
 // command name can execute a binary planted in the workspace. Resolve PATH
 // ourselves and refuse workspace-local hits before running the pre-trust Git
-// probe. This mirrors the Kimi Code 0.35+ executable boundary. The live
+// probe. The path resolution mirrors the Kimi Code 0.35+ executable boundary;
+// the probe's own suppression flags are HUD-held since upstream reverted its
+// #3964 hardening in 2.1.1 (see KI-7/KI-20). The live
 // dirty check uses index metadata so repository clean/process filters cannot
 // run before trust. The legacy status argv below is used only by injected
 // cache-test doubles; production calls probeGitStatusSafely.
@@ -147,7 +149,8 @@ function nullDevice(platform) {
 /**
  * Probe argv suppresses repo-local fsmonitor and hook configuration, but
  * does not disable every repo-configured command (for example clean filters;
- * see KI-20).
+ * see KI-20). These two controls are HUD-held, not an upstream contract:
+ * upstream reverted the #3964 hardening in 2.1.1.
  */
 function gitProbeArgs(platform) {
   return [
