@@ -2,6 +2,8 @@
 
 Reviewed: 2026-09-23. This document audits the HUD code against the released source and synthetic fixtures. It does not establish live 2.1.0 TUI acceptance or a HUD release.
 
+Post-review status (2026-10-15): upstream 2.1.1 reverted PR #3964 and its workspace-trust-boundary hardening (PR #4013), so the attribution recorded below for KI-20's upstream premise is superseded — the HUD keeps the probe's suppression flags as its own defense (KI-7, KI-20). HUD issue #44 was closed by PR #50 on the 2.1.0 prep branch, superseding the "the issue stays open" note in the watch carry-over section; #45 stays open and was carried into the 2.2.0 review. The 2.1.0-era statements below are otherwise unchanged.
+
 ## Release identity and range
 
 | | Previous | Target |

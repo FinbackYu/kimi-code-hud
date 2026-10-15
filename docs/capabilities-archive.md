@@ -429,3 +429,47 @@ Baseline delta (2.0.2 → 2.1.0), reviewed 2026-09-23:
   endpoint, and `usage.record` remain contract-compatible. Fullscreen's new
   `tui_mode` setting and interactive controls are host-owned; 2.1.0 live
   HUD acceptance is still unverified.
+
+Baseline delta (2.1.0 → 2.2.0), reviewed 2026-10-15:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.2.0`, tag object
+  `f9c6b3cfa0c232e651136b801c616df7e710a66b`, peeled commit
+  `472192c34c1efad89a369870eff0da0b708ce9bb` (published 2026-10-14 15:31 UTC).
+  The exact range from `52437299ff78de3d0aff7f38f054e5eb20c512e5` contains 40
+  commits, 522 changed paths and +27,728/−18,273 lines, and includes the 2.1.1
+  patch release. [Full review](upstream-2.2.0-review.md).
+- The Event2 persisted manifest stays at 64 record types with no additions,
+  removals or renames. The only payload change is `TowerModeEnterPayload`
+  losing its optional `base` field, which also drops the `tower.base` state
+  from `tower_mode.enter` / `tower_mode.exit`; the HUD reduces those records by
+  type and never read `base`, so the tower badge is unaffected.
+- `status-line-command.ts`, `footer.ts`, the slash-command registry (43
+  entries at both endpoints) and `tui/config.ts` are byte-identical across the
+  range: the 10-field payload, the 300 ms ceiling, the first-stdout-line
+  contract and the `[status_line]` config contract carry over unchanged. The
+  display-side change is `USER_MESSAGE_BULLET` `✨ ` → `❯ ` in
+  `apps/kimi-code/src/tui/constant/symbols.ts`; the showcase pages and their
+  exported PNGs were regenerated with the new marker.
+- 2.1.1 reverts the 2.1.0 workspace-trust hardening: PR #4013 rolls back
+  #3964, `apps/kimi-code/src/utils/git/git-args.ts` is deleted and
+  `git-status.ts` returns to plain synchronous Git calls. The HUD's probe
+  hardening is self-held and stays; KI-7 and KI-20 now record the revert
+  instead of an upstream dependency.
+- Prep pins superseded: PR #3970's merge commit `895e9d9b` and the
+  "v2.0.3 candidate" wording no longer describe the released line. The
+  manifest link in `CAPABILITIES.md` targets the 2.2.0 commit, and the
+  row-class fixture comment cites the released 2.1.0/2.2.0 tags.
+- Fullscreen semantics: what was an env-gated experiment through 0.38.0 is a
+  persistent `tui_mode` preference from 2.1.0 on, entered through
+  `[status_line]`-preserving `tui.toml` writes or `/settings`. The static
+  status-line contract still does not depend on it — `status-line-command.ts`
+  and `footer.ts` are byte-identical across the 2.1.0 → 2.2.0 range, and the
+  `[status_line]` round-trip is upstream behavior, verified by
+  `test/sync-status-line.test.mjs`'s "preserves other sections and status_line
+  keys". The interactive fullscreen frame itself remains a manual gap (KI-8):
+  the recorded Windows row used 2.0.0 and the pre-2.1.0 switch.
+- Out of range: PR #4201 (asynchronous footer Git cache, `gitBranch` may be
+  `null` on the first frame) merged upstream on 2026-10-14 but is absent from
+  the 2.2.0 tag, so its behaviour is not part of this baseline. The HUD's
+  null-branch HEAD fallback is prep for it; on 2.2.0 it stays off the normal
+  rendering path and only fires when the host's git read fails or times out.

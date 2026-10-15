@@ -1,8 +1,8 @@
 # Known issues
 
-- Last verified: 2026-09-23
+- Last verified: 2026-10-15
 - HUD behavior baseline: `v0.8.4` (`711d54e`)
-- Kimi Code baseline: `2.1.0` (`52437299ff78de3d0aff7f38f054e5eb20c512e5`)
+- Kimi Code baseline: `2.2.0` (`472192c34c1efad89a369870eff0da0b708ce9bb`)
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -58,8 +58,19 @@ Status: open
 
 Affected upstream slot: `git`
 
-The HUD renders the payload branch plus a dirty `*`. It does not render upstream
+The HUD renders a branch plus a dirty `*`. It does not render upstream
 diff counts, ahead/behind, or linked PR information.
+
+Branch provenance is a documented variant: the payload value wins whenever
+the host supplies one. Through 2.2.0 the host reads `gitBranch` synchronously
+from its own 5s/15s status cache, and upstream PR #4201 (merged 2026-10-14,
+not part of the 2.2.0 tag) makes that path asynchronous, so the first frame
+after startup can carry `null` even inside a repository. In that case the HUD
+reads `.git/HEAD` itself, but only after a filesystem-only check proves a
+symbolic branch exists — a detached HEAD or a non-repository still renders
+nothing, matching the host. Until #4201 ships, the fallback only fires when
+the host's synchronous git read fails or times out (payload `null`); it never
+overrides a host-supplied branch.
 
 The dirty probe itself is now bounded by a cross-process 15-second, 64-cwd
 cache and runs with `GIT_OPTIONAL_LOCKS=0`; this closes the per-frame scan/lock-contention
@@ -75,6 +86,9 @@ Acceptance criteria:
 - never block rendering on PR or network lookup;
 - handle a missing `gh` binary, detached HEAD, no upstream, and non-repositories;
 - expire or invalidate cached data when cwd or branch changes;
+- keep a payload-supplied branch authoritative over the HUD's own HEAD read,
+  and keep a null payload branch from producing a branch the host would not
+  show (detached HEAD, non-repository);
 - preserve the current silent render fallback.
 
 ## KI-3: Layout downgrade is not terminal-width aware
@@ -227,13 +241,20 @@ Resolution:
 - preserve the existing silent `false` fallback when no trusted executable is
   available or the bounded status command fails.
 
-Extension (upstream PR #3964, first released in 2.1.0; HUD prep issue #44): the status
-probe adds `-c core.fsmonitor=false` and redirects `core.hooksPath` to the null
-device (`NUL` on Windows, `/dev/null` elsewhere). These suppress two
-mechanisms, but a 2026-09-23 isolated repository showed that a clean filter
-still ran through `git status`. The review branch now reads index metadata and
-uses safe Git plumbing without worktree conversion; clean/process-filter
-regressions leave no marker. See [KI-20](#ki-20-git-status-probe-still-runs-repository-configured-clean-filters).
+Extension (HUD-owned since 2.1.1): the status probe also passes
+`-c core.fsmonitor=false` and redirects `core.hooksPath` to the null device
+(`NUL` on Windows, `/dev/null` elsewhere). The first version of this extension
+followed upstream PR #3964, which hardened the host's own Git calls; upstream
+reverted #3964 in 2.1.1 (`revert: roll back workspace trust-boundary
+hardening`, PR #4013) and removed its `GIT_CONFIG_ARGS`/`GIT_DIFF_ARGS`
+(`apps/kimi-code/src/utils/git/git-args.ts` is gone from the tree at 2.2.0).
+The HUD keeps its own controls regardless: it runs inside the user's workspace
+before any trust decision, so the suppression stays a self-held defense rather
+than an upstream parity claim. Those two controls still leave a clean filter
+reachable, and a 2026-09-23 isolated repository showed that a clean filter ran
+through `git status`. The review branch now reads index metadata and uses safe
+Git plumbing without worktree conversion; clean/process-filter regressions
+leave no marker. See [KI-20](#ki-20-git-status-probe-still-runs-repository-configured-clean-filters).
 The replacement uses `--no-ext-diff` / `--no-textconv` only with its cached
 diff call; `git status` itself rejects those options.
 
@@ -241,7 +262,15 @@ diff call; `git status` itself rejects those options.
 
 Status: partially verified (Windows row recorded 2026-09-18)
 
-Affected area: Kimi Code experimental fullscreen TUI (first reviewed at 0.36.0–0.38.0; 2.1.0 adds `tui_mode` in `/settings`)
+Affected area: Kimi Code fullscreen TUI (first reviewed at 0.36.0–0.38.0; 2.1.0 promoted it to the persistent `tui_mode` preference)
+
+Entry procedure at the 2.2.0 baseline: set `tui_mode = "fullscreen"` in
+`~/.kimi-code/tui.toml`, or pick the fullscreen layout in `/settings`; both
+take effect after restarting Kimi Code. The pre-2.1.0 switch
+`KIMI_CODE_TUI_FULL_SCREEN=1` is no longer part of the upstream documentation —
+the code keeps it only as a one-time migration that writes `tui_mode` when the
+key is still absent. The HUD's own install path (writes to `[status_line]`)
+round-trips through the same file, so a preference save keeps the custom line.
 
 Static release review through 0.38.0 confirms that fullscreen mode does not
 change the 10-field status-line payload, the first-stdout-line contract, the 300ms host
@@ -256,9 +285,9 @@ evidence, not a HUD pass or failure.
 the line-refresh/ownership half of criteria 2 are now met):
 
 - Matrix row: Windows 11 (build 26200) · Windows Terminal 1.24 (conpty) ·
-  installed Kimi Code 2.0.0 (`kimi.exe`) · experimental fullscreen mode
-  (`KIMI_CODE_TUI_FULL_SCREEN=1`) — a real PTY, newer than the 0.38.0 the
-  criteria named.
+  installed Kimi Code 2.0.0 (`kimi.exe`) · fullscreen mode via the then-current
+  switch (`KIMI_CODE_TUI_FULL_SCREEN=1`, the only entry point before 2.1.0) — a
+  real PTY, newer than the 0.38.0 the criteria named.
 - Line 1 refresh: observed — the custom line repaints on the host's 1-second
   cadence with live quota figures and reset countdowns (window captures at
   several timestamps).
@@ -282,6 +311,13 @@ fullscreen controls. The status-line payload is unchanged, but no live HUD
 frame has been exercised on the 2.1.0 build; the earlier Windows 2.0.0 row
 does not establish 2.1.0 fullscreen behavior.
 
+2.2.0 review: fullscreen gains clickable sticky user-message summaries
+(transcript-only; `status-line-command.ts` and `footer.ts` are byte-identical
+across the 2.1.0 → 2.2.0 range, see
+[docs/upstream-2.2.0-review.md](docs/upstream-2.2.0-review.md)). The entry
+procedure above is the current one. No live fullscreen frame is recorded for
+2.1.0, 2.1.1 or 2.2.0, so the Windows row still describes 2.0.0 only.
+
 Still open: resize behavior, `/reload-tui`, and failure-frame fallback are
 not yet exercised. The classic conhost window could not be produced on this
 host (every console delegates to Windows Terminal, including elevated
@@ -290,7 +326,8 @@ and Linux PTY rows remain unrecorded.
 
 Acceptance criteria:
 
-- launch Kimi Code 0.38.0 with the experimental fullscreen mode in a real PTY; ✅ 2026-09-18 (host 2.0.0, WT 1.24, Win11)
+- launch Kimi Code with fullscreen `tui_mode` in a real PTY (the 0.38.0
+  env-gated wording is obsolete); ✅ 2026-09-18 via the then-current switch (host 2.0.0, WT 1.24, Win11)
 - verify line 1 refresh, line 2 context ownership, resize, reload, and fallback; — line 1 refresh ✅, line 2 ownership ✅; resize/reload/fallback still open
 - record the terminal/OS matrix without weakening the 220ms HUD budget. — Windows row recorded ✅; macOS/Linux rows pending
 
@@ -506,6 +543,20 @@ Mitigation:
 - the heuristic admits one bounded false-positive shape: an agent lost and
   never resumed still counts for up to one fresh window after its last write.
 
+2.2.0 review (baseline decision on the optional prep item from HUD issue #45):
+the five durable `subagent.*` lifecycle records first shipped in 2.1.0 could
+in principle replace this heuristic, and `subagent.spawned` even carries an
+optional `taskId`. They do not close the gap: upstream emits them only from
+the run-spawning paths (`agent/tools/agent/agentTool.ts`,
+`features/tower/tools/spawn/spawnTool.ts`,
+`features/swarm/session/sessionSwarmService.ts`) and, at session init, for the
+host's own internal init run — none of which runs when a lost background agent
+is resumed. A resumed agent therefore still journals no lifecycle record, so
+the wire-freshness heuristic stays the only HUD-side signal. Revisit if a
+resume path ever emits `subagent.started` or `task.started`; the fixture
+`test/fixtures/wire-events-subagent-cancelled.jsonl` already carries all five
+classes for that future reduction.
+
 Acceptance criteria for closing as a HUD problem:
 
 - upstream journals `task.started` (or an equivalent `task.resumed`) on the
@@ -704,13 +755,24 @@ countdowns, freshness and expiry. No real credentials or user data were used.
 
 ## KI-20: Git status probe still runs repository-configured clean filters
 
-Status: open — synthetic fix verified; real 2.1.0 host acceptance pending
+Status: open — synthetic fix verified; real 2.2.0 host acceptance pending
 
 Affected area: Git dirty probe / untrusted workspace execution
 
 Before the fix, the prep probe passed `-c core.fsmonitor=false` and redirected
 `core.hooksPath`, but a local `filter.<driver>.clean` command selected by a
 tracked `.gitattributes` entry was executable during `git status`.
+
+Upstream premise (updated 2026-10-15): the prep work mirrored upstream PR
+#3964, which upstream reverted in 2.1.1 (PR #4013) and whose
+`GIT_CONFIG_ARGS`/`GIT_DIFF_ARGS` helpers no longer exist at the 2.2.0 tag.
+The reference to that PR's automated review comment — and the whole upstream
+hardening this issue originally tracked — is therefore historical. The HUD
+keeps the mitigation as its own pre-trust defense, because it probes the
+workspace before any trust decision and cannot rely on the host's current
+stance. The 2.2.0 range re-introduced a trust surface in the opposite
+direction (`KIMI_CODE_TRUST_WORKSPACE`, `#4059`), which the HUD does not read
+or set.
 
 Evidence (2026-09-23): in an isolated temporary repository, a modified tracked
 file matched `*.txt filter=probe`; `.git/config` mapped `filter.probe.clean`
@@ -734,7 +796,8 @@ Acceptance criteria:
 - [x] pre-trust probe cannot invoke repository clean/process filters;
 - [x] isolated regression fails if either filter runs;
 - [x] bounded, silent fallback and a shared 150ms probe budget;
-- [ ] trigger the relevant paths in a real 2.1.0 host session and record the result.
+- [x] keep branch/dirty output while the probe uses index metadata only;
+- [ ] trigger the relevant paths in a real 2.2.0 host session and record the result.
 
 ## KI-21: Provider balance does not resolve `api_key_env`
 
@@ -749,8 +812,8 @@ provider configuration hid the DeepSeek balance. PR #46 merged the fix into
 rejects simultaneous `api_key` and `api_key_env`, and fails closed for an
 unset or empty variable. Its doctor messages distinguish those cases; secret
 values do not enter cache files, targets, logs or output. The reviewed 2.1.0
-integration includes the same fix and synthetic regressions.
+and 2.2.0 integrations include the same fix and synthetic regressions.
 
-A real Kimi Code 2.1.0 DeepSeek account smoke remains unverified. Seeing a
+A real Kimi Code 2.2.0 DeepSeek account smoke remains unverified. Seeing a
 balance in one configuration validates that path only; the other failure
 branches remain covered by synthetic tests.

@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { PassThrough } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 
 import { renderStatusLine, RUNTIME_BUDGET_MS } from '../src/render-runtime.mjs';
 import { resolveQuotaContextKey } from '../src/quota.mjs';
@@ -13,6 +15,8 @@ import {
   writeProviderUsageCache,
 } from '../src/provider-usage.mjs';
 import { captureRuntimeSnapshot } from '../src/runtime-snapshot.mjs';
+
+const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
 function makePaths() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-runtime-'));
@@ -156,7 +160,7 @@ test('runtime shares one deadline and skips refresh and Git when budget is gone'
         return metrics();
       },
       ensureFreshQuota: () => { refreshes += 1; },
-      isGitDirty: () => { gitChecks += 1; return true; },
+      readGitStatus: () => { gitChecks += 1; return { branch: 'main', dirty: true }; },
     },
   });
   assert.equal(metricsDeadline, RUNTIME_BUDGET_MS);
@@ -200,10 +204,10 @@ test('runtime passes a context-matching quota cache to render and refresh', asyn
       }),
       getMetrics: () => metrics(),
       ensureFreshQuota: (options) => { refreshOptions = options; },
-      isGitDirty: (_cwd, options) => {
+      readGitStatus: (_cwd, options) => {
         gitTimeout = options.timeoutMs;
         gitCachePath = options.cachePath;
-        return true;
+        return { branch: 'main', dirty: true };
       },
     },
   });
@@ -216,6 +220,85 @@ test('runtime passes a context-matching quota cache to render and refresh', asyn
   // The matching cache is shown as current quota.
   assert.ok(result.line.includes('5h ███        31%'));
   assert.ok(result.line.includes('7d ██         25%'));
+});
+
+// The host reads `gitBranch` from its own Git status cache. Upstream PR #4201
+// turns that read asynchronous, so the payload will be able to carry `null`
+// briefly even inside a repository; the PR is merged upstream but not part of
+// the released 2.2.0 tag, so the HUD resolves HEAD itself for a null payload
+// branch — prep that stays inert while the host still supplies a branch.
+
+function gitRepository(t) {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-runtime-git-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const git = (args) => execFileSync('git', args, { cwd, stdio: 'pipe' });
+  git(['init', '--quiet', '-b', 'main']);
+  git(['config', 'user.name', 'Test']);
+  git(['config', 'user.email', 'test@example.org']);
+  fs.writeFileSync(path.join(cwd, 'tracked.txt'), 'first\n');
+  git(['add', 'tracked.txt']);
+  git(['commit', '--quiet', '-m', 'initial']);
+  return { cwd, git };
+}
+
+async function renderColdGitFrame(payloadOverrides, dependencies = {}) {
+  const paths = makePaths();
+  return renderStatusLine({
+    scriptPath: '/tmp/kimi-hud.mjs',
+    paths,
+    env: { NO_COLOR: '1' },
+    clock: () => 0,
+    dependencies: {
+      managedPluginDisabled: () => false,
+      readPayload: async () => ({ ...payload(), ...payloadOverrides }),
+      captureRuntimeSnapshot: () => ({
+        hudConfig: { layout: 'normal' },
+        configTomlText: '',
+        tuiTomlText: '',
+        quota: { fetchedAt: 1, weekly: null, windows: [] },
+      }),
+      getMetrics: () => metrics(),
+      ensureFreshQuota: () => {},
+      ...dependencies,
+    },
+  });
+}
+
+test('runtime fills a null payload branch from its own HEAD probe', async (t) => {
+  const { cwd } = gitRepository(t);
+  fs.writeFileSync(path.join(cwd, 'tracked.txt'), 'second\n');
+  const fixture = JSON.parse(fs.readFileSync(
+    path.join(FIXTURES, 'status-line-payload-cold-git.json'),
+    'utf8',
+  ));
+  assert.equal(fixture.gitBranch, null);
+  // The fixture supplies the payload shape; only cwd is replaced so the real
+  // probe runs against the temporary repository. Without the fallback this
+  // frame renders no Git segment at all, because a null payload branch used
+  // to suppress both the branch and the dirty marker.
+  const cold = await renderColdGitFrame({ ...fixture, cwd });
+  assert.ok(cold.line.includes('git:(main*)'));
+});
+
+test('runtime keeps the payload branch authoritative over the probe', async () => {
+  const result = await renderColdGitFrame({ gitBranch: 'main' }, {
+    readGitStatus: () => ({ branch: 'probe-branch', dirty: true }),
+  });
+  assert.ok(result.line.includes('git:(main*)'));
+  assert.ok(!result.line.includes('probe-branch'));
+});
+
+test('runtime skips the Git probe when there is no symbolic HEAD to show', async (t) => {
+  const { cwd, git } = gitRepository(t);
+  git(['checkout', '--quiet', '--detach']);
+  let probes = 0;
+  const probe = () => { probes += 1; return { branch: 'main', dirty: true }; };
+  const detached = await renderColdGitFrame({ gitBranch: null, cwd }, { readGitStatus: probe });
+  assert.ok(!detached.line.includes('git:('));
+  // A payload without a usable cwd cannot resolve a worktree either.
+  const cwdless = await renderColdGitFrame({ gitBranch: null, cwd: '' }, { readGitStatus: probe });
+  assert.ok(!cwdless.line.includes('git:('));
+  assert.equal(probes, 0);
 });
 
 test('runtime hides a cache tagged for another context and refreshes with null', async () => {

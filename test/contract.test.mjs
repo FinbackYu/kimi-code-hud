@@ -16,15 +16,21 @@ const SENSITIVE_PATTERN =
 
 test('sanitized host payload and wire fixtures lock every layout/theme/color contract', () => {
   const payloadText = fs.readFileSync(path.join(FIXTURES, 'status-line-payload.json'), 'utf8');
+  const coldGitText = fs.readFileSync(path.join(FIXTURES, 'status-line-payload-cold-git.json'), 'utf8');
   const wireText = fs.readFileSync(path.join(FIXTURES, 'wire-events.jsonl'), 'utf8');
   const quotaText = fs.readFileSync(path.join(FIXTURES, 'quota-cache.json'), 'utf8');
   const expectedText = fs.readFileSync(path.join(FIXTURES, 'render-contract.json'), 'utf8');
   const quota = JSON.parse(quotaText);
   const expected = JSON.parse(expectedText);
-  for (const fixtureText of [payloadText, wireText, quotaText, expectedText]) {
+  for (const fixtureText of [payloadText, coldGitText, wireText, quotaText, expectedText]) {
     assert.doesNotMatch(fixtureText, SENSITIVE_PATTERN);
   }
   assert.doesNotMatch(wireText, /"input"\s*:/);
+  // The cold-Git fixture differs from the reference payload on exactly one
+  // axis: the branch the host has not resolved yet.
+  const coldGit = JSON.parse(coldGitText);
+  assert.deepEqual(Object.keys(coldGit).sort(), Object.keys(JSON.parse(payloadText)).sort());
+  assert.equal(coldGit.gitBranch, null);
 
   const payload = parsePayload(payloadText);
   const sessionsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-contract-'));

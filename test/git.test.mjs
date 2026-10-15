@@ -162,7 +162,9 @@ test('status probe suppresses repo-local fsmonitor and diff driver config', (t) 
   ], { cwd, stdio: 'ignore' });
 
   // Command-shaped repo-local config: if the probe let any of these execute
-  // during the status read, the driver would leave its marker behind.
+  // during the status read, the driver would leave its marker behind. The
+  // suppression is HUD-held, so this regression stays valid even though
+  // upstream reverted its own #3964 hardening in 2.1.1.
   const driver = path.join(cwd, 'driver.sh');
   const marker = `${driver}.marker`;
   fs.writeFileSync(driver, '#!/bin/sh\ntouch "$0.marker"\n');

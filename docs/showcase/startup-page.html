@@ -211,7 +211,7 @@
    CAPABILITIES.md 的 Kimi Code baseline 一致；export-assets.py 导出时以
    ?hudver=…&cliver=… 注入覆盖，standalone 打开（无参数）即显示默认值 */
 const HUD_VERSION = '0.8.4';
-const CLI_VERSION = '2.1.0';
+const CLI_VERSION = '2.2.0';
 const params = new URLSearchParams(location.search);
 const hudver = params.get('hudver') || HUD_VERSION;
 const cliver = params.get('cliver') || CLI_VERSION;
@@ -237,7 +237,7 @@ const CONFIG = {
 
   /* 对话区：type 为 user（黄）/ thought（灰斜体）/ reply（白） */
   messages: [
-    { type: 'user',    text: '✨\uFE0E 你好' },
+    { type: 'user',    text: '❯\uFE0E 你好' },
     { type: 'thought', text: 'Simple greeting. Reply in Chinese.' },
     { type: 'reply',   text: '你好！有什么可以帮你的吗？比如看看 kimi-code-hud 这个项目，或者别的开发任务都可以。' },
   ],

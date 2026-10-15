@@ -201,7 +201,7 @@
       </div>
 
       <div class="chat">
-        <div class="msg user">✨&#xFE0E; 你好</div>
+        <div class="msg user">❯&#xFE0E; 你好</div>
         <div class="msg thought">● Simple greeting. Reply in Chinese.</div>
         <div class="msg reply"><span class="dot">●</span> 你好！有什么可以帮你的吗？比如看看 kimi-code-hud 这个项目，或者别的开发任务都可以。</div>
       </div>
@@ -230,7 +230,7 @@
    version，CLI_VERSION 取 CAPABILITIES.md 的 Kimi Code baseline）；
    export-assets.py 导出时以 ?hudver=…&cliver=… 注入覆盖，standalone 打开即默认 */
 const HUD_VERSION = '0.8.4';
-const CLI_VERSION = '2.1.0';
+const CLI_VERSION = '2.2.0';
 const params = new URLSearchParams(location.search);
 const hudver = params.get('hudver') || HUD_VERSION;
 const cliver = params.get('cliver') || CLI_VERSION;
