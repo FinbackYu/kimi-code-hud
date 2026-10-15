@@ -33,7 +33,15 @@ function readIndexEntries(output) {
   return { entries, untracked: false };
 }
 
-function readBranch(cwd, env) {
+/**
+ * Read the symbolic HEAD branch without spawning Git. Detached HEAD, a
+ * missing repository marker and any unreadable layout return `null`, so this
+ * doubles as the cheap precondition for a full status probe.
+ * @param {string} cwd
+ * @param {object} [env]
+ * @returns {string|null}
+ */
+export function readHeadBranch(cwd, env = {}) {
   try {
     const override = Object.entries(env).find(([key]) => key.toUpperCase() === 'GIT_DIR')?.[1];
     let gitDir = typeof override === 'string' && override
@@ -118,7 +126,7 @@ export function probeGitStatusSafely(git, cwd, {
     });
   };
 
-  const branch = readBranch(cwd, env);
+  const branch = readHeadBranch(cwd, env ?? {});
 
   try {
     const raw = run(['ls-files', '--cached', '--others', '--exclude-standard', '--stage', '--debug', '-z']).toString('utf8');

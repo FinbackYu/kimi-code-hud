@@ -310,12 +310,15 @@ function modelSegment({ layout, payload, metrics, color, C }) {
   return segment;
 }
 
-function projectSegment({ layout, payload, gitDirty }) {
+function projectSegment({ layout, payload, gitDirty, fallbackGitBranch }) {
   const cwd = typeof payload.cwd === 'string' ? sanitizeTerminalText(payload.cwd) : '';
   const project = layout !== 'compact' && cwd
     ? path.basename(cwd) || cwd
     : null;
-  const gitBranch = sanitizeTerminalText(payload.gitBranch);
+  // The payload branch stays authoritative; the runtime-supplied fallback
+  // covers a host that has no value yet but whose worktree has one.
+  const gitBranch = sanitizeTerminalText(payload.gitBranch)
+    || sanitizeTerminalText(fallbackGitBranch);
   if (gitBranch) {
     const git = `git:(${gitBranch}${gitDirty ? '*' : ''})`;
     return project ? `${project} ${git}` : git;
@@ -670,6 +673,9 @@ function buildSegments(layout, ctx) {
  * @param {object|object[]|null} ctx.providerUsage normalized provider facts
  * @param {object|null} ctx.metrics {tps, tpsStale, ttftMs, thinkingLevel, thinkingProvisional, goal, swarmMode, towerMode, cache, tpsTotal, tpsAgents, activeAgents, mainSpeed, mainActive, turnStartedAt, genSettledMs, genSettledAt, compactingSince, compactionMs, compactedAt, tasks}
  * @param {boolean} ctx.gitDirty
+ * @param {string|null} [ctx.fallbackGitBranch] branch resolved by the caller
+ *   when the payload carries none (the host omits it until its own Git cache
+ *   is warm); the payload value always wins when present
  * @param {string} [ctx.layout] normal|compact
  * @param {string} [ctx.permissionNames] official|short — permission badge
  *   wording (default official)

@@ -406,6 +406,43 @@ test('optional segments drop cleanly', () => {
   assert.equal(line, '[Always Ask] K3 │ kimi-code-hud');
 });
 
+test('a caller-resolved branch fills a payload that has none', () => {
+  const [line] = renderHud(baseCtx({
+    payload: basePayload({ gitBranch: null }),
+    quota: null,
+    metrics: { tps: null, ttftMs: null },
+    gitDirty: true,
+    fallbackGitBranch: 'feature/hud',
+  }));
+  assert.equal(line, '[Always Ask] K3 │ kimi-code-hud git:(feature/hud*)');
+  // The payload value stays authoritative, and the fallback is sanitized like
+  // every other dynamic field.
+  const [payloadWins] = renderHud(baseCtx({
+    payload: basePayload({ gitBranch: 'main' }),
+    quota: null,
+    metrics: { tps: null, ttftMs: null },
+    gitDirty: true,
+    fallbackGitBranch: `other\x1b]0;title\x07`,
+  }));
+  assert.equal(payloadWins, '[Always Ask] K3 │ kimi-code-hud git:(main*)');
+  const [sanitized] = renderHud(baseCtx({
+    payload: basePayload({ gitBranch: null }),
+    quota: null,
+    metrics: { tps: null, ttftMs: null },
+    gitDirty: false,
+    fallbackGitBranch: 'main\x9b32m',
+  }));
+  assert.equal(sanitized, '[Always Ask] K3 │ kimi-code-hud git:(main)');
+  const [empty] = renderHud(baseCtx({
+    payload: basePayload({ gitBranch: null }),
+    quota: null,
+    metrics: { tps: null, ttftMs: null },
+    gitDirty: false,
+    fallbackGitBranch: null,
+  }));
+  assert.equal(empty, '[Always Ask] K3 │ kimi-code-hud');
+});
+
 test('TTFT remains visible while TPS is warming up', () => {
   const [normal] = renderHud(baseCtx({
     layout: 'normal',
