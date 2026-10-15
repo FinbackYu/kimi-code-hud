@@ -471,4 +471,5 @@ Baseline delta (2.1.0 → 2.2.0), reviewed 2026-10-15:
 - Out of range: PR #4201 (asynchronous footer Git cache, `gitBranch` may be
   `null` on the first frame) merged upstream on 2026-10-14 but is absent from
   the 2.2.0 tag, so its behaviour is not part of this baseline. The HUD's
-  null-branch HEAD fallback is prep for it and stays inert on 2.2.0.
+  null-branch HEAD fallback is prep for it; on 2.2.0 it stays off the normal
+  rendering path and only fires when the host's git read fails or times out.

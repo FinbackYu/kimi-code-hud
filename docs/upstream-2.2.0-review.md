@@ -22,11 +22,11 @@ official checkout HEAD was not moved and the working tree stayed clean.
 |---|---|---|
 | [`status-line-command.ts`](https://github.com/MoonshotAI/kimi-code/blob/472192c34c1efad89a369870eff0da0b708ce9bb/apps/kimi-code/src/tui/utils/status-line-command.ts) is byte-identical across the range and [`footer.ts`](https://github.com/MoonshotAI/kimi-code/blob/472192c34c1efad89a369870eff0da0b708ce9bb/apps/kimi-code/src/tui/components/chrome/footer.ts) is not in the 522-path list at all; the 10 fields (`gitBranch: string \| null` included), the first stdout line, the 300 ms timeout and the 1 s refresh contract are unchanged | `src/payload.mjs`, `src/render-runtime.mjs`, `src/hooks.mjs` | **covered** by the existing parser/render/lifecycle tests; real 2.2.0 TUI behaviour remains unverified. |
 | [`wire-manifest.d.ts`](https://github.com/MoonshotAI/kimi-code/blob/472192c34c1efad89a369870eff0da0b708ce9bb/packages/agent-core-v2/docs/wire-manifest.d.ts): 64 record types at both endpoints, no additions, removals or renames. The only payload change is `TowerModeEnterPayload` dropping the optional `base` field (and the `tower.base` state on `tower_mode.enter` / `tower_mode.exit`) | `src/metrics-session-meta.mjs` folds those two records **by type** | **covered / no-op**: the HUD never read `base`, and its five-class `subagent.*` fixture still matches the release. `subagent.completed.usage`/`contextTokens` stay outside the session usage ledger. |
-| `usage.record` and the managed `/usages` seams are absent from the changed-path list; the only `usage*` source touched is `agent-core-v2/src/agent/usage/usageEvents.ts`, which adds optional `towerExitReason`/`permission` to `AgentStatusUpdatedPayload` | cost ledger (`src/session-usage.mjs`, `src/provider-cost.mjs`), quota (`src/quota.mjs`) | **no direct source delta**; the HUD does not fold `agent.status.updated` (it reads the permission mode from the payload). |
+| `usage.record` and the managed `/usages` seams are absent from the changed-path list; among usage-named source files the only one touched is `agent-core-v2/src/agent/usage/usageEvents.ts`, which adds optional `towerExitReason`/`permission` to `AgentStatusUpdatedPayload` (elsewhere under `agent/usage/` only `cacheProbeService.ts` gained parent-request telemetry fields — no wire impact — plus one test file) | cost ledger (`src/session-usage.mjs`, `src/provider-cost.mjs`), quota (`src/quota.mjs`) | **no direct source delta**; the HUD does not fold `agent.status.updated` (it reads the permission mode from the payload). |
 | `USER_MESSAGE_BULLET` changes from `✨ ` to `❯ ` in `apps/kimi-code/src/tui/constant/symbols.ts` (PR #4031, plus the fullscreen sticky summary pill) | HUD renders no transcript; the published showcase pages are a 1:1 replica of the host start page | **variant, updated**: both showcase pages and the two exported PNGs now carry `❯`. Host-owned otherwise. |
 | `tui_mode` stays a host preference; `tui/config.ts` is byte-identical across the range, and `KIMI_CODE_TUI_FULL_SCREEN` survives only as a one-time migration into `tui_mode` | HUD owns a custom line; the host owns context/hints and the fullscreen layout | **host-owned / unverified live** (KI-8). The entry procedure in `KNOWN_ISSUES.md` now names `tui_mode = "fullscreen"`. |
 | PR #4013 (2.1.1) reverts the 2.1.0 trust hardening: `git-args.ts` is deleted and `git-status.ts` returns to plain synchronous Git calls | `src/git.mjs`, `src/git-safe-probe.mjs` probe Git themselves | **covered / HUD-held**: the HUD keeps `core.fsmonitor=false`, a null `core.hooksPath` and the index-metadata probe as its own pre-trust defense; the #3964 attribution was rewritten (KI-7, KI-20). |
-| PR #4201 (`perf(tui): stop blocking the footer on git status`, merged 2026-10-14T07:09Z) is **absent from the 2.2.0 tag**: its merge commit `83a39b49ed62627c7a604b39e26d8e9d17ade296` is not in the 40-commit range, `.changeset/footer-git-refresh.md` does not exist at the tag, and `git-status.ts` still calls `spawnSync` with 5 s/15 s caches | `src/render-runtime.mjs` branch resolution | **prep, inert on 2.2.0**: when the payload carries no branch the HUD reads `.git/HEAD` itself and uses the cached probe, so a future `gitBranch: null` first frame cannot blink the segment. On 2.2.0 the payload always carries the branch inside a repository, so the new path never fires. |
+| PR #4201 (`perf(tui): stop blocking the footer on git status`, merged 2026-10-14T07:09Z) is **absent from the 2.2.0 tag**: its merge commit `83a39b49ed62627c7a604b39e26d8e9d17ade296` is not in the 40-commit range, `.changeset/footer-git-refresh.md` does not exist at the tag, and `git-status.ts` still calls `spawnSync` with 5 s/15 s caches | `src/render-runtime.mjs` branch resolution | **prep, off the normal path on 2.2.0**: when the payload carries no branch the HUD reads `.git/HEAD` itself and uses the cached probe, so a future `gitBranch: null` first frame cannot blink the segment. On 2.2.0 the host resolves the branch synchronously, so the fallback stays off normal rendering; it can still fire when the host's git read fails or times out (payload `null`), which only ever shows a branch that genuinely exists in the repository. |
 
 Display parity search covered `README.md`, `README.en.md`, `CAPABILITIES.md`,
 `KNOWN_ISSUES.md`, `CHANGELOG.md`, `docs/`, `src/`, `test/` and the fixtures
@@ -103,8 +103,8 @@ checked against the changed-path list instead.
 - [HUD #54](https://github.com/FinbackYu/kimi-code-hud/issues/54), upstream
   #4201: **prep landed, issue stays open**. The parity decision (fall back to
   the HUD's own HEAD read when the payload has no branch) and its fixture are
-  in place and inert on 2.2.0; acceptance belongs to the release that actually
-  ships #4201.
+  in place and off the normal rendering path on 2.2.0; acceptance belongs to
+  the release that actually ships #4201.
 - No new Repo-Overwatch report files were present since the prior baseline
   review; the five open `upstream-watch` issues were the complete input list.
 
@@ -131,6 +131,7 @@ dependency was installed.
 Source and fixture checks do not prove live rendering, real quota or DeepSeek
 access, Windows 2.2.0 behaviour or a HUD release. No live 2.1.0/2.1.1/2.2.0 TUI
 session was run for this review, and no real user configuration was read or
-written. The official upstream checkout stayed untouched; every upstream claim
-above comes from `git show` / `git grep` / `git diff` against the fetched
-2.1.0 and 2.2.0 tag objects.
+written. The official upstream checkout stayed untouched; tag and source claims above
+come from `git show` / `git grep` / `git diff` against the fetched 2.1.0 and
+2.2.0 tag objects, while the #4201 merge timestamp and the 2.2.0 release
+publish time come from the GitHub PR/Release API.

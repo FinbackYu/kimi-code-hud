@@ -68,8 +68,9 @@ not part of the 2.2.0 tag) makes that path asynchronous, so the first frame
 after startup can carry `null` even inside a repository. In that case the HUD
 reads `.git/HEAD` itself, but only after a filesystem-only check proves a
 symbolic branch exists — a detached HEAD or a non-repository still renders
-nothing, matching the host. The fallback was already inert before #4201
-because it only ever fires where the payload has no branch to display.
+nothing, matching the host. Until #4201 ships, the fallback only fires when
+the host's synchronous git read fails or times out (payload `null`); it never
+overrides a host-supplied branch.
 
 The dirty probe itself is now bounded by a cross-process 15-second, 64-cwd
 cache and runs with `GIT_OPTIONAL_LOCKS=0`; this closes the per-frame scan/lock-contention
