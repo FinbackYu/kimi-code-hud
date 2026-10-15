@@ -26,7 +26,7 @@ description: 在 kimi-code-hud 仓库执行一次完整发布——版本位判�
    - `CAPABILITIES.md` + `KNOWN_ISSUES.md`：同步 `Last verified`；把 `HUD behavior baseline` 更新为新版本和本次 release 中最后一个相关行为提交；清除已发布项的 working-tree / pending-release 临时说明，并把 closed issue 写成实际首次修复版本。两份文档的 Kimi Code baseline 必须保持一致。
    - `CHANGELOG.md`：`[Unreleased]` 内容落入 `## [X.Y.Z] - <今天 YYYY-MM-DD>`，保留空的 `[Unreleased]` 段；底部链接块前移——`[Unreleased]: .../compare/v<X.Y.Z>...HEAD`，并新增 `[X.Y.Z]: .../releases/tag/v<X.Y.Z>`。
    - `docs/showcase/states-gallery.html` 与 `startup-page.html` 的 `const HUD_VERSION`（两页面是必要的受跟踪生成源，release-metadata 测试会断言；`CLI_VERSION` 只在基线变更时才动）。
-3. **图片重生成**（需本机 python3 playwright + Chrome）：
+3. **图片重生成**（需本机 python3 playwright + Chrome；无 Chrome 发行版时用 `KIMI_HUD_SHOWCASE_CHANNEL=msedge` 走 Edge 通道）：
 
    ```bash
    node docs/showcase/render-states.mjs && python3 docs/showcase/export-assets.py
@@ -37,10 +37,11 @@ description: 在 kimi-code-hud 仓库执行一次完整发布——版本位判�
    - 欢迎框 `Version:` = CAPABILITIES 基线；
    - 顺带核对内容保真：HUD 行展示是否与当前渲染行为一致（如 startup 行应有暗显 provisional TPS、effort 未确认应置灰、配额段应存在——fixture 缺 `fetchedAt` 会让状态墙整面丢柱体，v0.8.3–v0.8.4 的图即此回归）。发现漂移见「已知坑」。
    - 两个 PNG 的 `Author` 元数据 = `FinbackYu`；必须用元数据读取工具读回确认，不能只假定导出脚本已写入。
-5. **门禁**：先运行 `KIMI_HUD_RELEASE_CHECK=1 node --test test/release-metadata.test.mjs`，再确认 `npm test` 全绿 + `git diff --check`。仓内门禁会验证 behavior commit 可达对应 release tag；新版本 tag 尚未创建时以当前 HEAD 作为 release candidate，并在第 9 步 tag 创建后重新跑同一检查、落定到精确 tag。严格 metadata 检查还会阻止两份文档版本不一致、HUD behavior baseline 未前移或 closed issue 区块仍写 working-tree / pending-release（含连字符和跨行写法）。
-6. **提交**：`chore: release vX.Y.Z`，只含发布元数据、受跟踪生成源与产物：`package.json`、`kimi.plugin.json`、`CHANGELOG.md`、必要的 `docs/showcase/` 生成源、`docs/media/*.png`，以及本次需要收口发布状态时的 `CAPABILITIES.md` / `KNOWN_ISSUES.md`。
-7. **打 tag 并推送**：`git tag vX.Y.Z`，推送 main 与 tag。
-8. **创建 GitHub Release（史上最易漏的一步）**：
+5. **门禁**：先运行 `KIMI_HUD_RELEASE_CHECK=1 node --test test/release-metadata.test.mjs`，再确认 `npm test` 全绿 + `git diff --check`。仓内门禁会验证 behavior commit 可达对应 release tag；新版本 tag 尚未创建时以当前 HEAD 作为 release candidate，并在第 8 步 tag 创建后重新跑同一检查、落定到精确 tag。严格 metadata 检查还会阻止两份文档版本不一致、HUD behavior baseline 未前移或 closed issue 区块仍写 working-tree / pending-release（含连字符和跨行写法）。
+6. **提交**：`chore: release vX.Y.Z`，只含发布元数据、受跟踪生成源与产物：`package.json`、`kimi.plugin.json`、`CHANGELOG.md`、必要的 `docs/showcase/` 生成源、`docs/media/*.png`，以及本次需要收口发布状态时的 `CAPABILITIES.md` / `KNOWN_ISSUES.md`。此时提交落在本地 main 上没关系，第 7 步会把它移到发布分支并在合并后对齐 main。
+7. **走 PR 合并 release commit**：main 受仓库规则保护，直接 push 会被拒（缺 PR 的 release-gate 检查）。从 release commit 建 `chore/release-vX.Y.Z` 分支推送并开 PR，等 CI（含 release-gate）全绿后 squash 合并。squash 会改写提交 SHA：合并后 `git checkout main && git fetch origin`，先 `git diff --quiet main origin/main` 确认本地预合并提交与远端树一致，再 `git reset --hard origin/main` 对齐。
+8. **打 tag 并推送**：确认 HEAD 就是 origin/main 上的 release 合并提交后，`git tag vX.Y.Z && git push origin vX.Y.Z`。tag 必须打在合并后的 main 提交上——先打 tag 再合并会让 tag 指向一个不在 main 上的预合并 commit，release-metadata 的「behavior commit 可达 release tag」与「HEAD 不领先 tag」检查都会失真。
+9. **创建 GitHub Release（史上最易漏的一步）**：
 
    ```bash
    gh release create vX.Y.Z --title vX.Y.Z --notes "<CHANGELOG 本节正文>
@@ -48,15 +49,16 @@ description: 在 kimi-code-hud 仓库执行一次完整发布——版本位判�
    Compatibility baseline: Kimi Code <基线> (unchanged from v<首次引入该基线的版本>)."
    ```
 
-9. **收尾确认**：`gh release list` 显示新版为 Latest。README 版本徽章是 shields 动态徽章（`github/v/release`），无需改 README，CDN 缓存几分钟内自动刷新；向用户报告时附 release URL。
-   再运行一次 `KIMI_HUD_RELEASE_CHECK=1 node --test test/release-metadata.test.mjs`，确保 tag/Release 完成后没有遗留临时兼容性状态。
+10. **收尾确认**：`gh release list` 显示新版为 Latest。README 版本徽章是 shields 动态徽章（`github/v/release`），无需改 README，CDN 缓存几分钟内自动刷新；向用户报告时附 release URL。
+   再运行一次 `KIMI_HUD_RELEASE_CHECK=1 node --test test/release-metadata.test.mjs`，确保 tag/Release 完成后没有遗留临时兼容性状态。注意「HEAD 不领先 tag」自检在 HEAD 恰好等于新 tag 时会跳过，这是设计行为，不是遗留问题。
 
 ## 授权边界
 
-commit / tag / push / `gh release create` 均为对外动作，执行前需用户明确授权；用户说「做一次发布」视为对全流程的一次性授权。
+commit / tag / push / PR 合并 / `gh release create` 均为对外动作，执行前需用户明确授权；用户说「做一次发布」视为对全流程的一次性授权。
 
 ## 已知坑
 
+- main 受仓库规则保护：release commit 直推 main 会被拒（v0.8.4、v0.8.5 两轮都踩到），必须走 PR；tag 只能在 squash 合并后打在 main 的合并提交上。流程已固定在执行序列第 7-8 步，不要回退成「本地打 tag 后连 main 一起推」。
 - `docs/showcase/` 的生成脚本、两个 HTML 页面与生成的 `hud-states.js` 都是受跟踪文件——release-metadata 测试把生成器跑到临时目录、与已提交的 `hud-states.js` 逐字节比对，改了 STATES 忘重跑（或重跑忘提交）会直接失败；`docs/media/*.png` 是受跟踪发布产物；私有/社媒产物（如 `xhs/`）继续 gitignore。
 - release-metadata 测试会校验两个 showcase 页面中的版本常量；升版本忘同步页面会直接失败。
 - `hud-demo.png` 的静态首帧来自 `startup-page.html` 里手维护的 CONFIG 复刻，不经过 `render-states.mjs`。发布读图时必须同时核对 provisional TPS 与未确认 effort 的暗显；发现漂移就修 CONFIG 重出图，不把手写首帧当成真实渲染的自动产物。
