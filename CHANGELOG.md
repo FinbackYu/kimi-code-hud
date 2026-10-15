@@ -6,6 +6,35 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-10-15
+
+### Fixed
+
+- Resolve provider credentials declared via `api_key_env` (shipped upstream in
+  Kimi Code 2.0.1), restoring balance and quota display for providers such as
+  DeepSeek that use it; declaring both `api_key` and `api_key_env` fails
+  closed (KI-21, PR #46).
+- Harden the Git dirty probe so repository-configured clean/process filters
+  and diff drivers can no longer execute inside HUD-spawned git calls: the
+  probe reads index and file metadata and passes `--no-ext-diff` /
+  `--no-textconv` to the staged-diff call (KI-20, PR #50). Upstream reverted
+  its own hardening in 2.1.1; the HUD's stays HUD-owned.
+- Fall back to the HUD's own cached `.git/HEAD` read when the status-line
+  payload carries no branch, so the git segment cannot blink empty once the
+  host's asynchronous footer cache lands (upstream PR #4201, merged upstream
+  but not part of the 2.2.0 tag). The payload branch always wins, a detached
+  HEAD or non-repository still renders nothing, and no git subprocess is
+  spawned outside a repository (KI-2, PR #55).
+
+### Changed
+
+- Advance the audited compatibility baseline to Kimi Code 2.2.0 (exact range
+  2.1.0→2.2.0, 40 commits): the status-line payload, slash-command registry
+  and tui config are unchanged; the wire manifest stays at 64 record types
+  with `tower_mode.enter` dropping its optional `base` field; the user-message
+  bullet is now `❯` and the showcase assets follow it; KI-8's fullscreen
+  entry is re-pinned to `tui_mode = "fullscreen"` (PRs #50, #55).
+
 ## [0.8.4] - 2026-09-19
 
 ### Fixed
@@ -628,7 +657,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.5
 [0.8.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.4
 [0.8.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.3
 [0.8.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.2
