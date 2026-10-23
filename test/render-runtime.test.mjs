@@ -222,11 +222,79 @@ test('runtime passes a context-matching quota cache to render and refresh', asyn
   assert.ok(result.line.includes('7d ██         25%'));
 });
 
+test('a [models."x".upgrade] subtable keeps provider attribution and the quota gate', async () => {
+  const paths = makePaths();
+  const now = 1_000_000;
+  const env = { NO_COLOR: '1' };
+  // Kimi Code 2.3.1 persists registry migration metadata as a nested subtable
+  // beside the model's scalar keys, the same table shape the older
+  // `[models."x".overrides]` subtable already uses. The model-table scan stops
+  // a body at the next `[`, so the scalar keys in front must stay visible and
+  // the managed provider must still open the quota gate.
+  const configText = [
+    '[models."K3"]',
+    'provider = "managed:kimi-code"',
+    'model = "k3"',
+    'display_name = "K3"',
+    'capabilities = [ "thinking" ]',
+    '',
+    '[models."K3".upgrade]',
+    'model = "k3-latest"',
+    'migration_markdown = "K3 retires soon; switch alias to k3-latest."',
+    'retirement_at = "2026-12-01"',
+    '',
+    '[models."claude-opus-4-7"]',
+    'provider = "anthropic"',
+    'model = "claude-opus-4-7"',
+    '',
+    '[models."claude-opus-4-7".upgrade]',
+    'model = "claude-opus-5"',
+    'migration_markdown = "Move this alias to opus 5."',
+    '',
+  ].join('\n');
+  const contextKey = resolveQuotaContextKey({ env, configText, kimiHome: paths.kimiHome });
+  const cachedQuota = {
+    version: 3,
+    contextKey,
+    fetchedAt: now - 1_000,
+    weekly: { used: 25, limit: 100 },
+    windows: [{ label: '5h', used: 31, limit: 100 }],
+  };
+  let refreshOptions = null;
+  const result = await renderStatusLine({
+    scriptPath: '/tmp/kimi-hud.mjs',
+    paths,
+    now,
+    env,
+    clock: () => 0,
+    dependencies: {
+      managedPluginDisabled: () => false,
+      // No wire alias: attribution goes through the payload display string,
+      // which matches the managed table's display_name.
+      readPayload: async () => payload(),
+      captureRuntimeSnapshot: () => ({
+        hudConfig: {},
+        configTomlText: configText,
+        tuiTomlText: '',
+        quota: cachedQuota,
+      }),
+      getMetrics: () => metrics(),
+      ensureFreshQuota: (options) => { refreshOptions = options; },
+      readGitStatus: () => ({ branch: 'main', dirty: true }),
+    },
+  });
+  assert.equal(refreshOptions.cachedQuota, cachedQuota);
+  assert.ok(result.line.includes('5h ███        31%'));
+  assert.ok(result.line.includes('7d ██         25%'));
+  // The sibling subtable must not leak its migration text into the footer.
+  assert.equal(result.line.includes('k3-latest'), false);
+  assert.equal(result.line.includes('opus 5'), false);
+});
+
 // The host reads `gitBranch` from its own Git status cache. Upstream PR #4201
-// turns that read asynchronous, so the payload will be able to carry `null`
-// briefly even inside a repository; the PR is merged upstream but not part of
-// the released 2.2.0 tag, so the HUD resolves HEAD itself for a null payload
-// branch — prep that stays inert while the host still supplies a branch.
+// made that read asynchronous in 2.3.0, so a first frame inside a repository
+// legitimately carries `null`; the HUD resolves HEAD itself for a null payload
+// branch, and a payload branch still wins whenever the host supplies one.
 
 function gitRepository(t) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-runtime-git-'));
