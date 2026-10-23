@@ -1,7 +1,7 @@
 # Known issues
 
 - Last verified: 2026-10-23
-- HUD behavior baseline: `v0.8.5` (`bd18368`)
+- HUD behavior baseline: `v0.9.0` (`bd8a481`)
 - Kimi Code baseline: `2.3.1` (`684bae9ea6a437f3bae98bba1dcb797a917d500b`)
 
 This file tracks open footer parity problems, information boundaries, and
@@ -837,7 +837,7 @@ branches remain covered by synthetic tests.
 
 ## KI-22: A shared display name misattributed the active provider
 
-Status: fixed (unreleased, `feat/coding-plan-quota`)
+Status: fixed in HUD `v0.9.0` (PR #59)
 
 Affected area: quota/provider attribution
 
@@ -860,7 +860,7 @@ collision, the same-provider consensus, and the exact-alias precedence.
 
 ## KI-23: An unavailable GLM Coding Plan degrades to the CN balance
 
-Status: open (by design, `feat/coding-plan-quota`)
+Status: open (by design)
 
 Affected area: GLM Coding Plan provider usage
 
