@@ -866,3 +866,39 @@ transient failures (5xx, timeouts) never trigger the balance request; they
 record normal refresh backoff. A live GLM Coding Plan account with an active
 plan remains unverified — the expired-account path is the one exercised on a
 real key.
+
+## KI-24: Four providers have no supported usage source
+
+Status: open (by design)
+
+Affected area: provider usage adapters
+
+A provider-usage adapter reads an official JSON endpoint with the same
+inference credential the provider already uses and renders only what that
+payload states. Four providers cannot meet that bar, so they have no adapter,
+and their segment hides instead of showing a guessed number:
+
+- **mimo / xiaomi** — the usage figures exist only behind a browser cookie
+  session; there is no endpoint the inference key can call. Explicitly out of
+  scope for this cycle.
+- **Alibaba coding plan** — quota lives behind a console RPC authenticated by a
+  console cookie, not by the inference key.
+- **doubao (Volcengine Ark)** — the console exposes no quota JSON endpoint for
+  an inference key; the only probe that answers is a synthetic inference
+  request, which spends tokens and still never returns a balance.
+- **zenmux** — its quota endpoint accepts only a management key, which is a
+  different credential from the inference key and cannot serve inference.
+
+Admission criteria for a new adapter (enforced by review, not by code):
+
+1. The provider's own inference credential (literal `api_key`, or `api_key_env`
+   pointing at one environment variable) can `GET` an official JSON endpoint
+   directly — no browser cookie, OAuth handshake, password login, separate
+   management key, or extra account identifier.
+2. The endpoint sits on the provider's official host, so host-based selection
+   keeps the key away from compatible proxies.
+3. Authorization failures and unreadable payloads both degrade to "hidden" —
+   never to a guessed amount and never to an invented zeroed window.
+
+A provider that fails any criterion stays listed here instead of shipping a
+best-effort probe.

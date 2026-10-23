@@ -91,6 +91,32 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 
 数据来自四路：stdin 快照与跨进程缓存的 Git 探针（cwd 只存 SHA-256，TTL 15s）；会话 `wire.jsonl` 增量解析（main + 全部 subagent，无正文，cursor 与计数持久化在 `~/.kimi-code-hud/sessions/`，旧版根目录文件在会话恢复时自动迁移；超过 30 天未活跃的会话状态与进程被杀残留的 `*.tmp-*` 临时文件由 SessionStart hook 每日清理一次）；官方 `/usages` 配额接口（60s 缓存 + 后台刷新，双区域按 oauth host 判定）；provider 官方余额/用量接口与本地定价的成本估算（按 provider + key 指纹隔离缓存）。
 
+## Provider 余额与用量
+
+provider 余额 / 用量窗口按**该 provider 的 `base_url` 官方 host** 选择适配器，不按 provider 名。只要 `base_url` 指向下表的官方 host（https、默认端口、无 userinfo，部分适配器还要求特定路径），HUD 就用该 provider 自己的凭证请求固定的官方接口，显示为 `Label Balance $N.NN`（余额）或 `Label 5h ▓ N%`（用量窗口，与托管配额同样的柱体、百分比和重置倒计时）。provider 名只决定本地缓存分桶与诊断标签，改名不影响适配。代理、自建网关和官方域名的仿冒后缀一律不命中，整段静默隐藏，API Key 不会被转发出去。
+
+| 适配器 | 官方 host（`base_url`） | 形态 | 备注 |
+|---|---|---|---|
+| `deepseek` | `api.deepseek.com` | `balance` | 同一份余额响应还为本地 Session Cost 提供币种 |
+| `opencode-go` | `opencode.ai` | `windows` | 5h / 7d / mo 订阅窗口；订阅额度不做成本估算 |
+| `zhipuai-coding-plan` | `open.bigmodel.cn`、`api.z.ai` | `windows`（CN 可退化为 `balance`） | 套餐不可用时中国区显示 `Zhipu Balance`，国际区没有余额接口 |
+| `moonshot` | `api.moonshot.ai`（USD）、`api.moonshot.cn`（CNY） | `balance` | 币种由 host 决定；欠费时显示 0，契约不承载负余额 |
+| `minimax` | `api.minimax.io`、`api.minimax.cn`、`api.minimaxi.com` | `windows` 或 `balance` | `sk-api-*` 按量 key 读余额，其余订阅 key 读 token plan 窗口 |
+| `synthetic` | `api.synthetic.new` | `windows` | 5h / 7d 用量加 1h 搜索额度 |
+| `chutes` | `llm.chutes.ai`、`api.chutes.ai`，以及任意 `<label>.chutes.ai` 单层子域 | `windows` | 4h / 1d / mo；接口没有公开 schema，读不出干净窗口时隐藏而不是猜 |
+| `openrouter` | `openrouter.ai`（路径 `/api/v1`） | `windows` | 显示 key 的消费上限，不是预付余额；`/credits` 只认 management key，本工具不做 |
+| `deepinfra` | `api.deepinfra.com` | `balance` | 预付余额与欠费折算为单条 USD；欠费账户按不可用标记 |
+| `venice` | `api.venice.ai` | `balance` 或 `windows` | 该路由要求 ADMIN key，推理 key 收到 401 后静默隐藏；DIEM 账户显示 `1d` 额度窗口 |
+| `ollama` | `ollama.com`、`www.ollama.com`、`api.ollama.com` | `windows` 或 `balance` | Ollama Cloud 账户；本地 `ollama serve` 没有余额概念 |
+| `command-code` | `api.commandcode.ai` | `windows` 或 `balance` | 5h / 7d 额度加 mo 订阅周期，异常时退化为剩余 USD 余额 |
+| `clinepass` | `api.cline.bot` | `windows` | 5h / 7d / mo；没有 ClinePass 订阅时隐藏 |
+| `kilo` | `ai-gateway.kilo.ai`、`api.kilo.ai` | `balance` | 控制台 tRPC 预付额度，接口未公开，异常结构一律隐藏 |
+| `vercel-ai-gateway` | `ai-gateway.vercel.sh` | `balance` | `/v1/credits`；团队预算需要额外的 Vercel access token，本工具不做 |
+
+凭证按 Kimi Code 的规则解析：provider 表里要么写 `api_key`，要么用 Kimi Code 2.0.1+ 的 `api_key_env` 指向环境变量（二者互斥），HUD 每次解析现读，密钥值不落盘、不进日志。首次后台刷新完成前不显示占位；401/403 直接隐藏并清掉旧缓存，传输失败按退避重试。余额和本地 `Session Cost ≈` 是两个独立事实：余额来自官方接口，成本来自本地价目表，互不替代。多个 provider 的模型共用同一 `display_name` 时，wire 别名缺失的帧无法判断归属，整段按安全设计隐藏。
+
+手动排查：`node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage <provider 名>`，然后检查 `~/.kimi-code-hud/provider-usage/`。
+
 ## 能力与已知问题
 
 - [能力清单](CAPABILITIES.md)：Kimi Code 2.2.0 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
@@ -98,7 +124,7 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 
 ## 隐私与安全
 
-- Kimi access token 仅从 `~/.kimi-code/credentials/` 本地读取（CLI 自己负责续期，本工具只读不写），仅用于官方 `api.kimi.com` / `api.kimi.ai` 配额接口；DeepSeek API Key 仅在 provider 名与基址均为官方 `api.deepseek.com` 时读取，请求固定的官方余额接口；OpenCode Go API Key 仅在基址为官方 `opencode.ai` 时读取，请求固定的官方用量接口；智谱 GLM Coding Plan API Key 仅在基址为官方 `open.bigmodel.cn` 或 `api.z.ai` 时读取，只请求固定的额度接口，套餐不可用时（仅中国区）再请求固定的 `www.bigmodel.cn` 余额接口；
+- Kimi access token 仅从 `~/.kimi-code/credentials/` 本地读取（CLI 自己负责续期，本工具只读不写），仅用于官方 `api.kimi.com` / `api.kimi.ai` 配额接口；provider 的 API Key 仅在该 provider 的 `base_url` 命中其官方 host 时读取（见 [Provider 余额与用量](#provider-余额与用量)），且只发给该 provider 固定的官方接口，智谱在套餐不可用时（仅中国区）额外请求固定的 `www.bigmodel.cn` 余额接口；
 - 两类凭证都不写入日志、缓存或输出；provider usage 缓存只保存 API Key 的单向 SHA-256 指纹和规范化的余额或用量窗口；
 - 所有动态显示文本在 HUD 加 ANSI 样式前剥离 OSC、CSI 及 C0/DEL/C1 控制字符；HUD 自身颜色序列不经过该清洗器；
 - Session Cost 完全在本地计算，不额外发送 API Key；持久化 ledger 只有模型别名与四类 Token 计数，无会话正文。
@@ -113,11 +139,7 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 
 **没有配额段？** 先确认当前模型不是第三方 provider（`/provider` 接入的模型本就不显示配额，接口只覆盖托管订阅），并且其模型配置能明确解析到 `managed:kimi-code`；provider 未知时按安全边界失败关闭。managed 模型下，缓存首次生成前整段省略。0.43.1 的新响应使用 `usages` 中的比例字段；HUD 按返回内容显示 5h、7d 和 mo，月度同时有总量与 code 时显示 kimi/code 拆分。升级会使旧配额缓存失效，首次成功刷新后恢复。可手动 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-quota` 后重试。
 
-**没有 DeepSeek 余额或 Session Cost？** 必须正在使用 provider 名为 `deepseek` 的支持模型，且其 `type = "openai"`、`base_url` 是官方 `https://api.deepseek.com`（可带 `/v1`）。余额还要求有效凭证：`api_key`，或 Kimi Code 2.0.1+ 的 `api_key_env` 指向的非空环境变量（二者互斥；HUD 每次解析按变量名现读，密钥值不落盘、不进日志；变量未设置或为空时余额按安全设计隐藏，不回退到其他凭证）；首次后台刷新完成前不显示占位（成本必须先从余额响应确认币种）。完整用量 ledger 就绪后，即使余额不可用也可按已知币种单独显示 Session Cost。可静默运行 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage deepseek` 后检查 `~/.kimi-code-hud/provider-usage/`。兼容代理会按安全设计拒绝余额请求和成本估算。
-
-**没有 OpenCode Go 用量窗口？** 必须正在使用 provider 名为 `opencode-go` 的模型，且其 `base_url` 是官方 `opencode.ai`（如 `https://opencode.ai/inference/go/openai/v1`）。HUD 用该 provider 的 `api_key` 请求官方 `https://opencode.ai/zen/go/v1/usage` 接口，以与托管配额相同的柱体显示订阅的 5h 滚动窗、7d 周窗与月度已用百分比及重置倒计时；首次后台刷新完成前不显示。可静默运行 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage opencode-go` 后检查 `~/.kimi-code-hud/provider-usage/`。注意若多个 provider 下的模型共享同一个 `display_name`（例如官方 DeepSeek 与 OpenCode Go 各有一条 "DeepSeek V4.1 Flash"），wire 别名缺失的帧无法判断归属，整段按安全设计隐藏，而不是猜一个显示。
-
-**没有智谱 GLM Coding Plan 用量窗口或余额？** 必须正在使用 provider 名为 `zhipuai-coding-plan` 的模型（`zhipu-coding-plan`、`zhipu`、`zai` 三个别名同样接受），且 `base_url` 指向官方 host：中国区 `open.bigmodel.cn`（如 `https://open.bigmodel.cn/api/paas/v4`），国际区 `api.z.ai`。HUD 用该 provider 的 `api_key` 请求固定的官方额度接口，以与托管配额相同的柱体显示 `TOKENS_LIMIT` / `CREDIT_LIMIT` 窗口（按返回的时长标注 5h、7d 等）与每月 MCP 工具额度（`mcp`），并显示重置倒计时；首次后台刷新完成前不显示。该服务把错误都写在 HTTP 200 的响应体里，所以套餐到期或账号没有 coding plan 时，中国区会退化为显示账户余额（`Zhipu Balance ¥N.NN`，只取可用余额，充值/赠送累计额不参与显示）；国际区 `api.z.ai` 没有余额接口，此时整段隐藏。可静默运行 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage zhipuai-coding-plan` 后检查 `~/.kimi-code-hud/provider-usage/`。
+**没有 provider 余额或用量窗口？** HUD 按该 provider 的 `base_url` 官方 host 选择适配器，不看 provider 名：先对照 [Provider 余额与用量](#provider-余额与用量)的支持矩阵，确认 `base_url` 指向官方 host（代理、自建网关和仿冒域名不会命中），再确认凭证有效——`api_key`，或 Kimi Code 2.0.1+ 的 `api_key_env` 指向的非空环境变量（二者互斥；HUD 每次解析按变量名现读，密钥值不落盘、不进日志；变量未设置或为空时按安全设计隐藏，不回退到其他凭证）。首次后台刷新完成前不显示占位；401/403 会清掉旧缓存并静默隐藏，传输失败按退避重试。余额与本地 `Session Cost ≈` 是两条独立路径：完整用量 ledger 就绪后，即使余额不可用也可按已知币种单独显示成本。可静默运行 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage <provider 名>` 后检查 `~/.kimi-code-hud/provider-usage/`。
 
 **没有 DeepSeek / OpenAI / Anthropic Session Cost？** 当前模型必须使用对应官方直连服务，且模型 ID 位于内置价格表。所有日志追平前不显示不完整数字；同一会话只要存在其他 provider 或无法解析模型的非零用量，整项隐藏。该值是本次会话的本地估算，不是 API 余额，也与 ChatGPT / Claude 订阅额度无关。
 
