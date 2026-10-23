@@ -6,6 +6,42 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-23
+
+### Added
+
+- Show subscription usage windows or API balances for the active provider,
+  selected by the provider's official `base_url` host rather than its config
+  name (PR #59). Windows cover opencode-go (5h/7d/mo), zhipuai-coding-plan
+  (5h/7d/mcp), synthetic, chutes, openrouter, clinepass, command-code and
+  MiniMax subscription keys; balances cover deepseek, moonshot, deepinfra,
+  ollama, kilo, vercel-ai-gateway, MiniMax pay-as-you-go keys and Venice
+  admin keys. Every figure renders on the same gauge bars as the managed Kimi
+  quota, the monthly window is labelled `mo` in both channels, and each fetch
+  is size-capped, deadline-bound, backed off per account fingerprint and sent
+  only to the official host, so credentials never enter caches or logs
+  (KI-24 documents the providers that have no inference-key usage source).
+- Fall back to `Zhipu Balance ¥N.NN` when a GLM Coding Plan account reports no
+  usable plan, reading only `availableBalance` from the CN account report; the
+  international region renders nothing instead (KI-23).
+
+### Fixed
+
+- Fail closed when two providers share one `display_name`, instead of
+  attributing the first configured provider's balance to the active provider
+  on frames that carry no wire `modelAlias` (KI-22, PR #59).
+
+### Changed
+
+- Advance the audited compatibility baseline to Kimi Code 2.3.1 (non-linear
+  range from 2.2.0, 37 commits): the status-line payload and footer line-1
+  slots are unchanged, but the host now resolves Git status through an
+  asynchronous cache, so a first-frame `gitBranch: null` is normal and the
+  HUD's own HEAD read is a regular display path (KI-2 rewritten); the
+  persisted wire manifest grows 64 → 65 with `changeNotifier.snapshot` folded
+  as a no-op; KI-8 and KI-20 carry their 2.3.x annotations (PR #60,
+  `docs/upstream-2.3.1-review.md`).
+
 ## [0.8.5] - 2026-10-15
 
 ### Fixed
@@ -657,7 +693,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.8.5...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.0
 [0.8.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.5
 [0.8.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.4
 [0.8.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.3
