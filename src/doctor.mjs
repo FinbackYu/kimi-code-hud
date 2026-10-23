@@ -24,6 +24,7 @@ import {
   DEEPSEEK_PROVIDER,
   OPENCODE_GO_PROVIDER,
   PROVIDER_USAGE_TTL_MS,
+  ZHIPU_PROVIDER_ALIASES,
   resolveProviderUsageTarget,
 } from './provider-usage.mjs';
 import {
@@ -544,13 +545,19 @@ export function collectDoctorReport({
 
   // --- provider usage -------------------------------------------------------
   if (configToml.state === 'ok') {
-    const supported = new Set([MANAGED_KIMI_PROVIDER, DEEPSEEK_PROVIDER, OPENCODE_GO_PROVIDER]);
+    const supported = new Set([
+      MANAGED_KIMI_PROVIDER,
+      DEEPSEEK_PROVIDER,
+      OPENCODE_GO_PROVIDER,
+      ...ZHIPU_PROVIDER_ALIASES,
+    ]);
     const unsupported = configuredProviderNames(configToml.text)
       .filter((name) => !supported.has(name));
     if (unsupported.length > 0) {
       add('providers', 'note', 'usage targets',
         `no usage adapter for: ${unsupported.join(', ')} — balance renders only for `
-        + `${DEEPSEEK_PROVIDER}, usage windows only for ${OPENCODE_GO_PROVIDER}; `
+        + `${DEEPSEEK_PROVIDER}; usage windows only for ${OPENCODE_GO_PROVIDER}; GLM Coding Plan `
+        + `windows for ${ZHIPU_PROVIDER_ALIASES.join('/')}; `
         + `quota bars only for ${MANAGED_KIMI_PROVIDER}`);
     }
     const groups = scanProviderGroups(p.providerUsageDir, now);
@@ -558,6 +565,7 @@ export function collectDoctorReport({
     for (const [provider, metric] of [
       [DEEPSEEK_PROVIDER, 'balance'],
       [OPENCODE_GO_PROVIDER, 'usage windows'],
+      ...ZHIPU_PROVIDER_ALIASES.map((provider) => [provider, 'usage']),
     ]) {
       const stem = reportProviderUsage({
         add,

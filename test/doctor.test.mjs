@@ -992,3 +992,72 @@ test('opencode-go is a supported provider and no longer listed as unadapted', ()
   assert.doesNotMatch(check.detail, /opencode-go,/);
   assert.match(check.detail, /usage windows only for opencode-go/);
 });
+
+test('zhipu coding-plan aliases are supported and report their cache state', () => {
+  const cn = makeEnv();
+  seedConfigToml(cn.paths, [
+    '',
+    '[providers."zhipuai-coding-plan"]',
+    'type = "openai"',
+    'base_url = "https://open.bigmodel.cn/api/paas/v4"',
+    'api_key = "zp_sk_synth"',
+    '',
+    '[providers.anthropic]',
+    'type = "anthropic"',
+    '',
+  ].join('\n'));
+  const configText = fs.readFileSync(cn.paths.configTomlPath, 'utf8');
+  const target = resolveProviderUsageTarget({
+    provider: 'zhipuai-coding-plan',
+    configText,
+    providerUsageDir: cn.paths.providerUsageDir,
+  });
+  assert.ok(target, 'official CN zhipu config must resolve');
+  fs.mkdirSync(cn.paths.providerUsageDir, { recursive: true });
+  fs.writeFileSync(target.cachePath, JSON.stringify({
+    version: 1,
+    provider: 'zhipuai-coding-plan',
+    credentialFingerprint: target.credentialFingerprint,
+    fetchedAt: NOW - 1000,
+    kind: 'balance',
+    label: 'Zhipu',
+    available: true,
+    balances: [{ currency: 'CNY', total: 15.39, granted: null, toppedUp: null }],
+  }));
+  const { report } = collect(cn);
+  const check = one(report, 'providers', 'zhipuai-coding-plan');
+  assert.equal(check.level, 'ok');
+  assert.match(check.detail, /cache fresh, age 1s/);
+  const targets = one(report, 'providers', 'usage targets');
+  assert.match(targets.detail, /no usage adapter for: anthropic/);
+  assert.doesNotMatch(targets.detail, /zhipuai-coding-plan,/);
+  assert.match(targets.detail, /GLM Coding Plan windows for zhipuai-coding-plan/);
+
+  const intl = makeEnv();
+  seedConfigToml(intl.paths, [
+    '',
+    '[providers.zai]',
+    'type = "openai"',
+    'base_url = "https://api.z.ai/api/paas/v4"',
+    'api_key = "zp_sk_synth"',
+    '',
+  ].join('\n'));
+  assert.match(
+    one(collect(intl).report, 'providers', 'zai').detail,
+    /no cache yet — the first render spawns a background refresh/,
+  );
+
+  const proxy = makeEnv();
+  seedConfigToml(proxy.paths, [
+    '',
+    '[providers."zhipu-coding-plan"]',
+    'type = "openai"',
+    'base_url = "https://open.bigmodel.cn.evil/api/paas/v4"',
+    'api_key = "zp_sk_synth"',
+    '',
+  ].join('\n'));
+  assert.match(
+    one(collect(proxy).report, 'providers', 'zhipu-coding-plan').detail,
+    /usage stays hidden by design/,
+  );
+});

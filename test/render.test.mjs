@@ -169,6 +169,31 @@ test('provider balance uses currency-aware compact text instead of a quota bar',
   assert.ok(usd.endsWith(' │ DeepSeek Balance $20.50'));
 });
 
+test('provider balance renders without granted/topped-up components, and mcp windows share the gauge', () => {
+  const [balance] = renderHud(baseCtx({
+    quota: null,
+    providerUsage: {
+      kind: 'balance', label: 'Zhipu', available: true,
+      balances: [{ currency: 'CNY', total: 15.39077652, granted: null, toppedUp: null }],
+    },
+  }));
+  assert.ok(balance.endsWith(' │ Zhipu Balance ¥15.39'));
+
+  const [windows] = renderHud(baseCtx({
+    quota: null,
+    providerUsage: {
+      kind: 'windows',
+      label: 'Zhipu Pro',
+      windows: [
+        { label: '5h', usedRatio: 0.25, resetAt: '2026-07-30T12:18:00Z' },
+        { label: '7d', usedRatio: 0.09, resetAt: null },
+        { label: 'mcp', usedRatio: 0.224, resetAt: null },
+      ],
+    },
+  }));
+  assert.match(windows, /Zhipu Pro 5h [█ ]*25% ~2h18m · 7d [█ ]*9% · mcp [█ ]*22%/);
+});
+
 test('provider balance reports unavailable and dims stale cache', () => {
   const [unavailable] = renderHud(baseCtx({
     quota: null,

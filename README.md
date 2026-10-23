@@ -98,7 +98,7 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 
 ## 隐私与安全
 
-- Kimi access token 仅从 `~/.kimi-code/credentials/` 本地读取（CLI 自己负责续期，本工具只读不写），仅用于官方 `api.kimi.com` / `api.kimi.ai` 配额接口；DeepSeek API Key 仅在 provider 名与基址均为官方 `api.deepseek.com` 时读取，请求固定的官方余额接口；OpenCode Go API Key 仅在基址为官方 `opencode.ai` 时读取，请求固定的官方用量接口；
+- Kimi access token 仅从 `~/.kimi-code/credentials/` 本地读取（CLI 自己负责续期，本工具只读不写），仅用于官方 `api.kimi.com` / `api.kimi.ai` 配额接口；DeepSeek API Key 仅在 provider 名与基址均为官方 `api.deepseek.com` 时读取，请求固定的官方余额接口；OpenCode Go API Key 仅在基址为官方 `opencode.ai` 时读取，请求固定的官方用量接口；智谱 GLM Coding Plan API Key 仅在基址为官方 `open.bigmodel.cn` 或 `api.z.ai` 时读取，只请求固定的额度接口，套餐不可用时（仅中国区）再请求固定的 `www.bigmodel.cn` 余额接口；
 - 两类凭证都不写入日志、缓存或输出；provider usage 缓存只保存 API Key 的单向 SHA-256 指纹和规范化的余额或用量窗口；
 - 所有动态显示文本在 HUD 加 ANSI 样式前剥离 OSC、CSI 及 C0/DEL/C1 控制字符；HUD 自身颜色序列不经过该清洗器；
 - Session Cost 完全在本地计算，不额外发送 API Key；持久化 ledger 只有模型别名与四类 Token 计数，无会话正文。
@@ -116,6 +116,8 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 **没有 DeepSeek 余额或 Session Cost？** 必须正在使用 provider 名为 `deepseek` 的支持模型，且其 `type = "openai"`、`base_url` 是官方 `https://api.deepseek.com`（可带 `/v1`）。余额还要求有效凭证：`api_key`，或 Kimi Code 2.0.1+ 的 `api_key_env` 指向的非空环境变量（二者互斥；HUD 每次解析按变量名现读，密钥值不落盘、不进日志；变量未设置或为空时余额按安全设计隐藏，不回退到其他凭证）；首次后台刷新完成前不显示占位（成本必须先从余额响应确认币种）。完整用量 ledger 就绪后，即使余额不可用也可按已知币种单独显示 Session Cost。可静默运行 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage deepseek` 后检查 `~/.kimi-code-hud/provider-usage/`。兼容代理会按安全设计拒绝余额请求和成本估算。
 
 **没有 OpenCode Go 用量窗口？** 必须正在使用 provider 名为 `opencode-go` 的模型，且其 `base_url` 是官方 `opencode.ai`（如 `https://opencode.ai/inference/go/openai/v1`）。HUD 用该 provider 的 `api_key` 请求官方 `https://opencode.ai/zen/go/v1/usage` 接口，以与托管配额相同的柱体显示订阅的 5h 滚动窗、7d 周窗与月度已用百分比及重置倒计时；首次后台刷新完成前不显示。可静默运行 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage opencode-go` 后检查 `~/.kimi-code-hud/provider-usage/`。注意若多个 provider 下的模型共享同一个 `display_name`（例如官方 DeepSeek 与 OpenCode Go 各有一条 "DeepSeek V4.1 Flash"），wire 别名缺失的帧无法判断归属，整段按安全设计隐藏，而不是猜一个显示。
+
+**没有智谱 GLM Coding Plan 用量窗口或余额？** 必须正在使用 provider 名为 `zhipuai-coding-plan` 的模型（`zhipu-coding-plan`、`zhipu`、`zai` 三个别名同样接受），且 `base_url` 指向官方 host：中国区 `open.bigmodel.cn`（如 `https://open.bigmodel.cn/api/paas/v4`），国际区 `api.z.ai`。HUD 用该 provider 的 `api_key` 请求固定的官方额度接口，以与托管配额相同的柱体显示 `TOKENS_LIMIT` / `CREDIT_LIMIT` 窗口（按返回的时长标注 5h、7d 等）与每月 MCP 工具额度（`mcp`），并显示重置倒计时；首次后台刷新完成前不显示。该服务把错误都写在 HTTP 200 的响应体里，所以套餐到期或账号没有 coding plan 时，中国区会退化为显示账户余额（`Zhipu Balance ¥N.NN`，只取可用余额，充值/赠送累计额不参与显示）；国际区 `api.z.ai` 没有余额接口，此时整段隐藏。可静默运行 `node ~/.kimi-code/plugins/managed/kimi-code-hud/bin/kimi-hud.mjs --refresh-provider-usage zhipuai-coding-plan` 后检查 `~/.kimi-code-hud/provider-usage/`。
 
 **没有 DeepSeek / OpenAI / Anthropic Session Cost？** 当前模型必须使用对应官方直连服务，且模型 ID 位于内置价格表。所有日志追平前不显示不完整数字；同一会话只要存在其他 provider 或无法解析模型的非零用量，整项隐藏。该值是本次会话的本地估算，不是 API 余额，也与 ChatGPT / Claude 订阅额度无关。
 

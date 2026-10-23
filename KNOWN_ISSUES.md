@@ -840,3 +840,29 @@ matching table and resolves only when all candidates agree on one provider;
 a match spread across providers fails closed and renders no quota, balance,
 or usage windows at all. Regression coverage pins the cross-provider
 collision, the same-provider consensus, and the exact-alias precedence.
+
+## KI-23: An unavailable GLM Coding Plan degrades to the CN balance
+
+Status: open (by design, `feat/coding-plan-quota`)
+
+Affected area: GLM Coding Plan provider usage
+
+The GLM Coding Plan quota service reports every failure as HTTP 200 with
+`success: false` and a body `code` — an expired plan answers
+`{"code":500,"msg":"当前用户不存在coding plan","success":false}`, and team
+accounts without the organization header can answer `success: true` with no
+usable limits. The HUD therefore inspects the raw body before normalizing:
+body `code` 401 is treated as an authorization failure, and any other
+unusable quota body falls back to the CN account report
+(`www.bigmodel.cn/api/biz/account/query-customer-account-report`), rendering
+`Zhipu Balance ¥N.NN` in place of the subscription windows. The report's
+`rechargeAmount` / `giveAmount` are lifetime totals, so only
+`availableBalance` (or `balance`) feeds the displayed amount and the
+granted/topped-up components stay unknown.
+
+The international region (`api.z.ai`) has no account-report endpoint, so an
+unusable plan there renders nothing instead of a balance. Quota HTTP-level
+transient failures (5xx, timeouts) never trigger the balance request; they
+record normal refresh backoff. A live GLM Coding Plan account with an active
+plan remains unverified — the expired-account path is the one exercised on a
+real key.
