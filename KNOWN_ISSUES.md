@@ -817,3 +817,26 @@ and 2.2.0 integrations include the same fix and synthetic regressions.
 A real Kimi Code 2.2.0 DeepSeek account smoke remains unverified. Seeing a
 balance in one configuration validates that path only; the other failure
 branches remain covered by synthetic tests.
+
+## KI-22: A shared display name misattributed the active provider
+
+Status: fixed (unreleased, `feat/coding-plan-quota`)
+
+Affected area: quota/provider attribution
+
+The status-line payload's `model` field is the host's display name
+(`displayName ?? model ?? alias`), not the config alias. When two providers
+declare models with the same `display_name` — e.g. official DeepSeek and a
+subscription gateway both naming a model "DeepSeek V4.1 Flash" — the HUD's
+fallback provider resolution matched the first table in config file order.
+On a frame without the wire `modelAlias` (before `profile.bind` /
+`config.update` / `llm.request` rows arrive), an OpenCode Go model could
+therefore resolve as `deepseek` and show the DeepSeek account balance
+against OpenCode Go traffic.
+
+The fix keeps the exact alias match authoritative and makes the loose
+display-name / model-id fallback attribution-safe: it collects every
+matching table and resolves only when all candidates agree on one provider;
+a match spread across providers fails closed and renders no quota, balance,
+or usage windows at all. Regression coverage pins the cross-provider
+collision, the same-provider consensus, and the exact-alias precedence.

@@ -138,3 +138,77 @@ test('resolveModelProvider returns null when it cannot determine the provider', 
   assert.equal(resolveModelProvider({ modelAlias: 'kimi-code/k3', configPath: '/nonexistent.toml' }), null);
   assert.equal(resolveModelProvider({}), null);
 });
+
+const AMBIGUOUS_CONFIG = `
+[providers.deepseek]
+type = "openai"
+base_url = "https://api.deepseek.com/v1"
+
+[providers.opencode-go]
+type = "openai"
+base_url = "https://opencode.ai/inference/go/openai/v1"
+
+[models."deepseek/deepseek-v4.1-flash"]
+provider = "deepseek"
+model = "deepseek-flash"
+display_name = "DeepSeek V4.1 Flash"
+
+[models."opencode-go/deepseek-v4.1-flash"]
+provider = "opencode-go"
+model = "deepseek-v4.1-flash"
+display_name = "DeepSeek V4.1 Flash"
+
+[models."deepseek/deepseek-v4-pro"]
+provider = "deepseek"
+model = "shared-upstream-id"
+display_name = "DeepSeek V4 Pro"
+
+[models."opencode-go/deepseek-v4-pro"]
+provider = "opencode-go"
+model = "shared-upstream-id"
+display_name = "V4 Pro via Go"
+
+[models."deepseek/v4-pro-max"]
+provider = "deepseek"
+model = "deepseek-v4-pro-max"
+display_name = "DeepSeek V4 Pro"
+`;
+
+test('resolveModelProvider resolves a shared display name exactly by wire alias', () => {
+  withConfig(AMBIGUOUS_CONFIG, (configPath) => {
+    assert.equal(
+      resolveModelProvider({ modelAlias: 'opencode-go/deepseek-v4.1-flash', configPath }),
+      'opencode-go',
+    );
+    assert.equal(
+      resolveModelProvider({ modelAlias: 'deepseek/deepseek-v4.1-flash', configPath }),
+      'deepseek',
+    );
+  });
+});
+
+test('resolveModelProvider fails closed when a display-name fallback spans providers', () => {
+  withConfig(AMBIGUOUS_CONFIG, (configPath) => {
+    // The payload's display string matches two tables on different providers:
+    // attributing either one could show the wrong account's balance or quota.
+    assert.equal(resolveModelProvider({ modelDisplay: 'DeepSeek V4.1 Flash', configPath }), null);
+    // Same rule for the upstream model id shared across providers.
+    assert.equal(resolveModelProvider({ modelDisplay: 'shared-upstream-id', configPath }), null);
+    // An unmatched alias cannot rescue the lookup through an ambiguous display.
+    assert.equal(
+      resolveModelProvider({ modelAlias: 'gone', modelDisplay: 'DeepSeek V4.1 Flash', configPath }),
+      null,
+    );
+  });
+});
+
+test('resolveModelProvider accepts a fallback shared by tables of one provider', () => {
+  withConfig(AMBIGUOUS_CONFIG, (configPath) => {
+    // Two aliases of the same provider share one display name: every loose
+    // match agrees, so the provider is unambiguous.
+    assert.equal(
+      resolveModelProvider({ modelDisplay: 'DeepSeek V4 Pro', configPath }),
+      'deepseek',
+    );
+  });
+});
