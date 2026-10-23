@@ -1,17 +1,21 @@
 # HUD capabilities
 
-- Last verified: 2026-10-15
+- Last verified: 2026-10-23
 - HUD behavior baseline: `v0.8.5` (`bd18368`)
-- Kimi Code baseline: `2.2.0` (`472192c34c1efad89a369870eff0da0b708ce9bb`)
-- Release status (2026-10-15): 2.2.0 is the audited source/fixture baseline.
-  The range's status-line, footer and manifest seams are unchanged from
-  2.1.0 except the `tower_mode` payload trim recorded below; the durable
-  subagent fixture still matches the release. KI-20's real 2.2.0 host
-  acceptance, KI-8's live fullscreen frame, and a real managed-account /
-  DeepSeek smoke remain unverified. Issue #54's `gitBranch` fallback is prep
-  for upstream PR #4201, which is not part of the 2.2.0 tag (see
+- Kimi Code baseline: `2.3.1` (`684bae9ea6a437f3bae98bba1dcb797a917d500b`)
+- Release status (2026-10-23): 2.3.1 is the audited source/fixture baseline.
+  The range is not linear — its merge-base `c69bd6c5a0` sits behind both
+  endpoints, and the 37 commits / 481 changed paths (+27,446/−8,387) include
+  the 2.3.0 release. The status-line payload and the footer line-1 slots are
+  unchanged, but the host now resolves its Git status through an asynchronous
+  cache, so a first-frame `gitBranch: null` is a normal state rather than a
+  host failure; the HUD's HEAD fallback therefore moved onto the regular
+  display path (issue #54, see
   [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer)
-  and [docs/upstream-2.2.0-review.md](docs/upstream-2.2.0-review.md)).
+  and [docs/upstream-2.3.1-review.md](docs/upstream-2.3.1-review.md)). The
+  persisted manifest grows 64 → 65 with `changeNotifier.snapshot`, folded as a
+  no-op. KI-20's real host acceptance, KI-8's live fullscreen frame, and a real
+  managed-account / DeepSeek smoke remain unverified.
 
 This is the canonical inventory of footer coverage, readable data, and
 information that the HUD can already derive but does not currently render.
@@ -21,16 +25,16 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/472192c34c1efad89a369870eff0da0b708ce9bb/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/472192c34c1efad89a369870eff0da0b708ce9bb/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/472192c34c1efad89a369870eff0da0b708ce9bb/apps/kimi-code/src/utils/git/git-status.ts)
-- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/472192c34c1efad89a369870eff0da0b708ce9bb/packages/agent-core-v2/docs/wire-manifest.d.ts) — 64 types in the released 2.2.0 manifest
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/472192c34c1efad89a369870eff0da0b708ce9bb/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/684bae9ea6a437f3bae98bba1dcb797a917d500b/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/684bae9ea6a437f3bae98bba1dcb797a917d500b/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/684bae9ea6a437f3bae98bba1dcb797a917d500b/apps/kimi-code/src/utils/git/git-status.ts)
+- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/684bae9ea6a437f3bae98bba1dcb797a917d500b/packages/agent-core-v2/docs/wire-manifest.d.ts) — 65 types in the released 2.3.1 manifest
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/684bae9ea6a437f3bae98bba1dcb797a917d500b/apps/kimi-code/src/tui/commands/registry.ts)
 
-Per-release baseline audit history (0.32.0 → 2.2.0, including the #3970
+Per-release baseline audit history (0.32.0 → 2.3.1, including the #3970
 prep) lives in
 [docs/capabilities-archive.md](docs/capabilities-archive.md). The sections
-below describe the current contract against the pinned 2.2.0 baseline; new
+below describe the current contract against the pinned 2.3.1 baseline; new
 release audits are appended to the archive instead of growing this file.
 
 ## Footer coverage
@@ -40,7 +44,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 2.2.0 | HUD reviewed branch | Status |
+| Official line-1 slot or state | Upstream 2.3.1 | HUD reviewed branch | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
 | plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
@@ -51,7 +55,7 @@ does not need to be redrawn by the command.
 | background Shell | `[N task(s) running]` for running `process` / `bash-*` tasks | Reduces main-wire `task.started` / `task.terminated` and reconciles `tasks/<taskId>.json` sidecars; renders the same badge between model and cwd | covered — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) closed |
 | background Agent | `[N agent(s) running]` for running `agent` tasks | Same reducer; `agent` kind is counted and badged separately; a lost-then-resumed agent counts while its own wire stays fresh — [KI-15](KNOWN_ISSUES.md#ki-15-a-resumed-background-agent-was-invisible-to-the-task-badges) | covered — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) closed |
 | cwd | home-aware path shortened to at most three segments | Normal shows only `basename(cwd)`; compact omits cwd | intentional degradation |
-| Git | branch, diff `+N/-N` or `±`, ahead/behind, and linked PR number | Payload branch when the host has one, else the HUD's own cached HEAD read, plus a synchronous dirty check — rendered as `git:(branch*)` | degraded — [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer); the HEAD fallback is a variant whose prep target (upstream PR #4201) is merged upstream but absent from the released 2.2.0 tag, so on 2.2.0 it stays off the normal rendering path (it can still fire when the host's git read fails or times out); HUD probe avoids filter-capable worktree conversion ([KI-20](KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters)) |
+| Git | branch, diff `+N/-N` or `±`, ahead/behind, and linked PR number, all from an asynchronous Git status cache | Payload branch when the host has one, else the HUD's own cached HEAD read, plus a synchronous dirty check — rendered as `git:(branch*)` | degraded — [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer); since 2.3.1 the host fills `gitBranch` from a cached async read (30 s status TTL, 2 s HEAD poll, 2 s spawn timeout), so a first-frame `null` is the normal state and the HUD's own HEAD read is a regular display variant rather than a fallback for a failed host read; a payload branch always wins, and a detached HEAD or non-repository still renders no branch; HUD probe avoids filter-capable worktree conversion ([KI-20](KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters)) |
 | rotating tips | width-aware, weighted 10-second rotation | omitted | intentional omission |
 | tool-output shortcut | fixed `ctrl+o expand` / `ctrl+o collapse` moves to line 2 when a custom command owns line 1 | host draws it subject to width and higher-priority hints | host-owned, preserved |
 | Context and transient hint | context percentage and exact current/max tokens; transient hint at left | still rendered by the host on line 2 | host-owned, preserved; the reported value follows `[token_counting]` strategy |
@@ -65,7 +69,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 2.2.0. HUD installation, configuration, and lifecycle
+built into Kimi Code 2.3.1. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 
@@ -124,7 +128,10 @@ the observable `subagent.cancelled` mirror, and in PR
 manifest-registered entries (59 → 64), so they survive session resume;
 `subagent.completed` thereby persists a `usage` block and `contextTokens`,
 which must never enter the session usage ledger (only `usage.record` feeds
-it). The
+it). In 2.3.1 the manifest grows again, 64 → 65, with
+`changeNotifier.snapshot` (`agentId`, `agentsMdHash`, `agentsMdFiles`,
+`skillsHash`, `subagentNames`, optional `modelPool`) as a change-notifier
+blob state; the HUD has no projection for it. The
 physical schema stays append-only `{type, …payload, time}` lines, and every
 HUD reducer gates on exact known types, so these records fold as no-ops; the
 raw-journal versus active-chain boundary is tracked in
@@ -132,7 +139,7 @@ raw-journal versus active-chain boundary is tracked in
 
 | Source | Available information | Current use | Unexposed capability / constraint |
 |---|---|---|---|
-| status-line payload | full cwd, context ratio, current/max context tokens, session ID, host version, and a nullable branch | model/mode/cwd/branch display; session ID locates wire data; Context stays on host line 2; host version persists into metrics state for compatibility gating | host version is available for diagnostics; full cwd is deliberately shortened; context values follow `[token_counting]` strategy; duplicating Context on line 1 adds little value; a null `gitBranch` is filled from the HUD's own HEAD read ([KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer)) |
+| status-line payload | full cwd, context ratio, current/max context tokens, session ID, host version, and a nullable branch | model/mode/cwd/branch display; session ID locates wire data; Context stays on host line 2; host version persists into metrics state for compatibility gating | host version is available for diagnostics; full cwd is deliberately shortened; context values follow `[token_counting]` strategy; duplicating Context on line 1 adds little value; the host fills `gitBranch` from its async Git cache since 2.3.1, so a first-frame `null` is expected and the HUD's own HEAD read fills it ([KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer)) |
 | `step.end.usage` | `inputOther`, `inputCacheRead`, `inputCacheCreation`, `output` per model step | output + stream duration derive TPS; the three input fields derive Cache | not added to the cost ledger because `usage.record` duplicates the same request usage with a model identity |
 | Cache reducer state | exact session-cumulative `readTokens` and `inputTokens` plus their ratio | renders only rounded `Cache N%` | exact `Cache N% (read/input)` is available without new wire parsing; token counts were removed with the full layout in HUD 0.6.0 |
 | `usage.record` | the same four usage counters, model, and optional session/turn scope | a dedicated all-agent cursor accumulates model-scoped session totals for supported DeepSeek / OpenAI / Anthropic local cost estimates | cursor and content-free counters persist; the estimate remains hidden until every visible wire is caught up and every nonzero row belongs to the active provider, and must never also add duplicate `step.end` usage |
@@ -141,10 +148,11 @@ raw-journal versus active-chain boundary is tracked in
 | task records | task ID, kind, status, timestamps, timeout, plus kind-specific process/agent details | the two running counts (`tasks.bash` / `tasks.agents`) | command, PID, description, subagent type, stop reason, and output tail stay out of the footer; they belong in task/debug views |
 | `subagent.spawned` model fields | display-normalized model alias and effective thinking effort per subagent (optional, added upstream 0.34.0) | not rendered | deliberately not shown: the footer stays aggregated, consistent with the fleet-speed presentation; a task/debug view could expose per-subagent model and effort |
 | compaction records | begin/end timing; compaction records also carry message counts and summaries | live and last compaction duration | compaction count/message count could support diagnostics; summaries are content and should remain hidden |
-| Git commands | diff stats, upstream divergence, PR number and URL | dirty boolean only, collected with a bounded cross-process 15-second per-cwd cache and `GIT_OPTIONAL_LOCKS=0` | full diff/upstream/PR parity still requires richer persistent facts and async PR lookup |
+| Git commands | diff stats, upstream divergence, PR number and URL | dirty boolean only, collected with a bounded cross-process 15-second per-cwd cache and `GIT_OPTIONAL_LOCKS=0` | full diff/upstream/PR parity still requires richer persistent facts and async PR lookup; the host's own `git-status.ts` became asynchronous in 2.3.1 (30 s status TTL, 2 s HEAD poll, 2 s spawn timeout), which is why a first-frame payload branch can be absent |
 | quota cache | schema-v3 cache tagged with a non-reversible `contextKey` (credential slot + endpoint + credential-content digest), plus reported `usedRatio`, `resetAt`, and `fetchedAt` for known 5h, weekly, and monthly windows; legacy payloads retain exact `used`/`limit` | percentage, bar, and reset countdown; stale-usable figures dim, gaining a `[stale]` marker past the 1h mark | ratio entries carry no absolute units; v1/v2 caches are invalidated and refreshed; unknown quota windows and booster-wallet facts are not rendered; do not relabel subscription quota as token billing or API balance; only a cache matching the config's current context is shown, and any credential-file change invalidates conservatively (see [KI-17](KNOWN_ISSUES.md#ki-17-same-slot-credential-changes-invalidate-quota-conservatively)) |
 | provider-usage cache | provider, one-way SHA-256 credential fingerprint, `fetchedAt`, plus normalized currency balances (balance kind) or labeled usage windows with `usedRatio`/`resetAt` (windows kind) | the active adapter's fact — a `Label Balance` amount or `Label <window>` usage bars — composing with the independent local Session Cost fact; stale fact text is dimmed | only the active credential's cache is read; API keys never enter cache, filenames, logs, or output; a payload that yields no clean fact is `invalid` and never overwrites the last good cache; the GLM CN balance fallback carries no granted/topped-up split because the report's recharge and give amounts are lifetime totals |
 | model/profile config | model alias, provider, provider base URL/API key, thinking effort; potentially profile/tool metadata | an exact `managed:kimi-code` provider gates Kimi quota; provider-usage adapters are selected by the provider's official `base_url` host, never by its name, and the provider name only names the cache bucket; unknown attribution hides all quota/provider usage; official direct OpenAI/Anthropic base plus model ID selects a local pricing contract; thinking suffix | provider attribution falls back from the wire alias to the payload display string, and a display name or model id shared across providers fails closed (nothing shown) instead of guessing; each provider's credential is read only inside its own adapter; local cost estimation sends no credential; provider/profile remain available for non-secret diagnostics |
+| `[models."<alias>".upgrade]` | per-alias registry migration metadata added in 2.3.1: `model`, `migration_markdown`, optional `retirement_at` (the config table is a nested subtable like `[models."<alias>".overrides]`) | not rendered | migration copy and retirement dates are host-registry content, not footer material; the HUD keeps reading only `provider`/`model`/`display_name`/capability/effort keys from the same table, and a sibling `.upgrade` subtable does not truncate them |
 | upstream tip table | tip text, priority, solo/pair behavior | unused | it can be copied only with an explicit sync/drift strategy; it is not present in payload or wire data |
 
 ## Token meanings

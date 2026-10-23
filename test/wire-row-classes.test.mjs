@@ -407,8 +407,10 @@ const SCENARIOS = [
      * mirror records — spawned / started / completed / failed / cancelled —
      * to durable, manifest-registered records (59 → 64 entries), so they now
      * survive session resume. The PR first shipped in the 2.1.0 release tag
-     * (peeled `52437299ff78`) and the count is unchanged at the 2.2.0 baseline
-     * (peeled `472192c34c`). Like every non-reduced record class they must
+     * (peeled `52437299ff78`); the count held at the 2.2.0 baseline (peeled
+     * `472192c34c`) and reached 65 at the 2.3.1 baseline (peeled
+     * `684bae9ea6`) with `changeNotifier.snapshot` (see that scenario). Like
+     * every non-reduced record class they must
      * fold as no-ops: the HUD has no subagent-lifecycle projection, and the
      * usage block `subagent.completed` now carries durably must never enter
      * the session usage ledger (only `usage.record` feeds it).
@@ -471,6 +473,57 @@ const SCENARIOS = [
       assert.ok(Number.isFinite(completed.usage?.inputOther));
       assert.ok(Number.isFinite(completed.contextTokens));
       assert.equal(typeof rows.find((row) => row.type === 'subagent.failed').error, 'string');
+    },
+    baselineReadings(metrics) {
+      assert.equal(metrics.tps, 30);
+    },
+  },
+  {
+    /**
+     * Kimi Code 2.3.1 grows the Event2 persisted manifest 64 → 65 with
+     * `changeNotifier.snapshot` (peeled `684bae9ea6`): `agentId`,
+     * `agentsMdHash`, `agentsMdFiles`, `skillsHash`, `subagentNames` and an
+     * optional `modelPool`, declared as the `changeNotifier.snapshot` blob
+     * state that `context.*` rows also write into. The HUD has no change
+     * notifier projection, so the record must fold as a no-op and must not
+     * reach metrics, persisted state or the rendered line.
+     */
+    label: 'changeNotifier.snapshot records',
+    fixture: 'wire-events-change-notifier-snapshot.jsonl',
+    fixtureTitle:
+      'fixture interleaves both changeNotifier.snapshot shapes into a normal session',
+    fold: 'noop',
+    foldTitle: 'processWireChunk folds changeNotifier.snapshot rows without touching the state',
+    baselineTitle:
+      'changeNotifier.snapshot rows leave metrics, state and render identical to baseline',
+    rowsUnder(wireText) {
+      return wireText.split('\n').filter((line) => line && line.includes('"changeNotifier.snapshot"'));
+    },
+    baseline(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && !line.includes('"changeNotifier.snapshot"'))
+        .join('\n') + '\n';
+    },
+    fixtureChecks(wireText, baselineText) {
+      const rows = this.rowsUnder(wireText).map((line) => JSON.parse(line).type);
+      assert.deepEqual(rows, ['changeNotifier.snapshot', 'changeNotifier.snapshot']);
+      // Stripping the two rows must reproduce the reference wire fixture
+      // byte-identically, so the comparison differs on exactly one axis.
+      assert.equal(baselineText, REFERENCE);
+      assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
+      const parsed = this.rowsUnder(wireText).map((line) => JSON.parse(line));
+      // Populated form: file map keys are workspace-relative names, never
+      // absolute paths, and the model pool maps subagent names to aliases.
+      assert.deepEqual(parsed[0].agentsMdFiles, { 'AGENTS.md': parsed[0].agentsMdHash });
+      assert.deepEqual(parsed[0].subagentNames, ['reviewer']);
+      assert.deepEqual(parsed[0].modelPool, { reviewer: 'kimi-code/k3' });
+      // Nullable form: every content-bearing field can be null.
+      assert.equal(parsed[1].agentsMdHash, null);
+      assert.equal(parsed[1].skillsHash, null);
+      assert.equal(parsed[1].subagentNames, null);
+      assert.equal(parsed[1].modelPool, undefined);
+      for (const row of parsed) assert.equal(row.agentId, 'main');
     },
     baselineReadings(metrics) {
       assert.equal(metrics.tps, 30);

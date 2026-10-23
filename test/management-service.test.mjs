@@ -123,3 +123,48 @@ test('install over this tool\'s own status line stays silent about replacement',
     nodeCommand('/tmp/Kimi HUD/bin/kimi-hud.mjs'),
   );
 });
+
+test('a 2.3.x tui.toml keeps auto_session_title through install and uninstall', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-management-'));
+  const paths = {
+    configPath: path.join(root, 'hud', 'config.json'),
+    tuiTomlPath: path.join(root, 'kimi', 'tui.toml'),
+    configTomlPath: path.join(root, 'kimi', 'config.toml'),
+  };
+  fs.mkdirSync(path.dirname(paths.tuiTomlPath), { recursive: true });
+  // Shape written by Kimi Code 2.3.x: auto_session_title is always present and
+  // defaults to true, while the legacy disable_feedback_survey opt-out is only
+  // rewritten when it already existed, so it is absent here.
+  const original = [
+    'theme = "auto"',
+    'tui_mode = "regular"',
+    'auto_session_title = true # false stops the TUI from auto-generating a session title after the first turn',
+    '',
+    '[editor]',
+    'command = ""',
+    '',
+  ].join('\n');
+  fs.writeFileSync(paths.tuiTomlPath, original);
+  const stdout = { write() { return true; } };
+  const options = {
+    paths,
+    scriptPath: '/tmp/Kimi HUD/bin/kimi-hud.mjs',
+    hookScriptPath: '/tmp/Kimi HUD/hooks/sync-status-line.mjs',
+    stdout,
+  };
+
+  installHud(options);
+  const installed = fs.readFileSync(paths.tuiTomlPath, 'utf8');
+  assert.ok(installed.includes('auto_session_title = true'));
+  assert.doesNotMatch(installed, /disable_feedback_survey/);
+  assert.equal(
+    inspectStatusLineCommand(installed).value,
+    nodeCommand('/tmp/Kimi HUD/bin/kimi-hud.mjs'),
+  );
+
+  installHud(options);
+  assert.equal(fs.readFileSync(paths.tuiTomlPath, 'utf8'), installed);
+
+  uninstallHud(options);
+  assert.equal(fs.readFileSync(paths.tuiTomlPath, 'utf8'), original);
+});

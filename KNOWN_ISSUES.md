@@ -1,8 +1,8 @@
 # Known issues
 
-- Last verified: 2026-10-15
+- Last verified: 2026-10-23
 - HUD behavior baseline: `v0.8.5` (`bd18368`)
-- Kimi Code baseline: `2.2.0` (`472192c34c1efad89a369870eff0da0b708ce9bb`)
+- Kimi Code baseline: `2.3.1` (`684bae9ea6a437f3bae98bba1dcb797a917d500b`)
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -62,14 +62,16 @@ The HUD renders a branch plus a dirty `*`. It does not render upstream
 diff counts, ahead/behind, or linked PR information.
 
 Branch provenance is a documented variant: the payload value wins whenever
-the host supplies one. Through 2.2.0 the host reads `gitBranch` synchronously
-from its own 5s/15s status cache, and upstream PR #4201 (merged 2026-10-14,
-not part of the 2.2.0 tag) makes that path asynchronous, so the first frame
-after startup can carry `null` even inside a repository. In that case the HUD
-reads `.git/HEAD` itself, but only after a filesystem-only check proves a
-symbolic branch exists — a detached HEAD or a non-repository still renders
-nothing, matching the host. Until #4201 ships, the fallback only fires when
-the host's synchronous git read fails or times out (payload `null`); it never
+the host supplies one. Through 2.2.0 the host read `gitBranch` synchronously
+from its own 5s/15s status cache. Starting with 2.3.1, upstream PR #4201 makes
+that path asynchronous: `getStatus()` only reads a cache, and the first read,
+a TTL expiry, a HEAD change or an explicit refresh schedule a background
+`git status` (30 s status TTL, 2 s HEAD poll, 2 s spawn timeout). The first
+frame after startup therefore carries `null` even inside a repository, so the
+HUD's own HEAD read is a regular display path rather than a fallback for a
+failed host read. It runs whenever the payload carries no branch, but only
+after a filesystem-only check proves a symbolic branch exists — a detached
+HEAD or a non-repository still renders nothing, matching the host. It never
 overrides a host-supplied branch.
 
 The dirty probe itself is now bounded by a cross-process 15-second, 64-cwd
@@ -264,7 +266,7 @@ Status: partially verified (Windows row recorded 2026-09-18)
 
 Affected area: Kimi Code fullscreen TUI (first reviewed at 0.36.0–0.38.0; 2.1.0 promoted it to the persistent `tui_mode` preference)
 
-Entry procedure at the 2.2.0 baseline: set `tui_mode = "fullscreen"` in
+Entry procedure at the 2.3.1 baseline: set `tui_mode = "fullscreen"` in
 `~/.kimi-code/tui.toml`, or pick the fullscreen layout in `/settings`; both
 take effect after restarting Kimi Code. The pre-2.1.0 switch
 `KIMI_CODE_TUI_FULL_SCREEN=1` is no longer part of the upstream documentation —
@@ -317,6 +319,14 @@ across the 2.1.0 → 2.2.0 range, see
 [docs/upstream-2.2.0-review.md](docs/upstream-2.2.0-review.md)). The entry
 procedure above is the current one. No live fullscreen frame is recorded for
 2.1.0, 2.1.1 or 2.2.0, so the Windows row still describes 2.0.0 only.
+
+2.3.1 review: `status-line-command.ts` is byte-identical at both endpoints
+(blob `6482a4ac7c`), and `footer.ts` changed only in Git-cache lifecycle —
+`gitCache.dispose()` plus a `refreshGitStatus()` entry point — so fullscreen
+still cannot change the status-line payload, the first-line contract or line-2
+ownership. The 2.3.x line also makes the host's Git read asynchronous (see
+KI-2), which is invisible to fullscreen layout. No live 2.3.x fullscreen frame
+is recorded either, so the Windows row still describes 2.0.0 only.
 
 Still open: resize behavior, `/reload-tui`, and failure-frame fallback are
 not yet exercised. The classic conhost window could not be produced on this
@@ -755,7 +765,7 @@ countdowns, freshness and expiry. No real credentials or user data were used.
 
 ## KI-20: Git status probe still runs repository-configured clean filters
 
-Status: fixed in v0.8.5 (PR #50); real 2.2.0 host acceptance pending
+Status: fixed in v0.8.5 (PR #50); real host acceptance pending (2.2.0 and 2.3.x)
 
 Affected area: Git dirty probe / untrusted workspace execution
 
@@ -773,6 +783,13 @@ workspace before any trust decision and cannot rely on the host's current
 stance. The 2.2.0 range re-introduced a trust surface in the opposite
 direction (`KIMI_CODE_TRUST_WORKSPACE`, `#4059`), which the HUD does not read
 or set.
+
+2.3.x note: the host moved its workspace-trust reads and writes into
+`packages/agent-core-v2/src/workspace/workspaceTrust/workspaceTrustStore.ts`
+(same `KIMI_CODE_TRUST_WORKSPACE` surface, no new HUD input), and 2.3.1 adds a
+cross-process session-lock directory under `<KIMI_CODE_HOME>/locks/sessions/`.
+The HUD reads neither the trust store nor the lock directory, so both remain
+outside its probe boundary and its pre-trust stance is unchanged.
 
 Evidence (2026-09-23): in an isolated temporary repository, a modified tracked
 file matched `*.txt filter=probe`; `.git/config` mapped `filter.probe.clean`
@@ -797,7 +814,7 @@ Acceptance criteria:
 - [x] isolated regression fails if either filter runs;
 - [x] bounded, silent fallback and a shared 150ms probe budget;
 - [x] keep branch/dirty output while the probe uses index metadata only;
-- [ ] trigger the relevant paths in a real 2.2.0 host session and record the result.
+- [ ] trigger the relevant paths in a real host session (2.2.0 or 2.3.x) and record the result.
 
 ## KI-21: Provider balance does not resolve `api_key_env`
 

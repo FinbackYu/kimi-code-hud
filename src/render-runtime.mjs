@@ -207,13 +207,12 @@ export async function renderStatusLine({
     if (payloadBranch) {
       gitDirty = readStatus(payload.cwd, gitOptions).dirty;
     } else if (typeof payload.cwd === 'string' && payload.cwd !== '') {
-      // A host-side Git cache can be cold on the first frame once upstream
-      // #4201 lands; that PR is merged upstream but has not shipped in a
-      // release (it is absent from the 2.2.0 tag), so this branch is prep and
-      // stays inert while the payload carries a branch. A null payload branch
-      // then means either "no branch to show" or "not known yet": the HUD
-      // reads HEAD itself, but only after the filesystem-only check proves a
-      // symbolic branch exists.
+      // Since upstream PR #4201 shipped in 2.3.0, the host's Git status cache
+      // is asynchronous: a first frame in a repository legitimately carries a
+      // null branch. A null payload branch therefore means either "no branch
+      // to show" or "not known yet": the HUD reads HEAD itself, but only after
+      // the filesystem-only check proves a symbolic branch exists. A payload
+      // branch always wins over this read.
       const readHead = dependencies.readHeadBranch || readHeadBranch;
       if (readHead(payload.cwd, env)) {
         const status = readStatus(payload.cwd, gitOptions);

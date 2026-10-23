@@ -88,8 +88,11 @@ Baseline delta (0.36.0 → 0.36.1):
 - New `event.plugin.changed` / `event.capability.changed` event variants and
   independent approval/question IDs are ignored by the HUD's known-event
   reducers. Background task previews are sanitized upstream before display.
-- Experimental automatic session titles are default-off and outside the HUD
-  contract; the HUD does not consume or persist session titles.
+- Experimental automatic session titles were default-off at 0.36.1 and outside
+  the HUD contract; the HUD does not consume or persist session titles.
+  (Superseded in 2.3.0: `auto_session_title` now defaults to `true` and the TUI
+  writes it into `tui.toml`; it stays host-owned and the HUD still neither reads
+  nor persists session titles — see the 2.2.0 → 2.3.1 delta below.)
 
 Baseline delta (0.36.1 → 0.37.2):
 
@@ -473,3 +476,59 @@ Baseline delta (2.1.0 → 2.2.0), reviewed 2026-10-15:
   the 2.2.0 tag, so its behaviour is not part of this baseline. The HUD's
   null-branch HEAD fallback is prep for it; on 2.2.0 it stays off the normal
   rendering path and only fires when the host's git read fails or times out.
+
+Baseline delta (2.2.0 → 2.3.1), reviewed 2026-10-23:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.3.1`, tag object
+  `71a07ca316d31cea0db4adbf6a032e8bda8143f9`, peeled commit
+  `684bae9ea6a437f3bae98bba1dcb797a917d500b`. The range is not linear: the
+  merge-base `c69bd6c5a0` is behind both endpoints, and the 37 commits / 481
+  changed paths (+27,446/−8,387) include the 2.3.0 release.
+  [Full review](upstream-2.3.1-review.md).
+- PR #4201 (asynchronous footer Git cache) ships in this range. `git-status.ts`
+  now exposes a cache whose `getStatus()` only reads state: the first read, a
+  30 s status TTL expiry, a HEAD change (2 s poll) or an explicit `refresh()`
+  schedules a background `git status`, with a 2 s spawn timeout replacing the
+  former 500 ms one. A first-frame `gitBranch: null` is therefore the normal
+  state in a repository, so the HUD's HEAD fallback (issue #54) is on the
+  regular rendering path; a payload branch still wins, and a detached HEAD or
+  non-repository still renders no branch. `footer.ts` changes only in Git-cache
+  lifecycle (`dispose()` on workDir change and `dispose()`, plus a
+  `refreshGitStatus()` entry point): no label, slot order or line-2 change.
+  `status-line-command.ts` is byte-identical (`6482a4ac7c`).
+- The Event2 persisted manifest grows 64 → 65 with
+  `changeNotifier.snapshot` (`agentId`, `agentsMdHash`, `agentsMdFiles`,
+  `skillsHash`, `subagentNames`, optional `modelPool`); the record also joins
+  the change-notifier state of `context.*` rows. Every HUD reducer gates on
+  exact known types, so it folds as a no-op; the row-class fixture suite gained
+  a positive fixture and a counterexample for it.
+- `tui.toml` key movement: `auto_session_title` is a new top-level key whose
+  default is `true` (the TUI always writes it), while `disable_feedback_survey`
+  is kept only as a readable legacy key and is no longer written unless it was
+  already present (`removeLegacySurveySetting` clears it on migration). Both
+  changes are host-owned; the HUD only adds or removes `[status_line]`'s
+  `command`, and install/uninstall round-trips a 2.3.x `tui.toml` unchanged.
+- `config.toml` gains `[models."<alias>".upgrade]` (`model`,
+  `migration_markdown`, optional `retirement_at`) as a nested subtable next to
+  the existing `[models."<alias>".overrides]`, a top-level
+  `disable_feedback_survey` mirror of the TUI legacy key, and
+  `[mcp].default_deferred` for on-demand MCP tools. Persisted model keys
+  (`support_efforts`, `default_effort`, `capabilities`, `max_context_size`,
+  `display_name`) and the `managed:kimi-code` provider constant are unchanged,
+  so provider attribution and the quota gate keep working; the HUD reads none
+  of the new keys.
+- The managed `/models` ingestion switches to the unified schema
+  (`limit.context`, `modalities.input`, `reasoning.{type,effort}`), but the
+  aliases written into `config.toml` and the `capabilitiesForModel` value set
+  are unchanged, so this is an ingestion-layer change only.
+- Workspace trust reads/writes move into `workspaceTrustStore.ts` (same
+  `KIMI_CODE_TRUST_WORKSPACE` surface), and a cross-process session-lock
+  directory appears at `<KIMI_CODE_HOME>/locks/sessions/`; wire rewrite/repair
+  now takes that lock. The HUD reads neither file, and its cursor already
+  detects a rewritten journal through size/inode/tail-digest fingerprints.
+- Unchanged seams, verified by blob identity or by absence from the 481-path
+  list: `status-line-command.ts`, the slash-command registry (43 entries),
+  `permission-mode.ts`, `thinking-config.ts`, `working-tips.ts`, the plugin
+  manifest/manager files, `managed-usage.ts`, `region.ts`, the usage/task/goal/
+  swarm/tower/compaction op files, and the `wire.jsonl` path plus `tasks/`
+  sidecar layout.
