@@ -143,9 +143,10 @@ export async function renderStatusLine({
       const readUsageCache = dependencies.readProviderUsageCache || readProviderUsageCache;
       const cachedUsage = readUsageCache(target);
       if (cachedUsage) {
-        const displayedBalance = cachedUsage.balances.find((item) => item.currency === 'CNY')
-          || cachedUsage.balances.find((item) => item.currency === 'USD')
-          || cachedUsage.balances[0];
+        const balances = Array.isArray(cachedUsage.balances) ? cachedUsage.balances : [];
+        const displayedBalance = balances.find((item) => item.currency === 'CNY')
+          || balances.find((item) => item.currency === 'USD')
+          || balances[0];
         providerCurrency = displayedBalance?.currency || null;
         providerUsageFacts.push({
           ...cachedUsage,

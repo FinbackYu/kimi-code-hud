@@ -772,3 +772,104 @@ test('runtime renders config-derived effort muted until a wire row confirms', as
   assert.ok(provisional.line.includes('\x1b[90m low\x1b[0m'), provisional.line);
   assert.ok(!provisional.line.includes('\x1b[90m high'), provisional.line);
 });
+
+test('runtime renders cached OpenCode Go usage windows for the aliased model', async () => {
+  const paths = makePaths();
+  const now = Date.parse('2026-10-23T10:00:00Z');
+  const configText = `
+[providers.opencode-go]
+type = "openai"
+base_url = "https://opencode.ai/inference/go/openai/v1"
+api_key = "redacted-opencode-credential"
+
+[models."opencode-go/deepseek-v4.1-flash"]
+provider = "opencode-go"
+model = "deepseek-v4.1-flash"
+display_name = "DeepSeek V4.1 Flash"
+`;
+  fs.writeFileSync(paths.configTomlPath, configText);
+  const target = resolveProviderUsageTarget({
+    provider: 'opencode-go', configText, providerUsageDir: paths.providerUsageDir,
+  });
+  writeProviderUsageCache({
+    kind: 'windows',
+    label: 'OpenCode Go',
+    windows: [
+      { label: '5h', usedRatio: 0.01, resetAt: '2026-10-23T12:30:21.000Z' },
+      { label: '7d', usedRatio: 0.04, resetAt: '2026-10-26T00:00:00.000Z' },
+      { label: 'mo', usedRatio: 0.02, resetAt: null },
+    ],
+  }, target, { now });
+  let usageRefresh = null;
+  const result = await renderStatusLine({
+    scriptPath: '/tmp/kimi-hud.mjs',
+    paths,
+    now,
+    clock: () => 0,
+    env: { NO_COLOR: '1' },
+    dependencies: {
+      managedPluginDisabled: () => false,
+      readPayload: async () => ({ ...payload(), model: 'DeepSeek V4.1 Flash', gitBranch: null }),
+      getMetrics: () => ({ ...metrics(), modelAlias: 'opencode-go/deepseek-v4.1-flash' }),
+      ensureFreshQuota: () => {},
+      ensureFreshProviderUsage: (options) => { usageRefresh = options; },
+    },
+  });
+  assert.equal(usageRefresh.target.credentialFingerprint, target.credentialFingerprint);
+  assert.match(result.line, /OpenCode Go 5h [█ ]+1% ~2h30m · 7d [█ ]+4% ~2d14h · mo [█ ]+2%/);
+  assert.doesNotMatch(result.line, /Balance|quota/i);
+});
+
+test('runtime shows no provider usage when a shared display name is ambiguous', async () => {
+  const paths = makePaths();
+  const configText = `
+[providers.deepseek]
+type = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key = "redacted-deepseek-credential"
+
+[providers.opencode-go]
+type = "openai"
+base_url = "https://opencode.ai/inference/go/openai/v1"
+api_key = "redacted-opencode-credential"
+
+[models."deepseek/deepseek-v4.1-flash"]
+provider = "deepseek"
+model = "deepseek-flash"
+display_name = "DeepSeek V4.1 Flash"
+
+[models."opencode-go/deepseek-v4.1-flash"]
+provider = "opencode-go"
+model = "deepseek-v4.1-flash"
+display_name = "DeepSeek V4.1 Flash"
+`;
+  fs.writeFileSync(paths.configTomlPath, configText);
+  const deepseekTarget = resolveProviderUsageTarget({
+    provider: 'deepseek', configText, providerUsageDir: paths.providerUsageDir,
+  });
+  writeProviderUsageCache({
+    kind: 'balance',
+    label: 'DeepSeek',
+    available: true,
+    balances: [{ currency: 'CNY', total: 110, granted: 10, toppedUp: 100 }],
+  }, deepseekTarget, { now: 1_000 });
+  let usageResolutions = 0;
+  const result = await renderStatusLine({
+    scriptPath: '/tmp/kimi-hud.mjs',
+    paths,
+    now: 1_000,
+    clock: () => 0,
+    env: { NO_COLOR: '1' },
+    dependencies: {
+      managedPluginDisabled: () => false,
+      // No wire alias this frame: the payload display string is the only
+      // signal, and it matches both providers' tables.
+      readPayload: async () => ({ ...payload(), model: 'DeepSeek V4.1 Flash', gitBranch: null }),
+      getMetrics: () => ({ ...metrics(), modelAlias: null }),
+      ensureFreshQuota: () => {},
+      resolveProviderUsageTarget: () => { usageResolutions += 1; return null; },
+    },
+  });
+  assert.equal(usageResolutions, 0);
+  assert.doesNotMatch(result.line, /Balance|OpenCode Go/);
+});

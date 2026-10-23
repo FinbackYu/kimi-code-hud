@@ -14,10 +14,12 @@ import {
   ensureFreshProviderUsage,
   isProviderUsageStale,
   parseDeepSeekBalance,
+  parseOpenCodeGoUsage,
   readProviderUsageCache,
   refreshProviderUsage,
   releaseProviderUsageLock,
   requestDeepSeekUsage,
+  requestOpenCodeGoUsage,
   resolveProviderUsageTarget,
   writeProviderUsageCache,
 } from '../src/provider-usage.mjs';
@@ -606,4 +608,141 @@ test('a state file tagged for another fingerprint never blocks this account', ()
   });
   assert.equal(ok, true);
   assert.equal(spawns, 1);
+});
+
+const OPENCODE_GO_RESPONSE = {
+  usage: {
+    rolling: { status: 'ok', percent: 1, resetsAt: '2026-10-23T12:30:21.000Z' },
+    weekly: { status: 'ok', percent: 4, resetsAt: '2026-10-26T00:00:00.000Z' },
+    monthly: { status: 'ok', percent: 2, resetsAt: '2026-11-20T16:22:12.000Z' },
+  },
+};
+
+function openCodeGoConfig({ baseUrl = 'https://opencode.ai/inference/go/openai/v1' } = {}) {
+  return `
+[providers.opencode-go]
+type = "openai"
+base_url = "${baseUrl}"
+api_key = "redacted-opencode-credential"
+`;
+}
+
+function openCodeGoTargetFor(paths, configText = openCodeGoConfig()) {
+  return resolveProviderUsageTarget({
+    provider: 'opencode-go',
+    configText,
+    providerUsageDir: paths.providerUsageDir,
+  });
+}
+
+test('parseOpenCodeGoUsage normalizes rolling/weekly/monthly percentage windows', () => {
+  assert.deepEqual(parseOpenCodeGoUsage(OPENCODE_GO_RESPONSE), {
+    kind: 'windows',
+    label: 'OpenCode Go',
+    windows: [
+      { label: '5h', usedRatio: 0.01, resetAt: '2026-10-23T12:30:21.000Z' },
+      { label: '7d', usedRatio: 0.04, resetAt: '2026-10-26T00:00:00.000Z' },
+      { label: 'mo', usedRatio: 0.02, resetAt: '2026-11-20T16:22:12.000Z' },
+    ],
+  });
+  const noMonthly = parseOpenCodeGoUsage({ usage: {
+    rolling: { percent: 10, resetsAt: '2026-10-23T12:30:21.000Z' },
+    weekly: { percent: 20, resetsAt: '2026-10-26T00:00:00.000Z' },
+  } });
+  assert.equal(noMonthly.windows.length, 2);
+  // An over-limit window shows the real figure (the bar clamps visually),
+  // matching the managed quota segment's >100% display.
+  const overLimit = parseOpenCodeGoUsage({ usage: {
+    rolling: { percent: 250 },
+    weekly: { percent: 20 },
+  } });
+  assert.equal(overLimit.windows[0].usedRatio, 2.5);
+  assert.equal(overLimit.windows[0].resetAt, null);
+});
+
+test('parseOpenCodeGoUsage refuses payloads without the rolling/weekly contract', () => {
+  assert.equal(parseOpenCodeGoUsage(null), null);
+  assert.equal(parseOpenCodeGoUsage({}), null);
+  assert.equal(parseOpenCodeGoUsage({ usage: null }), null);
+  assert.equal(parseOpenCodeGoUsage({ usage: { rolling: { percent: 1 } } }), null);
+  assert.equal(parseOpenCodeGoUsage({ usage: {
+    rolling: { percent: -1 },
+    weekly: { percent: 4 },
+  } }), null);
+  assert.equal(parseOpenCodeGoUsage({ usage: {
+    rolling: { percent: 'high' },
+    weekly: { percent: 4 },
+  } }), null);
+});
+
+test('OpenCode Go target resolution requires the official opencode.ai base URL', () => {
+  const paths = tempPaths();
+  const target = openCodeGoTargetFor(paths);
+  assert.equal(target.provider, 'opencode-go');
+  assert.equal(target.adapter, 'opencode-go');
+  assert.equal(Object.hasOwn(target, 'apiKey'), false);
+  assert.doesNotMatch(target.cachePath, /redacted|credential/);
+  assert.ok(openCodeGoTargetFor(paths, openCodeGoConfig({ baseUrl: 'https://opencode.ai' })));
+  assert.equal(
+    openCodeGoTargetFor(paths, openCodeGoConfig({ baseUrl: 'https://opencode.ai.evil/v1' })),
+    null,
+  );
+  assert.equal(
+    openCodeGoTargetFor(paths, openCodeGoConfig({ baseUrl: 'https://proxy.example/v1' })),
+    null,
+  );
+  assert.equal(
+    openCodeGoTargetFor(paths, openCodeGoConfig({ baseUrl: 'http://opencode.ai/v1' })),
+    null,
+  );
+});
+
+test('OpenCode Go windows cache round-trips through the per-account files', () => {
+  const paths = tempPaths();
+  const target = openCodeGoTargetFor(paths);
+  const usage = parseOpenCodeGoUsage(OPENCODE_GO_RESPONSE);
+  assert.equal(writeProviderUsageCache(usage, target, { now: 1_000 }), true);
+  const cached = readProviderUsageCache(target);
+  assert.equal(cached.kind, 'windows');
+  assert.deepEqual(cached.windows, usage.windows);
+  assert.equal(cached.fetchedAt, 1_000);
+});
+
+test('OpenCode Go request classifies responses and refuses non-official targets', async () => {
+  let request = null;
+  const success = await requestOpenCodeGoUsage({
+    apiKey: API_KEY,
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return { ok: true, status: 200, json: async () => OPENCODE_GO_RESPONSE };
+    },
+  });
+  assert.equal(success.status, PROVIDER_USAGE_RESULT.SUCCESS);
+  assert.equal(success.parsed.kind, 'windows');
+  assert.equal(success.parsed.windows[0].label, '5h');
+  assert.equal(request.url, 'https://opencode.ai/zen/go/v1/usage');
+  assert.equal(request.options.headers.Authorization, `Bearer ${API_KEY}`);
+
+  let called = false;
+  const refused = await requestOpenCodeGoUsage({
+    apiKey: API_KEY,
+    url: 'https://proxy.example/zen/go/v1/usage',
+    fetchImpl: async () => { called = true; },
+  });
+  assert.equal(refused.status, PROVIDER_USAGE_RESULT.INVALID);
+  assert.equal(called, false);
+
+  for (const [status, expected] of [
+    [401, PROVIDER_USAGE_RESULT.UNAUTHORIZED],
+    [403, PROVIDER_USAGE_RESULT.UNAUTHORIZED],
+    [429, PROVIDER_USAGE_RESULT.TRANSIENT],
+    [500, PROVIDER_USAGE_RESULT.TRANSIENT],
+    [400, PROVIDER_USAGE_RESULT.INVALID],
+  ]) {
+    const result = await requestOpenCodeGoUsage({
+      apiKey: API_KEY,
+      fetchImpl: async () => ({ ok: false, status }),
+    });
+    assert.equal(result.status, expected);
+  }
 });

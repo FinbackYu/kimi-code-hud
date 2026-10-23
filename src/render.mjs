@@ -484,6 +484,33 @@ function cacheSegment({ metrics }) {
   return `Cache ${Math.round(cache.hitRate * 100)}%`;
 }
 
+/**
+ * One ratio window as `5h ▓▓░░ 31% ~2h18m`: the gauge bar (dropped in compact
+ * layout, where the percentage takes over the level-color signal), the used
+ * percentage, and the reset countdown. Stale windows dim as a whole. Shared
+ * by the managed-quota segment and provider usage windows so every ratio
+ * window renders identically regardless of its source.
+ */
+function formatUsageWindow({ label, entry, stale, layout, color, useLevelColor, now, C }) {
+  const fraction = quotaFraction(entry);
+  if (fraction === null) return null;
+  const pct = `${Math.round(fraction * 100)}%`;
+  const countdown = formatCountdown(entry.resetAt, now);
+  const suffix = countdown ? ` ${countdown}` : '';
+  const dim = (text) => colorize(color, C.muted, text);
+  if (layout === 'compact') {
+    const level = numberLevelColor(fraction, C);
+    const text = `${label} ${level && useLevelColor ? colorize(color, level, pct) : pct}${suffix}`;
+    return stale ? dim(text) : text;
+  }
+  if (stale) {
+    // The dim gauge is self-styled, so its resets cut a whole-segment wrap
+    // short — label and trailing figures dim around it instead.
+    return `${dim(`${label} `)}${bar(fraction, color, C, { dim: true })}${dim(` ${pct}${suffix}`)}`;
+  }
+  return `${label} ${bar(fraction, useLevelColor, C)} ${pct}${suffix}`;
+}
+
 function quotaSegment({ layout, quota, color, now, C }) {
   if (!quota) return null;
   // The age contract lives in quota.mjs so rendering and the refresh
@@ -506,26 +533,8 @@ function quotaSegment({ layout, quota, color, now, C }) {
   const useLevelColor = color && !stale;
   const dim = (text) => colorize(color, C.muted, text);
   const parts = [];
-  const formatWindow = (label, entry) => {
-    const fraction = quotaFraction(entry);
-    if (fraction === null) return null;
-    const pct = `${Math.round(fraction * 100)}%`;
-    const countdown = formatCountdown(entry.resetAt, now);
-    const suffix = countdown ? ` ${countdown}` : '';
-    // Compact drops the bar, so the percentage itself takes over the
-    // usage-level signal the bar color carries in the normal layout.
-    if (layout === 'compact') {
-      const level = numberLevelColor(fraction, C);
-      const text = `${label} ${level && useLevelColor ? colorize(color, level, pct) : pct}${suffix}`;
-      return stale ? dim(text) : text;
-    }
-    if (stale) {
-      // The dim gauge is self-styled, so its resets cut a whole-segment
-      // wrap short — label and trailing figures dim around it instead.
-      return `${dim(`${label} `)}${bar(fraction, color, C, { dim: true })}${dim(` ${pct}${suffix}`)}`;
-    }
-    return `${label} ${bar(fraction, useLevelColor, C)} ${pct}${suffix}`;
-  };
+  const formatWindow = (label, entry) =>
+    formatUsageWindow({ label, entry, stale, layout, color, useLevelColor, now, C });
   for (const window of Array.isArray(quota.windows) ? quota.windows : []) {
     const text = formatWindow(sanitizeTerminalText(window?.label), window);
     if (text) parts.push(text);
@@ -537,7 +546,7 @@ function quotaSegment({ layout, quota, color, now, C }) {
   const total = quotaFraction(quota.monthly?.total);
   const code = quotaFraction(quota.monthly?.code);
   if (total !== null) {
-    let text = formatWindow('Monthly', quota.monthly.total);
+    let text = formatWindow('mo', quota.monthly.total);
     if (code !== null) {
       // monthCode is a share of monthTotal, not an independent allowance.
       // Follow the upstream breakdown's subtraction and floating-point clamp.
@@ -547,7 +556,7 @@ function quotaSegment({ layout, quota, color, now, C }) {
     }
     parts.push(text);
   } else if (code !== null) {
-    parts.push(formatWindow('Monthly code', quota.monthly.code));
+    parts.push(formatWindow('mo code', quota.monthly.code));
   }
   if (parts.length === 0) return null;
   const text = parts.join(stale ? dim(' · ') : ' · ');
@@ -605,6 +614,25 @@ function providerUsageFact(usage) {
       stale: false,
     };
   }
+  if (usage.kind === 'windows') {
+    if (!Array.isArray(usage.windows)) return null;
+    const windows = [];
+    for (const window of usage.windows) {
+      const ratio = Number(window?.usedRatio);
+      if (typeof window?.label !== 'string' || !Number.isFinite(ratio) || ratio < 0) continue;
+      windows.push({
+        label: sanitizeTerminalText(window.label),
+        usedRatio: ratio,
+        resetAt: typeof window.resetAt === 'string' ? window.resetAt : null,
+      });
+    }
+    if (windows.length === 0) return null;
+    return {
+      kind: 'windows', label,
+      windows,
+      stale: usage.stale === true,
+    };
+  }
   if (usage.kind !== 'balance' || !Array.isArray(usage.balances)) return null;
   let suffix;
   if (usage.available === false) {
@@ -624,7 +652,7 @@ function providerUsageFact(usage) {
   };
 }
 
-function providerUsageSegment({ providerUsage, color, C }) {
+function providerUsageSegment({ providerUsage, color, C, now, layout }) {
   const values = Array.isArray(providerUsage) ? providerUsage : [providerUsage];
   let facts = values.map(providerUsageFact).filter(Boolean);
   const costLabels = new Set(facts.filter((fact) => fact.kind === 'cost').map((fact) => fact.label));
@@ -636,11 +664,32 @@ function providerUsageSegment({ providerUsage, color, C }) {
   if (facts.length === 0) return null;
 
   let previousLabel = null;
-  return facts.map((fact) => {
+  const rendered = [];
+  for (const fact of facts) {
+    if (fact.kind === 'windows') {
+      // Ratio windows share the quota segment's gauge presentation: the brand
+      // leads once, then the windows join exactly like managed quota windows.
+      const parts = fact.windows.map((window) => formatUsageWindow({
+        label: window.label,
+        entry: window,
+        stale: fact.stale,
+        layout,
+        color,
+        useLevelColor: color && !fact.stale,
+        now,
+        C,
+      })).filter(Boolean);
+      if (parts.length === 0) continue;
+      const brand = fact.stale ? colorize(color, C.muted, fact.label) : fact.label;
+      rendered.push(fact.label === previousLabel ? parts.join(' · ') : `${brand} ${parts.join(' · ')}`);
+      previousLabel = fact.label;
+      continue;
+    }
     const text = fact.label === previousLabel ? fact.suffix : `${fact.label} ${fact.suffix}`;
     previousLabel = fact.label;
-    return fact.stale ? colorize(color, C.muted, text) : text;
-  }).join(' · ');
+    rendered.push(fact.stale ? colorize(color, C.muted, text) : text);
+  }
+  return rendered.length === 0 ? null : rendered.join(' · ');
 }
 
 // Each pure builder declares the minimum information tier at which it may

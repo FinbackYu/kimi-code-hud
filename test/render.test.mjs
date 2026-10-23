@@ -47,7 +47,7 @@ test('ratio quota displays monthly total and derives kimi as total minus code', 
   for (const layout of ['normal', 'compact']) {
     const [line] = renderHud(baseCtx({ layout, quota: { fetchedAt: NOW, ...parsed } }));
     assert.match(line, /5h (?:█+ +)?25%/);
-    assert.match(line, /Monthly (?:█+ +)?60% \(kimi 40% · code 20%\)/);
+    assert.match(line, /mo (?:█+ +)?60% \(kimi 40% · code 20%\)/);
     assert.doesNotMatch(line, /kimi 60%|NaN|undefined/);
   }
 });
@@ -55,8 +55,8 @@ test('ratio quota displays monthly total and derives kimi as total minus code', 
 test('weekly-only and monthly-only plans remain visible in compact layout', () => {
   for (const [usages, expected] of [
     [{ limit_7d: { used_ratio: 0 } }, /7d 0%/],
-    [{ limit_month_total: { used_ratio: 0.6 } }, /Monthly 60%/],
-    [{ limit_month_code: { used_ratio: 0.2 } }, /Monthly code 20%/],
+    [{ limit_month_total: { used_ratio: 0.6 } }, /mo 60%/],
+    [{ limit_month_code: { used_ratio: 0.2 } }, /mo code 20%/],
   ]) {
     const [line] = renderHud(baseCtx({ layout: 'compact', quota: {
       fetchedAt: NOW, ...parseQuotaPayload({ usages }),
@@ -77,7 +77,7 @@ test('ratio quota keeps freshness, reset countdown and finite display boundaries
   assert.match(stale, /kimi 0% · code 20%/);
   assert.match(stale, /\[stale\]/);
   const [expired] = renderHud(baseCtx({ quota: { ...quota, fetchedAt: NOW - QUOTA_STALE_MAX_MS - 1 } }));
-  assert.doesNotMatch(expired, /Monthly|120%/);
+  assert.doesNotMatch(expired, /mo 10%|120%/);
   const [invalid] = renderHud(baseCtx({ quota: {
     fetchedAt: NOW, windows: [{ label: '5h', usedRatio: NaN }], weekly: { usedRatio: null },
   } }));
@@ -1192,4 +1192,49 @@ test('quota without a usable fetchedAt renders nothing', () => {
     quota: { weekly: { used: 1, limit: 2 }, windows: [] },
   }));
   assert.doesNotMatch(line, /5h|7d/);
+});
+
+test('provider usage windows share the quota gauge presentation', () => {
+  const windows = [
+    { label: '5h', usedRatio: 0.24, resetAt: '2026-07-30T12:18:00Z' },
+    { label: '7d', usedRatio: 0.10, resetAt: '2026-08-02T12:00:00Z' },
+    { label: 'mo', usedRatio: 0.02, resetAt: null },
+  ];
+  const [line] = renderHud(baseCtx({
+    quota: null,
+    providerUsage: { kind: 'windows', label: 'OpenCode Go', windows },
+  }));
+  // Same gauge bar as the managed quota segment: width-10 track, one block
+  // per 10% used.
+  assert.ok(line.endsWith(
+    ' │ OpenCode Go 5h ██         24% ~2h18m · 7d █          10% ~3d2h · mo            2%',
+  ));
+
+  const [compact] = renderHud(baseCtx({
+    layout: 'compact',
+    quota: null,
+    providerUsage: { kind: 'windows', label: 'OpenCode Go', windows },
+  }));
+  // Compact drops the bar, like quota windows.
+  assert.ok(compact.endsWith(' │ OpenCode Go 5h 24% ~2h18m · 7d 10% ~3d2h · mo 2%'));
+  assert.doesNotMatch(compact, /█/);
+
+  const [stale] = renderHud(baseCtx({
+    color: true,
+    quota: null,
+    providerUsage: {
+      kind: 'windows', label: 'OpenCode Go', stale: true,
+      windows: [{ label: '5h', usedRatio: 0.5, resetAt: null }],
+    },
+  }));
+  // Stale dims brand, label, bar and figures separately, like stale quota.
+  assert.match(stale, /\x1b\[90mOpenCode Go\x1b\[0m/);
+  assert.match(stale, /\x1b\[90m5h \x1b\[0m/);
+  assert.match(stale, /\x1b\[90m 50%\x1b\[0m/);
+
+  const [invalid] = renderHud(baseCtx({
+    quota: null,
+    providerUsage: { kind: 'windows', label: 'OpenCode Go', windows: [{ label: '5h' }] },
+  }));
+  assert.doesNotMatch(invalid, /OpenCode Go/);
 });

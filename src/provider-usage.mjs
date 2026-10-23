@@ -17,6 +17,8 @@ import { CONFIG_TOML_PATH, PROVIDER_USAGE_DIR } from './paths.mjs';
 
 export const DEEPSEEK_PROVIDER = 'deepseek';
 export const DEEPSEEK_BALANCE_URL = 'https://api.deepseek.com/user/balance';
+export const OPENCODE_GO_PROVIDER = 'opencode-go';
+export const OPENCODE_GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 export const PROVIDER_USAGE_TTL_MS = 60_000;
 export const PROVIDER_USAGE_LOCK_STALE_MS = 30_000;
 
@@ -46,23 +48,48 @@ function normalizeBalanceInfo(info) {
   return { currency, total, granted, toppedUp };
 }
 
-function normalizeUsage(usage) {
-  if (!usage || typeof usage !== 'object' || usage.kind !== 'balance') return null;
-  if (
-    typeof usage.label !== 'string'
-    || !/^[A-Za-z0-9][A-Za-z0-9 .&+-]{0,31}$/.test(usage.label)
-  ) {
+function normalizeUsageLabel(label) {
+  return typeof label === 'string' && /^[A-Za-z0-9][A-Za-z0-9 .&+-]{0,31}$/.test(label);
+}
+
+function normalizeWindowEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  if (typeof entry.label !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9.]{0,15}$/.test(entry.label)) {
     return null;
   }
-  if (typeof usage.available !== 'boolean' || !Array.isArray(usage.balances)) return null;
-  const balances = usage.balances.map(normalizeBalanceInfo).filter(Boolean);
-  if (balances.length === 0) return null;
+  const usedRatio = Number(entry.usedRatio);
+  if (!Number.isFinite(usedRatio) || usedRatio < 0) return null;
   return {
-    kind: 'balance',
-    label: usage.label,
-    available: usage.available,
-    balances,
+    label: entry.label,
+    usedRatio,
+    resetAt: typeof entry.resetAt === 'string' ? entry.resetAt : null,
   };
+}
+
+function normalizeUsage(usage) {
+  if (!usage || typeof usage !== 'object' || !normalizeUsageLabel(usage.label)) return null;
+  if (usage.kind === 'balance') {
+    if (typeof usage.available !== 'boolean' || !Array.isArray(usage.balances)) return null;
+    const balances = usage.balances.map(normalizeBalanceInfo).filter(Boolean);
+    if (balances.length === 0) return null;
+    return {
+      kind: 'balance',
+      label: usage.label,
+      available: usage.available,
+      balances,
+    };
+  }
+  if (usage.kind === 'windows') {
+    if (!Array.isArray(usage.windows)) return null;
+    const windows = usage.windows.map(normalizeWindowEntry).filter(Boolean);
+    if (windows.length === 0) return null;
+    return {
+      kind: 'windows',
+      label: usage.label,
+      windows,
+    };
+  }
+  return null;
 }
 
 /** Parse DeepSeek's official /user/balance response into provider-neutral data. */
@@ -73,6 +100,37 @@ export function parseDeepSeekBalance(json) {
     label: 'DeepSeek',
     available: json.is_available,
     balances: json.balance_infos,
+  });
+}
+
+function openCodeGoWindow(raw, label) {
+  if (!raw || typeof raw !== 'object') return null;
+  const percent = Number(raw.percent);
+  if (!Number.isFinite(percent) || percent < 0) return null;
+  return {
+    label,
+    usedRatio: percent / 100,
+    resetAt: typeof raw.resetsAt === 'string' ? raw.resetsAt : null,
+  };
+}
+
+/**
+ * Parse OpenCode Go's /zen/go/v1/usage response into provider-neutral data.
+ * The API reports each subscription window as a used percentage plus its
+ * reset time: rolling (the 5h window), weekly (7d) and monthly. Rolling and
+ * weekly are the core contract; monthly rides along when present.
+ */
+export function parseOpenCodeGoUsage(json) {
+  const usage = json && typeof json === 'object' && !Array.isArray(json) ? json.usage : null;
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null;
+  const rolling = openCodeGoWindow(usage.rolling, '5h');
+  const weekly = openCodeGoWindow(usage.weekly, '7d');
+  if (!rolling || !weekly) return null;
+  const monthly = openCodeGoWindow(usage.monthly, 'mo');
+  return normalizeUsage({
+    kind: 'windows',
+    label: 'OpenCode Go',
+    windows: monthly ? [rolling, weekly, monthly] : [rolling, weekly],
   });
 }
 
@@ -100,6 +158,41 @@ function officialDeepSeekBalanceUrl(value) {
       && parsed.hostname === 'api.deepseek.com'
       && (parsed.port === '' || parsed.port === '443')
       && parsed.pathname === '/user/balance'
+      && parsed.username === ''
+      && parsed.password === ''
+      && parsed.search === ''
+      && parsed.hash === '';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The credential boundary for OpenCode Go is the official host: the key is
+ * only ever sent to opencode.ai, the same host the provider's inference
+ * base_url already points at. The path is not pinned — both /inference/go/*
+ * and /zen/go/* are the official service.
+ */
+function officialOpenCodeGoBaseUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:'
+      && parsed.hostname === 'opencode.ai'
+      && (parsed.port === '' || parsed.port === '443')
+      && parsed.username === ''
+      && parsed.password === '';
+  } catch {
+    return false;
+  }
+}
+
+function officialOpenCodeGoUsageUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:'
+      && parsed.hostname === 'opencode.ai'
+      && (parsed.port === '' || parsed.port === '443')
+      && parsed.pathname === '/zen/go/v1/usage'
       && parsed.username === ''
       && parsed.password === ''
       && parsed.search === ''
@@ -145,6 +238,13 @@ function providerUsageAdapter(provider) {
       id: DEEPSEEK_PROVIDER,
       accepts: (config) => officialDeepSeekBaseUrl(config.baseUrl),
       request: requestDeepSeekUsage,
+    };
+  }
+  if (provider === OPENCODE_GO_PROVIDER) {
+    return {
+      id: OPENCODE_GO_PROVIDER,
+      accepts: (config) => officialOpenCodeGoBaseUrl(config.baseUrl),
+      request: requestOpenCodeGoUsage,
     };
   }
   return null;
@@ -200,8 +300,9 @@ function resolveProviderUsageContext({
 
 /**
  * Resolve an active provider into a supported, secret-free usage target.
- * A provider name alone is insufficient: DeepSeek also requires its official
- * base URL so an API key is never forwarded to a compatible third-party proxy.
+ * A provider name alone is insufficient: each adapter also requires its
+ * official base URL (api.deepseek.com, opencode.ai) so an API key is never
+ * forwarded to a compatible third-party proxy.
  * The credential may be a literal `api_key` or an `api_key_env` variable read
  * from `env` (default `process.env`) at resolution time.
  */
@@ -418,6 +519,36 @@ export async function requestDeepSeekUsage({
     maxBytes,
     fetchImpl,
     parse: parseDeepSeekBalance,
+  });
+}
+
+/** Fetch one OpenCode Go usage response without mutating any local state.
+ * Same request discipline as the DeepSeek balance fetch: one shared deadline
+ * for headers, body and parse, size-capped and always released.
+ * @returns {Promise<{status: string, category: string, parsed?: object,
+ *   retryAfterSeen?: boolean, retryAfterMs?: number|null}>}
+ */
+export async function requestOpenCodeGoUsage({
+  apiKey,
+  url = OPENCODE_GO_USAGE_URL,
+  timeoutMs = 8000,
+  maxBytes = MAX_RESPONSE_BYTES,
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  if (
+    typeof apiKey !== 'string'
+    || apiKey.length === 0
+    || !officialOpenCodeGoUsageUrl(url)
+  ) {
+    return { status: PROVIDER_USAGE_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
+  }
+  return requestJsonWithLimits({
+    url,
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    timeoutMs,
+    maxBytes,
+    fetchImpl,
+    parse: parseOpenCodeGoUsage,
   });
 }
 

@@ -926,3 +926,69 @@ test('bin --help documents the doctor entry point', () => {
   assert.match(result.stdout, /--doctor/);
   assert.match(result.stdout, /--share/);
 });
+
+test('opencode-go usage windows: official target reports cache state; proxy hides by design', () => {
+  const withKey = makeEnv();
+  seedConfigToml(withKey.paths, [
+    '',
+    '[providers.opencode-go]',
+    'type = "openai"',
+    'base_url = "https://opencode.ai/inference/go/openai/v1"',
+    'api_key = "oc_sk_synth"',
+    '',
+  ].join('\n'));
+  const configText = fs.readFileSync(withKey.paths.configTomlPath, 'utf8');
+  const target = resolveProviderUsageTarget({
+    provider: 'opencode-go',
+    configText,
+    providerUsageDir: withKey.paths.providerUsageDir,
+  });
+  assert.ok(target, 'official opencode-go config must resolve');
+  fs.mkdirSync(withKey.paths.providerUsageDir, { recursive: true });
+  fs.writeFileSync(target.cachePath, JSON.stringify({
+    version: 1,
+    provider: 'opencode-go',
+    credentialFingerprint: target.credentialFingerprint,
+    fetchedAt: NOW - 1000,
+    kind: 'windows',
+    label: 'OpenCode Go',
+    windows: [{ label: '5h', usedRatio: 0.01, resetAt: null }],
+  }));
+  const okCheck = one(collect(withKey).report, 'providers', 'opencode-go');
+  assert.equal(okCheck.level, 'ok');
+  assert.match(okCheck.detail, /cache fresh, age 1s/);
+
+  const proxy = makeEnv();
+  seedConfigToml(proxy.paths, [
+    '',
+    '[providers.opencode-go]',
+    'type = "openai"',
+    'base_url = "https://opencode.proxy.example/v1"',
+    'api_key = "oc_sk_synth"',
+    '',
+  ].join('\n'));
+  assert.match(
+    one(collect(proxy).report, 'providers', 'opencode-go').detail,
+    /usage windows stays hidden by design/,
+  );
+});
+
+test('opencode-go is a supported provider and no longer listed as unadapted', () => {
+  const env = makeEnv();
+  seedConfigToml(env.paths, [
+    '',
+    '[providers.opencode-go]',
+    'type = "openai"',
+    'base_url = "https://opencode.ai/inference/go/openai/v1"',
+    'api_key = "oc_sk_synth"',
+    '',
+    '[providers.anthropic]',
+    'type = "anthropic"',
+    '',
+  ].join('\n'));
+  const { report } = collect(env);
+  const check = one(report, 'providers', 'usage targets');
+  assert.match(check.detail, /no usage adapter for: anthropic/);
+  assert.doesNotMatch(check.detail, /opencode-go,/);
+  assert.match(check.detail, /usage windows only for opencode-go/);
+});
