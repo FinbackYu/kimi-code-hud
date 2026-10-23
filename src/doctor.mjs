@@ -21,11 +21,9 @@ import path from 'node:path';
 
 import { nodeCommand } from './command.mjs';
 import {
-  DEEPSEEK_PROVIDER,
-  OPENCODE_GO_PROVIDER,
   PROVIDER_USAGE_TTL_MS,
-  ZHIPU_PROVIDER_ALIASES,
   resolveProviderUsageTarget,
+  selectProviderUsageAdapter,
 } from './provider-usage.mjs';
 import {
   MANAGED_KIMI_PROVIDER,
@@ -83,17 +81,17 @@ function providerCredentialNote(provider, configText) {
  * age, refresh backoff) and return the current credential's cache stem so
  * foreign-account leftovers can be reported separately, or null when the
  * provider has no config table. Only non-reversible fingerprints are printed.
+ * Called only for providers whose base_url host already matched `adapter`.
  */
-function reportProviderUsage({ add, provider, metric, configText, groups, providerUsageDir, now }) {
+function reportProviderUsage({ add, provider, adapter, configText, groups, providerUsageDir, now }) {
   if (findProviderTable(configText, provider) === null) return null;
+  const metric = adapter.metric;
   const target = resolveProviderUsageTarget({ provider, configText, providerUsageDir });
   if (target === null) {
-    const reasons = [
-      providerCredentialNote(provider, configText),
-      'base_url is not the official endpoint',
-    ].filter(Boolean).join(', or ');
+    const reason = providerCredentialNote(provider, configText)
+      || 'the provider name cannot form an account cache bucket';
     add('providers', 'note', provider,
-      `provider table present but unusable for ${metric} (${reasons}) — the ${metric} `
+      `provider table present but unusable for ${metric} (${reason}) — the ${metric} `
       + 'stays hidden by design');
     return null;
   }
@@ -545,32 +543,32 @@ export function collectDoctorReport({
 
   // --- provider usage -------------------------------------------------------
   if (configToml.state === 'ok') {
-    const supported = new Set([
-      MANAGED_KIMI_PROVIDER,
-      DEEPSEEK_PROVIDER,
-      OPENCODE_GO_PROVIDER,
-      ...ZHIPU_PROVIDER_ALIASES,
-    ]);
-    const unsupported = configuredProviderNames(configToml.text)
-      .filter((name) => !supported.has(name));
-    if (unsupported.length > 0) {
+    // Adapters are chosen by each provider's base_url host, never by its name;
+    // the managed subscription provider is the quota consumer, not a usage
+    // adapter, so it is not counted here.
+    const configured = configuredProviderNames(configToml.text)
+      .filter((provider) => provider !== MANAGED_KIMI_PROVIDER)
+      .map((provider) => {
+        const config = resolveProviderConfig({ provider, configText: configToml.text });
+        return { provider, selection: config ? selectProviderUsageAdapter(config) : null };
+      });
+    const unadapted = configured
+      .filter((entry) => entry.selection === null)
+      .map((entry) => entry.provider);
+    if (unadapted.length > 0) {
       add('providers', 'note', 'usage targets',
-        `no usage adapter for: ${unsupported.join(', ')} — balance renders only for `
-        + `${DEEPSEEK_PROVIDER}; usage windows only for ${OPENCODE_GO_PROVIDER}; GLM Coding Plan `
-        + `windows for ${ZHIPU_PROVIDER_ALIASES.join('/')}; `
-        + `quota bars only for ${MANAGED_KIMI_PROVIDER}`);
+        `no usage adapter for: ${unadapted.join(', ')} — an adapter is chosen by the `
+        + 'provider\'s base_url host, and no registered adapter serves it; check that '
+        + 'base_url points at the provider\'s official API host');
     }
     const groups = scanProviderGroups(p.providerUsageDir, now);
     const currentStems = new Set();
-    for (const [provider, metric] of [
-      [DEEPSEEK_PROVIDER, 'balance'],
-      [OPENCODE_GO_PROVIDER, 'usage windows'],
-      ...ZHIPU_PROVIDER_ALIASES.map((provider) => [provider, 'usage']),
-    ]) {
+    for (const { provider, selection } of configured) {
+      if (selection === null) continue;
       const stem = reportProviderUsage({
         add,
         provider,
-        metric,
+        adapter: selection.adapter,
         configText: configToml.text,
         groups,
         providerUsageDir: p.providerUsageDir,

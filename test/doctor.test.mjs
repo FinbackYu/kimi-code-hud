@@ -450,7 +450,13 @@ test('deepseek balance: official target with a fresh cache is ok; unusable confi
     '',
   ].join('\n'));
   const proxyRun = collect(proxy);
-  assert.match(one(proxyRun.report, 'providers', 'deepseek').detail, /balance stays hidden by design/);
+  // A proxy base_url host matches no adapter, so the provider is reported as
+  // unadapted instead of getting a per-provider line; the balance stays hidden
+  // by design and the exit code stays healthy.
+  const proxyTargets = one(proxyRun.report, 'providers', 'usage targets');
+  assert.match(proxyTargets.detail, /no usage adapter for: deepseek/);
+  assert.match(proxyTargets.detail, /check that base_url points at the provider's official API host/);
+  assert.equal(proxyRun.report.checks.some((c) => c.label === 'deepseek'), false);
   assert.equal(doctorExitCode(proxyRun.report), 0);
 
   const noKey = makeEnv();
@@ -967,13 +973,14 @@ test('opencode-go usage windows: official target reports cache state; proxy hide
     'api_key = "oc_sk_synth"',
     '',
   ].join('\n'));
+  const proxyRun = collect(proxy);
   assert.match(
-    one(collect(proxy).report, 'providers', 'opencode-go').detail,
-    /usage windows stays hidden by design/,
+    one(proxyRun.report, 'providers', 'usage targets').detail,
+    /no usage adapter for: opencode-go/,
   );
 });
 
-test('opencode-go is a supported provider and no longer listed as unadapted', () => {
+test('an official base_url host is what makes a provider adapted, not its name', () => {
   const env = makeEnv();
   seedConfigToml(env.paths, [
     '',
@@ -990,10 +997,11 @@ test('opencode-go is a supported provider and no longer listed as unadapted', ()
   const check = one(report, 'providers', 'usage targets');
   assert.match(check.detail, /no usage adapter for: anthropic/);
   assert.doesNotMatch(check.detail, /opencode-go,/);
-  assert.match(check.detail, /usage windows only for opencode-go/);
+  assert.doesNotMatch(check.detail, /balance renders only for/);
+  assert.match(check.detail, /check that base_url points at the provider's official API host/);
 });
 
-test('zhipu coding-plan aliases are supported and report their cache state', () => {
+test('zhipu coding-plan providers resolve by official host and report their cache state', () => {
   const cn = makeEnv();
   seedConfigToml(cn.paths, [
     '',
@@ -1031,7 +1039,8 @@ test('zhipu coding-plan aliases are supported and report their cache state', () 
   const targets = one(report, 'providers', 'usage targets');
   assert.match(targets.detail, /no usage adapter for: anthropic/);
   assert.doesNotMatch(targets.detail, /zhipuai-coding-plan,/);
-  assert.match(targets.detail, /GLM Coding Plan windows for zhipuai-coding-plan/);
+  assert.doesNotMatch(targets.detail, /GLM Coding Plan windows for/);
+  assert.match(targets.detail, /check that base_url points at the provider's official API host/);
 
   const intl = makeEnv();
   seedConfigToml(intl.paths, [
@@ -1057,7 +1066,7 @@ test('zhipu coding-plan aliases are supported and report their cache state', () 
     '',
   ].join('\n'));
   assert.match(
-    one(collect(proxy).report, 'providers', 'zhipu-coding-plan').detail,
-    /usage stays hidden by design/,
+    one(collect(proxy).report, 'providers', 'usage targets').detail,
+    /no usage adapter for: zhipu-coding-plan/,
   );
 });

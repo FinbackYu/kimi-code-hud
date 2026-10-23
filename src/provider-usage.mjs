@@ -1,3 +1,22 @@
+// Provider usage facade: account-scoped cache, refresh lock, failure backoff,
+// and adapter selection. The provider-specific request/parse code lives in
+// src/provider-usage/, one module per provider surface:
+//
+//   provider-usage/common.mjs       shared normalizer, result vocabulary, URL discipline
+//   provider-usage/deepseek.mjs     api.deepseek.com balance
+//   provider-usage/opencode-go.mjs  opencode.ai subscription windows
+//   provider-usage/zhipu.mjs        GLM Coding Plan windows + CN balance fallback
+//
+// Every adapter module exports one frozen `ADAPTER`; the contract is spelled
+// out at the top of common.mjs. An adapter is selected by the configured
+// provider's `base_url` host — never by the provider's name — so a new adapter
+// is a new file plus one line in ADAPTERS. Adding an adapter must not require
+// touching any other adapter.
+//
+// This module stays the public facade: the parsers, request helpers and
+// provider constants that existed here before the split are re-exported
+// unchanged, so consumers and tests keep importing from this path.
+
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -6,430 +25,69 @@ import path from 'node:path';
 import { atomicWriteFile } from './fs-store.mjs';
 import { resolveProviderConfig } from './model-config.mjs';
 import {
-  MAX_RESPONSE_BYTES,
-  REQUEST_CATEGORY,
   clearRefreshState,
   isRefreshBlocked,
   recordRefreshFailure,
-  requestJsonWithLimits,
 } from './request-guard.mjs';
 import { CONFIG_TOML_PATH, PROVIDER_USAGE_DIR } from './paths.mjs';
+import { ADAPTER as deepSeekAdapter } from './provider-usage/deepseek.mjs';
+import { ADAPTER as openCodeGoAdapter } from './provider-usage/opencode-go.mjs';
+import { ADAPTER as zhipuAdapter } from './provider-usage/zhipu.mjs';
+import { PROVIDER_USAGE_RESULT, normalizeUsage } from './provider-usage/common.mjs';
 
-export const DEEPSEEK_PROVIDER = 'deepseek';
-export const DEEPSEEK_BALANCE_URL = 'https://api.deepseek.com/user/balance';
-export const OPENCODE_GO_PROVIDER = 'opencode-go';
-export const OPENCODE_GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
-/** Canonical provider name, plus the aliases users configure for the same plan. */
-export const ZHIPU_PROVIDER = 'zhipuai-coding-plan';
-export const ZHIPU_PROVIDER_ALIASES = Object.freeze([
-  'zhipuai-coding-plan',
-  'zhipu-coding-plan',
-  'zhipu',
-  'zai',
-]);
-export const ZHIPU_CN_USAGE_URL = 'https://open.bigmodel.cn/api/monitor/usage/quota/limit';
-export const ZHIPU_INTL_USAGE_URL = 'https://api.z.ai/api/monitor/usage/quota/limit';
-export const ZHIPU_CN_BALANCE_URL = 'https://www.bigmodel.cn/api/biz/account/query-customer-account-report';
+export {
+  OPENCODE_GO_PROVIDER,
+  OPENCODE_GO_USAGE_URL,
+  parseOpenCodeGoUsage,
+  requestOpenCodeGoUsage,
+} from './provider-usage/opencode-go.mjs';
+export {
+  DEEPSEEK_BALANCE_URL,
+  DEEPSEEK_PROVIDER,
+  parseDeepSeekBalance,
+  requestDeepSeekUsage,
+} from './provider-usage/deepseek.mjs';
+export {
+  ZHIPU_CN_BALANCE_URL,
+  ZHIPU_CN_USAGE_URL,
+  ZHIPU_INTL_USAGE_URL,
+  ZHIPU_PROVIDER,
+  ZHIPU_PROVIDER_ALIASES,
+  parseZhipuBalance,
+  parseZhipuQuota,
+  requestZhipuUsage,
+} from './provider-usage/zhipu.mjs';
+export { PROVIDER_USAGE_RESULT } from './provider-usage/common.mjs';
+
 export const PROVIDER_USAGE_TTL_MS = 60_000;
 export const PROVIDER_USAGE_LOCK_STALE_MS = 30_000;
 
 const CACHE_VERSION = 1;
 
-export const PROVIDER_USAGE_RESULT = Object.freeze({
-  SUCCESS: 'success',
-  UNAUTHORIZED: 'unauthorized',
-  TRANSIENT: 'transient',
-  INVALID: 'invalid',
-});
-
-function finiteAmount(value) {
-  if (typeof value !== 'number' && typeof value !== 'string') return null;
-  if (typeof value === 'string' && value.trim() === '') return null;
-  const amount = Number(value);
-  return Number.isFinite(amount) && amount >= 0 ? amount : null;
-}
-
-function normalizeBalanceInfo(info) {
-  if (!info || typeof info !== 'object') return null;
-  const currency = typeof info.currency === 'string' ? info.currency.toUpperCase() : '';
-  const total = finiteAmount(info.total ?? info.total_balance);
-  if (!/^[A-Z]{3}$/.test(currency) || total === null) return null;
-  const granted = finiteAmount(info.granted ?? info.granted_balance);
-  const toppedUp = finiteAmount(info.toppedUp ?? info.topped_up_balance);
-  return { currency, total, granted, toppedUp };
-}
-
-function normalizeUsageLabel(label) {
-  return typeof label === 'string' && /^[A-Za-z0-9][A-Za-z0-9 .&+-]{0,31}$/.test(label);
-}
-
-function normalizeWindowEntry(entry) {
-  if (!entry || typeof entry !== 'object') return null;
-  if (typeof entry.label !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9.]{0,15}$/.test(entry.label)) {
-    return null;
-  }
-  const usedRatio = Number(entry.usedRatio);
-  if (!Number.isFinite(usedRatio) || usedRatio < 0) return null;
-  return {
-    label: entry.label,
-    usedRatio,
-    resetAt: typeof entry.resetAt === 'string' ? entry.resetAt : null,
-  };
-}
-
-function normalizeUsage(usage) {
-  if (!usage || typeof usage !== 'object' || !normalizeUsageLabel(usage.label)) return null;
-  if (usage.kind === 'balance') {
-    if (typeof usage.available !== 'boolean' || !Array.isArray(usage.balances)) return null;
-    const balances = usage.balances.map(normalizeBalanceInfo).filter(Boolean);
-    if (balances.length === 0) return null;
-    return {
-      kind: 'balance',
-      label: usage.label,
-      available: usage.available,
-      balances,
-    };
-  }
-  if (usage.kind === 'windows') {
-    if (!Array.isArray(usage.windows)) return null;
-    const windows = usage.windows.map(normalizeWindowEntry).filter(Boolean);
-    if (windows.length === 0) return null;
-    return {
-      kind: 'windows',
-      label: usage.label,
-      windows,
-    };
-  }
-  return null;
-}
-
-/** Parse DeepSeek's official /user/balance response into provider-neutral data. */
-export function parseDeepSeekBalance(json) {
-  if (!json || typeof json !== 'object' || typeof json.is_available !== 'boolean') return null;
-  return normalizeUsage({
-    kind: 'balance',
-    label: 'DeepSeek',
-    available: json.is_available,
-    balances: json.balance_infos,
-  });
-}
-
-function openCodeGoWindow(raw, label) {
-  if (!raw || typeof raw !== 'object') return null;
-  const percent = Number(raw.percent);
-  if (!Number.isFinite(percent) || percent < 0) return null;
-  return {
-    label,
-    usedRatio: percent / 100,
-    resetAt: typeof raw.resetsAt === 'string' ? raw.resetsAt : null,
-  };
-}
+/**
+ * Every registered usage adapter. Selection walks this list in order and stops
+ * at the first adapter whose `accepts(config)` returns endpoints, so one host
+ * may be claimed by one adapter only; a second claim would make the winner
+ * depend on registry order.
+ */
+const ADAPTERS = Object.freeze([
+  deepSeekAdapter,
+  openCodeGoAdapter,
+  zhipuAdapter,
+]);
 
 /**
- * Parse OpenCode Go's /zen/go/v1/usage response into provider-neutral data.
- * The API reports each subscription window as a used percentage plus its
- * reset time: rolling (the 5h window), weekly (7d) and monthly. Rolling and
- * weekly are the core contract; monthly rides along when present.
+ * Pick the adapter that serves a provider config by its official base_url
+ * host. Returns null when no adapter accepts the URL (a proxy, a non-https
+ * URL, or a provider that has no usage endpoint at all).
+ * @param {{baseUrl: string|null}|null} config result of resolveProviderConfig
+ * @returns {{adapter: object, endpoints: object}|null}
  */
-export function parseOpenCodeGoUsage(json) {
-  const usage = json && typeof json === 'object' && !Array.isArray(json) ? json.usage : null;
-  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null;
-  const rolling = openCodeGoWindow(usage.rolling, '5h');
-  const weekly = openCodeGoWindow(usage.weekly, '7d');
-  if (!rolling || !weekly) return null;
-  const monthly = openCodeGoWindow(usage.monthly, 'mo');
-  return normalizeUsage({
-    kind: 'windows',
-    label: 'OpenCode Go',
-    windows: monthly ? [rolling, weekly, monthly] : [rolling, weekly],
-  });
-}
-
-/**
- * One finite number from a JSON field, or null when the field is absent,
- * blank, or not a finite number. `Number(null)` would read as 0, so presence
- * is checked before coercion.
- */
-function zhipuNumber(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (typeof value !== 'string' || value.trim() === '') return null;
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : null;
-}
-
-/** Window length in minutes; unit 1 = day, 3 = hour, 5 = minute, 6 = week. */
-const ZHIPU_UNIT_MINUTES = Object.freeze({ 1: 1440, 3: 60, 5: 1, 6: 10080 });
-const ZHIPU_TOKEN_LIMIT_TYPES = new Set(['TOKENS_LIMIT', 'CREDIT_LIMIT']);
-// TIME_LIMIT is the monthly MCP tool allowance; its unit/number pair describes
-// one tool call, not the reset period, so the reset-defense horizon is a month.
-const ZHIPU_MCP_WINDOW_MINUTES = 43_200;
-const ZHIPU_RESET_SLACK_MS = 300_000;
-
-function zhipuWindowMinutes(number, unit) {
-  const multiplier = ZHIPU_UNIT_MINUTES[unit];
-  const count = zhipuNumber(number);
-  if (multiplier === undefined || count === null || count <= 0) return null;
-  const minutes = count * multiplier;
-  return Number.isInteger(minutes) ? minutes : null;
-}
-
-function zhipuWindowLabel(minutes) {
-  if (minutes === 300) return '5h';
-  if (minutes === 10_080) return '7d';
-  if (minutes % 1440 === 0) return `${minutes / 1440}d`;
-  if (minutes % 60 === 0) return `${minutes / 60}h`;
-  return `${minutes}m`;
-}
-
-function zhipuUsedRatio(raw) {
-  const clamp = (value) => Math.min(1, Math.max(0, value));
-  const usage = zhipuNumber(raw.usage);
-  const current = zhipuNumber(raw.currentValue);
-  const remaining = zhipuNumber(raw.remaining);
-  if (usage !== null && usage > 0 && current !== null && remaining !== null) {
-    return clamp(Math.max(usage - remaining, current) / usage);
-  }
-  const percentage = zhipuNumber(raw.percentage);
-  return percentage !== null && percentage >= 0 ? clamp(percentage / 100) : null;
-}
-
-/**
- * Reset time as ISO text. A reset stamped further out than a window's own
- * length (plus five minutes of slack) cannot belong to that window — the
- * service has been seen to attach a neighbouring window's reset — so only the
- * percentage survives.
- */
-function zhipuResetAt(raw, windowMinutes, now) {
-  const stamp = zhipuNumber(raw.nextResetTime);
-  if (stamp === null || stamp <= 0) return null;
-  const date = new Date(stamp);
-  if (!Number.isFinite(date.getTime())) return null;
-  if (windowMinutes < 1440 && stamp > now + windowMinutes * 60_000 + ZHIPU_RESET_SLACK_MS) {
-    return null;
-  }
-  return date.toISOString();
-}
-
-function zhipuEnvelopeSucceeded(json) {
-  if (json.success === false) return false;
-  if (json.success === true) return true;
-  const code = zhipuNumber(json.code);
-  return code === 200;
-}
-
-/**
- * Parse the GLM Coding Plan quota response into provider-neutral windows.
- * TOKENS_LIMIT / CREDIT_LIMIT windows are collected in ascending duration and
- * labelled from their duration; TIME_LIMIT is the monthly MCP tool allowance
- * and rides along once as the `mcp` window. The response's `percentage` is
- * the used share; when the per-window counters are present they win because
- * they are recomputed rather than rounded.
- */
-export function parseZhipuQuota(json, now = Date.now()) {
-  if (!json || typeof json !== 'object' || Array.isArray(json) || !zhipuEnvelopeSucceeded(json)) {
-    return null;
-  }
-  const data = json.data;
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
-  const limits = Array.isArray(data.limits) ? data.limits : [];
-  const tokenWindows = [];
-  let mcp = null;
-  for (const raw of limits) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
-    if (raw.type === 'TIME_LIMIT') {
-      if (mcp) continue;
-      const ratio = zhipuUsedRatio(raw);
-      if (ratio === null) continue;
-      mcp = {
-        label: 'mcp',
-        usedRatio: ratio,
-        resetAt: zhipuResetAt(raw, ZHIPU_MCP_WINDOW_MINUTES, now),
-      };
-      continue;
-    }
-    if (!ZHIPU_TOKEN_LIMIT_TYPES.has(raw.type)) continue;
-    const minutes = zhipuWindowMinutes(raw.number, raw.unit);
-    if (minutes === null) continue;
-    const ratio = zhipuUsedRatio(raw);
-    if (ratio === null) continue;
-    tokenWindows.push({
-      minutes,
-      window: {
-        label: zhipuWindowLabel(minutes),
-        usedRatio: ratio,
-        resetAt: zhipuResetAt(raw, minutes, now),
-      },
-    });
-  }
-  tokenWindows.sort((a, b) => a.minutes - b.minutes);
-  const seen = new Set();
-  const windows = [];
-  for (const entry of tokenWindows) {
-    if (seen.has(entry.window.label)) continue;
-    seen.add(entry.window.label);
-    windows.push(entry.window);
-  }
-  if (mcp) windows.push(mcp);
-  if (windows.length === 0) return null;
-  const planName = typeof data.planName === 'string'
-    && /^[A-Za-z0-9][A-Za-z0-9 .&+-]{0,31}$/.test(data.planName)
-    ? `Zhipu ${data.planName}`
-    : 'Zhipu';
-  return normalizeUsage({ kind: 'windows', label: planName, windows });
-}
-
-/**
- * Parse the CN account report into a plain CNY balance. `rechargeAmount` and
- * `giveAmount` are lifetime totals, not this account's current grants, so they
- * are deliberately not mapped onto granted/toppedUp.
- */
-export function parseZhipuBalance(json) {
-  if (!json || typeof json !== 'object' || Array.isArray(json) || !zhipuEnvelopeSucceeded(json)) {
-    return null;
-  }
-  const data = json.data;
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
-  const available = zhipuNumber(data.availableBalance) ?? zhipuNumber(data.balance);
-  if (available === null || available < 0) return null;
-  return normalizeUsage({
-    kind: 'balance',
-    label: 'Zhipu',
-    available: true,
-    balances: [{ currency: 'CNY', total: available, granted: null, toppedUp: null }],
-  });
-}
-
-function officialDeepSeekBaseUrl(value) {
-  try {
-    const parsed = new URL(value);
-    const pathname = parsed.pathname.replace(/\/$/, '');
-    return parsed.protocol === 'https:'
-      && parsed.hostname === 'api.deepseek.com'
-      && (parsed.port === '' || parsed.port === '443')
-      && (pathname === '' || pathname === '/v1')
-      && parsed.username === ''
-      && parsed.password === ''
-      && parsed.search === ''
-      && parsed.hash === '';
-  } catch {
-    return false;
-  }
-}
-
-function officialDeepSeekBalanceUrl(value) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'https:'
-      && parsed.hostname === 'api.deepseek.com'
-      && (parsed.port === '' || parsed.port === '443')
-      && parsed.pathname === '/user/balance'
-      && parsed.username === ''
-      && parsed.password === ''
-      && parsed.search === ''
-      && parsed.hash === '';
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The credential boundary for OpenCode Go is the official host: the key is
- * only ever sent to opencode.ai, the same host the provider's inference
- * base_url already points at. The path is not pinned — both /inference/go/*
- * and /zen/go/* are the official service.
- */
-function officialOpenCodeGoBaseUrl(value) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'https:'
-      && parsed.hostname === 'opencode.ai'
-      && (parsed.port === '' || parsed.port === '443')
-      && parsed.username === ''
-      && parsed.password === '';
-  } catch {
-    return false;
-  }
-}
-
-function officialOpenCodeGoUsageUrl(value) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'https:'
-      && parsed.hostname === 'opencode.ai'
-      && (parsed.port === '' || parsed.port === '443')
-      && parsed.pathname === '/zen/go/v1/usage'
-      && parsed.username === ''
-      && parsed.password === ''
-      && parsed.search === ''
-      && parsed.hash === '';
-  } catch {
-    return false;
-  }
-}
-
-const ZHIPU_CN_HOST = 'open.bigmodel.cn';
-const ZHIPU_INTL_HOST = 'api.z.ai';
-const ZHIPU_BALANCE_HOST = 'www.bigmodel.cn';
-
-function pinnedHttpsUrl(value, hosts, pathname) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'https:'
-      && hosts.includes(parsed.hostname)
-      && (parsed.port === '' || parsed.port === '443')
-      && parsed.pathname === pathname
-      && parsed.username === ''
-      && parsed.password === ''
-      && parsed.search === ''
-      && parsed.hash === '';
-  } catch {
-    return false;
-  }
-}
-
-function officialZhipuUsageUrl(value) {
-  return pinnedHttpsUrl(value, [ZHIPU_CN_HOST, ZHIPU_INTL_HOST], '/api/monitor/usage/quota/limit');
-}
-
-function officialZhipuBalanceUrl(value) {
-  return pinnedHttpsUrl(
-    value,
-    [ZHIPU_BALANCE_HOST],
-    '/api/biz/account/query-customer-account-report',
-  );
-}
-
-/**
- * Resolve the Zhipu endpoints from the provider's inference base URL. The
- * region is decided by the official host alone — CN accounts live on
- * open.bigmodel.cn, international accounts on api.z.ai — and both hosts are
- * the ones the configured key already targets. Only the CN service exposes an
- * account balance report, so the international region has no fallback.
- */
-function zhipuEndpoints(config) {
-  let parsed;
-  try {
-    parsed = new URL(config.baseUrl);
-  } catch {
-    return null;
-  }
-  if (
-    parsed.protocol !== 'https:'
-    || !(parsed.port === '' || parsed.port === '443')
-    || parsed.username !== ''
-    || parsed.password !== ''
-  ) {
-    return null;
-  }
-  if (parsed.hostname === ZHIPU_CN_HOST) {
-    return {
-      region: 'cn',
-      usageUrl: ZHIPU_CN_USAGE_URL,
-      balanceUrl: ZHIPU_CN_BALANCE_URL,
-    };
-  }
-  if (parsed.hostname === ZHIPU_INTL_HOST) {
-    return { region: 'intl', usageUrl: ZHIPU_INTL_USAGE_URL, balanceUrl: null };
+export function selectProviderUsageAdapter(config) {
+  if (!config) return null;
+  for (const adapter of ADAPTERS) {
+    const endpoints = adapter.accepts(config);
+    if (endpoints) return { adapter, endpoints };
   }
   return null;
 }
@@ -464,35 +122,6 @@ export function providerUsagePaths({
   };
 }
 
-function providerUsageAdapter(provider) {
-  if (provider === DEEPSEEK_PROVIDER) {
-    return {
-      id: DEEPSEEK_PROVIDER,
-      accepts: (config) => (officialDeepSeekBaseUrl(config.baseUrl)
-        ? { usageUrl: DEEPSEEK_BALANCE_URL, balanceUrl: null }
-        : null),
-      request: requestDeepSeekUsage,
-    };
-  }
-  if (provider === OPENCODE_GO_PROVIDER) {
-    return {
-      id: OPENCODE_GO_PROVIDER,
-      accepts: (config) => (officialOpenCodeGoBaseUrl(config.baseUrl)
-        ? { usageUrl: OPENCODE_GO_USAGE_URL, balanceUrl: null }
-        : null),
-      request: requestOpenCodeGoUsage,
-    };
-  }
-  if (ZHIPU_PROVIDER_ALIASES.includes(provider)) {
-    return {
-      id: provider,
-      accepts: zhipuEndpoints,
-      request: requestZhipuUsage,
-    };
-  }
-  return null;
-}
-
 /**
  * Resolve the request credential the way the host does since Kimi Code
  * 2.0.1: a provider declares either a literal `api_key` or an `api_key_env`
@@ -519,24 +148,28 @@ function resolveProviderUsageContext({
   env = process.env,
   providerUsageDir = PROVIDER_USAGE_DIR,
 } = {}) {
-  const adapter = providerUsageAdapter(provider);
-  if (!adapter) return null;
   const config = resolveProviderConfig({ provider, configText });
-  const apiKey = config ? resolveCredential(config, env) : null;
-  const endpoints = apiKey && config ? adapter.accepts(config) : null;
-  if (!apiKey || !endpoints) {
-    return null;
-  }
+  if (!config) return null;
+  const selection = selectProviderUsageAdapter(config);
+  const apiKey = resolveCredential(config, env);
+  if (!selection || !apiKey) return null;
   const fingerprint = credentialFingerprint(provider, apiKey);
   const paths = providerUsagePaths({ provider, credentialFingerprint: fingerprint, providerUsageDir });
   if (!paths) return null;
   return {
-    adapter,
+    adapter: selection.adapter,
     apiKey,
-    endpoints,
+    endpoints: selection.endpoints,
     target: {
       provider,
-      adapter: adapter.id,
+      // The account label shown to diagnostics. It has always been the
+      // configured provider name (adapters no longer contribute a name), and
+      // the cache/lock buckets below stay keyed by that name.
+      adapter: provider,
+      // The adapter module that accepted this provider's base_url host. This
+      // is what host-based selection resolves to and is independent of the
+      // provider's name.
+      adapterId: selection.adapter.id,
       credentialFingerprint: fingerprint,
       ...paths,
     },
@@ -544,11 +177,11 @@ function resolveProviderUsageContext({
 }
 
 /**
- * Resolve an active provider into a supported, secret-free usage target.
- * A provider name alone is insufficient: each adapter also requires its
- * official base URL (api.deepseek.com, opencode.ai, open.bigmodel.cn or
- * api.z.ai) so an API key is never forwarded to a compatible third-party
- * proxy.
+ * Resolve a configured provider into a supported, secret-free usage target.
+ * A provider name alone is insufficient: the provider table must exist and
+ * one registered adapter must accept its official base URL
+ * (api.deepseek.com, opencode.ai, open.bigmodel.cn or api.z.ai) so an API key
+ * is never forwarded to a compatible third-party proxy.
  * The credential may be a literal `api_key` or an `api_key_env` variable read
  * from `env` (default `process.env`) at resolution time.
  */
@@ -736,141 +369,6 @@ export function ensureFreshProviderUsage({
     if (target && lockToken) releaseProviderUsageLock(target.lockPath, lockToken);
     return false;
   }
-}
-
-/** Fetch one DeepSeek balance response without mutating any local state.
- * The whole request — headers, body and JSON parse — shares one deadline, and
- * response bodies are size-capped and always released.
- * @returns {Promise<{status: string, category: string, parsed?: object,
- *   retryAfterSeen?: boolean, retryAfterMs?: number|null}>}
- */
-export async function requestDeepSeekUsage({
-  apiKey,
-  url = null,
-  endpoints = null,
-  timeoutMs = 8000,
-  maxBytes = MAX_RESPONSE_BYTES,
-  fetchImpl = globalThis.fetch,
-} = {}) {
-  const targetUrl = url ?? endpoints?.usageUrl ?? DEEPSEEK_BALANCE_URL;
-  if (
-    typeof apiKey !== 'string'
-    || apiKey.length === 0
-    || !officialDeepSeekBalanceUrl(targetUrl)
-  ) {
-    return { status: PROVIDER_USAGE_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
-  }
-  return requestJsonWithLimits({
-    url: targetUrl,
-    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
-    timeoutMs,
-    maxBytes,
-    fetchImpl,
-    parse: parseDeepSeekBalance,
-  });
-}
-
-/** Fetch one OpenCode Go usage response without mutating any local state.
- * Same request discipline as the DeepSeek balance fetch: one shared deadline
- * for headers, body and parse, size-capped and always released.
- * @returns {Promise<{status: string, category: string, parsed?: object,
- *   retryAfterSeen?: boolean, retryAfterMs?: number|null}>}
- */
-export async function requestOpenCodeGoUsage({
-  apiKey,
-  url = null,
-  endpoints = null,
-  timeoutMs = 8000,
-  maxBytes = MAX_RESPONSE_BYTES,
-  fetchImpl = globalThis.fetch,
-} = {}) {
-  const targetUrl = url ?? endpoints?.usageUrl ?? OPENCODE_GO_USAGE_URL;
-  if (
-    typeof apiKey !== 'string'
-    || apiKey.length === 0
-    || !officialOpenCodeGoUsageUrl(targetUrl)
-  ) {
-    return { status: PROVIDER_USAGE_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
-  }
-  return requestJsonWithLimits({
-    url: targetUrl,
-    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
-    timeoutMs,
-    maxBytes,
-    fetchImpl,
-    parse: parseOpenCodeGoUsage,
-  });
-}
-
-/**
- * Fetch one Zhipu Coding Plan quota response. The service reports every
- * failure as HTTP 200 with `success: false` plus a body `code`, so the quota
- * body is inspected before any normalization: body `code` 401 is an auth
- * failure, and an expired or absent plan (as well as a `success: true` body
- * with no usable limits) falls back to the CN account balance. Only the CN
- * region has a balance report; the international region hides instead.
- * HTTP-level failures on the quota request are returned as-is, so a
- * transient error never spends a second request.
- * @returns {Promise<{status: string, category: string, parsed?: object,
- *   retryAfterSeen?: boolean, retryAfterMs?: number|null}>}
- */
-export async function requestZhipuUsage({
-  apiKey,
-  endpoints = null,
-  timeoutMs = 8000,
-  maxBytes = MAX_RESPONSE_BYTES,
-  fetchImpl = globalThis.fetch,
-  now = Date.now(),
-} = {}) {
-  const usageUrl = endpoints?.usageUrl;
-  const balanceUrl = endpoints?.balanceUrl ?? null;
-  if (
-    typeof apiKey !== 'string'
-    || apiKey.length === 0
-    || !officialZhipuUsageUrl(usageUrl)
-    || (balanceUrl !== null && !officialZhipuBalanceUrl(balanceUrl))
-  ) {
-    return { status: PROVIDER_USAGE_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
-  }
-  const headers = { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' };
-  const quota = await requestJsonWithLimits({
-    url: usageUrl,
-    headers,
-    timeoutMs,
-    maxBytes,
-    fetchImpl,
-    parse: (json) => json,
-    now,
-  });
-  if (quota.status !== PROVIDER_USAGE_RESULT.SUCCESS) return quota;
-  const body = quota.parsed;
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return { status: PROVIDER_USAGE_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
-  }
-  if (zhipuNumber(body.code) === 401) {
-    return { status: PROVIDER_USAGE_RESULT.UNAUTHORIZED, category: REQUEST_CATEGORY.AUTH };
-  }
-  const parsedQuota = parseZhipuQuota(body, now);
-  if (parsedQuota) return { status: PROVIDER_USAGE_RESULT.SUCCESS, parsed: parsedQuota };
-  if (balanceUrl === null) {
-    return { status: PROVIDER_USAGE_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
-  }
-  const balance = await requestJsonWithLimits({
-    url: balanceUrl,
-    headers,
-    timeoutMs,
-    maxBytes,
-    fetchImpl,
-    parse: (json) => json,
-    now,
-  });
-  if (balance.status === PROVIDER_USAGE_RESULT.UNAUTHORIZED) return balance;
-  const parsedBalance = balance.status === PROVIDER_USAGE_RESULT.SUCCESS
-    ? parseZhipuBalance(balance.parsed)
-    : null;
-  return parsedBalance
-    ? { status: PROVIDER_USAGE_RESULT.SUCCESS, parsed: parsedBalance }
-    : { status: PROVIDER_USAGE_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
 }
 
 function removeFile(filePath) {

@@ -298,6 +298,7 @@ test('zhipu target resolution accepts aliases and decides the region from the of
     assert.ok(target, `${provider} must resolve`);
     assert.equal(target.provider, provider);
     assert.equal(target.adapter, provider);
+    assert.equal(target.adapterId, 'zhipuai-coding-plan');
     assert.equal(Object.hasOwn(target, 'apiKey'), false);
     assert.doesNotMatch(target.cachePath, /redacted|credential/);
   }
@@ -309,10 +310,13 @@ test('zhipu target resolution accepts aliases and decides the region from the of
     'http://open.bigmodel.cn/api/paas/v4',
     'https://open.bigmodel.cn:8443/api/paas/v4',
     'https://user:pass@open.bigmodel.cn/api/paas/v4',
-    'https://api.deepseek.com/v1',
   ]) {
     assert.equal(targetFor(paths, zhipuConfig({ baseUrl })), null, baseUrl);
   }
+  // Selection follows the base_url host, not the provider's name: the same
+  // table pointed at DeepSeek's official host routes to the DeepSeek adapter.
+  const crossHost = targetFor(paths, zhipuConfig({ baseUrl: 'https://api.deepseek.com/v1' }));
+  assert.equal(crossHost.adapterId, 'deepseek');
 });
 
 test('requestZhipuUsage calls the CN quota endpoint with the provider key', async () => {
