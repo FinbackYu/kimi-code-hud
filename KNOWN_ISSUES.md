@@ -817,3 +817,88 @@ and 2.2.0 integrations include the same fix and synthetic regressions.
 A real Kimi Code 2.2.0 DeepSeek account smoke remains unverified. Seeing a
 balance in one configuration validates that path only; the other failure
 branches remain covered by synthetic tests.
+
+## KI-22: A shared display name misattributed the active provider
+
+Status: fixed (unreleased, `feat/coding-plan-quota`)
+
+Affected area: quota/provider attribution
+
+The status-line payload's `model` field is the host's display name
+(`displayName ?? model ?? alias`), not the config alias. When two providers
+declare models with the same `display_name` — e.g. official DeepSeek and a
+subscription gateway both naming a model "DeepSeek V4.1 Flash" — the HUD's
+fallback provider resolution matched the first table in config file order.
+On a frame without the wire `modelAlias` (before `profile.bind` /
+`config.update` / `llm.request` rows arrive), an OpenCode Go model could
+therefore resolve as `deepseek` and show the DeepSeek account balance
+against OpenCode Go traffic.
+
+The fix keeps the exact alias match authoritative and makes the loose
+display-name / model-id fallback attribution-safe: it collects every
+matching table and resolves only when all candidates agree on one provider;
+a match spread across providers fails closed and renders no quota, balance,
+or usage windows at all. Regression coverage pins the cross-provider
+collision, the same-provider consensus, and the exact-alias precedence.
+
+## KI-23: An unavailable GLM Coding Plan degrades to the CN balance
+
+Status: open (by design, `feat/coding-plan-quota`)
+
+Affected area: GLM Coding Plan provider usage
+
+The GLM Coding Plan quota service reports every failure as HTTP 200 with
+`success: false` and a body `code` — an expired plan answers
+`{"code":500,"msg":"当前用户不存在coding plan","success":false}`, and team
+accounts without the organization header can answer `success: true` with no
+usable limits. The HUD therefore inspects the raw body before normalizing:
+body `code` 401 is treated as an authorization failure, and any other
+unusable quota body falls back to the CN account report
+(`www.bigmodel.cn/api/biz/account/query-customer-account-report`), rendering
+`Zhipu Balance ¥N.NN` in place of the subscription windows. The report's
+`rechargeAmount` / `giveAmount` are lifetime totals, so only
+`availableBalance` (or `balance`) feeds the displayed amount and the
+granted/topped-up components stay unknown.
+
+The international region (`api.z.ai`) has no account-report endpoint, so an
+unusable plan there renders nothing instead of a balance. Quota HTTP-level
+transient failures (5xx, timeouts) never trigger the balance request; they
+record normal refresh backoff. A live GLM Coding Plan account with an active
+plan remains unverified — the expired-account path is the one exercised on a
+real key.
+
+## KI-24: Four providers have no supported usage source
+
+Status: open (by design)
+
+Affected area: provider usage adapters
+
+A provider-usage adapter reads an official JSON endpoint with the same
+inference credential the provider already uses and renders only what that
+payload states. Four providers cannot meet that bar, so they have no adapter,
+and their segment hides instead of showing a guessed number:
+
+- **mimo / xiaomi** — the usage figures exist only behind a browser cookie
+  session; there is no endpoint the inference key can call. Explicitly out of
+  scope for this cycle.
+- **Alibaba coding plan** — quota lives behind a console RPC authenticated by a
+  console cookie, not by the inference key.
+- **doubao (Volcengine Ark)** — the console exposes no quota JSON endpoint for
+  an inference key; the only probe that answers is a synthetic inference
+  request, which spends tokens and still never returns a balance.
+- **zenmux** — its quota endpoint accepts only a management key, which is a
+  different credential from the inference key and cannot serve inference.
+
+Admission criteria for a new adapter (enforced by review, not by code):
+
+1. The provider's own inference credential (literal `api_key`, or `api_key_env`
+   pointing at one environment variable) can `GET` an official JSON endpoint
+   directly — no browser cookie, OAuth handshake, password login, separate
+   management key, or extra account identifier.
+2. The endpoint sits on the provider's official host, so host-based selection
+   keeps the key away from compatible proxies.
+3. Authorization failures and unreadable payloads both degrade to "hidden" —
+   never to a guessed amount and never to an invented zeroed window.
+
+A provider that fails any criterion stays listed here instead of shipping a
+best-effort probe.

@@ -173,11 +173,42 @@ export function resolveProviderConfig({ provider, configText } = {}) {
 }
 
 /**
+ * All [models."<alias>"] tables whose alias, display_name, or model id
+ * matches the given string. The table-name (alias) match is flagged: it is
+ * unique by construction, unlike cosmetic display names, which unrelated
+ * providers may share.
+ * @param {string} text config.toml content
+ * @param {string} name
+ * @returns {{body: string, byAlias: boolean}[]}
+ */
+function findModelTables(text, name) {
+  const re = /\[models\."([^"]+)"\]\s*\n([\s\S]*?)(?=\n\[|$)/g;
+  const matches = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const [, alias, body] = m;
+    const byAlias = alias === name;
+    if (
+      byAlias
+      || stringValue(body, 'display_name') === name
+      || stringValue(body, 'model') === name
+    ) {
+      matches.push({ body, byAlias });
+    }
+  }
+  return matches;
+}
+
+/**
  * Resolve which provider serves the session's active model. The wire's
  * modelAlias is exact and preferred; the payload's model display string is
  * the fallback. Returns the provider name (e.g. "managed:kimi-code",
  * "anthropic") or null when it cannot be determined (missing config,
- * unknown model, or a model table without a provider key).
+ * unknown model, a model table without a provider key, or a fallback match
+ * spread across multiple providers — different providers can serve the same
+ * upstream model under the same display name, so an ambiguous fallback fails
+ * closed rather than attributing one provider's balance or quota to another
+ * provider's traffic).
  * @param {object} opts
  * @param {string|null} [opts.modelAlias] alias from the wire's config.update
  * @param {string|null} [opts.modelDisplay] model display string from the payload
@@ -202,8 +233,13 @@ export function resolveModelProvider({
   }
   for (const name of [modelAlias, modelDisplay]) {
     if (!name) continue;
-    const table = findModelTable(text, name);
-    if (table !== null) return stringValue(table, 'provider');
+    const matches = findModelTables(text, name);
+    const exact = matches.filter((entry) => entry.byAlias);
+    if (exact.length > 0) return stringValue(exact[0].body, 'provider');
+    if (matches.length === 0) continue;
+    const providers = new Set(matches.map((entry) => stringValue(entry.body, 'provider')));
+    if (providers.size === 1) return [...providers][0];
+    return null;
   }
   return null;
 }

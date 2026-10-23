@@ -1,3 +1,34 @@
+// Provider usage facade: account-scoped cache, refresh lock, failure backoff,
+// and adapter selection. The provider-specific request/parse code lives in
+// src/provider-usage/, one module per provider surface:
+//
+//   provider-usage/common.mjs       shared normalizer, result vocabulary, URL discipline
+//   provider-usage/deepseek.mjs     api.deepseek.com balance
+//   provider-usage/opencode-go.mjs  opencode.ai subscription windows
+//   provider-usage/zhipu.mjs        GLM Coding Plan windows + CN balance fallback
+//   provider-usage/moonshot.mjs     Moonshot Open Platform balance (intl + CN)
+//   provider-usage/minimax.mjs      MiniMax token-plan windows / balance by key prefix
+//   provider-usage/synthetic.mjs    synthetic.new subscription windows
+//   provider-usage/chutes.mjs       Chutes subscription windows
+//   provider-usage/openrouter.mjs   OpenRouter spending-cap windows
+//   provider-usage/deepinfra.mjs    DeepInfra prepaid balance
+//   provider-usage/venice.mjs       Venice billing balance (admin key)
+//   provider-usage/ollama.mjs       Ollama Cloud windows / balance
+//   provider-usage/command-code.mjs Command Code credit windows + balance
+//   provider-usage/clinepass.mjs    ClinePass plan windows
+//   provider-usage/kilo.mjs         Kilo Gateway prepaid balance
+//   provider-usage/vercel-ai-gateway.mjs  Vercel AI Gateway credits
+//
+// Every adapter module exports one frozen `ADAPTER`; the contract is spelled
+// out at the top of common.mjs. An adapter is selected by the configured
+// provider's `base_url` host — never by the provider's name — so a new adapter
+// is a new file plus one line in ADAPTERS. Adding an adapter must not require
+// touching any other adapter.
+//
+// This module stays the public facade: the parsers, request helpers and
+// provider constants that existed here before the split are re-exported
+// unchanged, so consumers and tests keep importing from this path.
+
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -6,107 +37,97 @@ import path from 'node:path';
 import { atomicWriteFile } from './fs-store.mjs';
 import { resolveProviderConfig } from './model-config.mjs';
 import {
-  MAX_RESPONSE_BYTES,
-  REQUEST_CATEGORY,
   clearRefreshState,
   isRefreshBlocked,
   recordRefreshFailure,
-  requestJsonWithLimits,
 } from './request-guard.mjs';
 import { CONFIG_TOML_PATH, PROVIDER_USAGE_DIR } from './paths.mjs';
+import { ADAPTER as deepSeekAdapter } from './provider-usage/deepseek.mjs';
+import { ADAPTER as openCodeGoAdapter } from './provider-usage/opencode-go.mjs';
+import { ADAPTER as zhipuAdapter } from './provider-usage/zhipu.mjs';
+import { ADAPTER as moonshotAdapter } from './provider-usage/moonshot.mjs';
+import { ADAPTER as miniMaxAdapter } from './provider-usage/minimax.mjs';
+import { ADAPTER as syntheticAdapter } from './provider-usage/synthetic.mjs';
+import { ADAPTER as chutesAdapter } from './provider-usage/chutes.mjs';
+import { ADAPTER as openRouterAdapter } from './provider-usage/openrouter.mjs';
+import { ADAPTER as deepInfraAdapter } from './provider-usage/deepinfra.mjs';
+import { ADAPTER as veniceAdapter } from './provider-usage/venice.mjs';
+import { ADAPTER as ollamaAdapter } from './provider-usage/ollama.mjs';
+import { ADAPTER as commandCodeAdapter } from './provider-usage/command-code.mjs';
+import { ADAPTER as clinePassAdapter } from './provider-usage/clinepass.mjs';
+import { ADAPTER as kiloAdapter } from './provider-usage/kilo.mjs';
+import { ADAPTER as vercelAiGatewayAdapter } from './provider-usage/vercel-ai-gateway.mjs';
+import { PROVIDER_USAGE_RESULT, normalizeUsage } from './provider-usage/common.mjs';
 
-export const DEEPSEEK_PROVIDER = 'deepseek';
-export const DEEPSEEK_BALANCE_URL = 'https://api.deepseek.com/user/balance';
+export {
+  OPENCODE_GO_PROVIDER,
+  OPENCODE_GO_USAGE_URL,
+  parseOpenCodeGoUsage,
+  requestOpenCodeGoUsage,
+} from './provider-usage/opencode-go.mjs';
+export {
+  DEEPSEEK_BALANCE_URL,
+  DEEPSEEK_PROVIDER,
+  parseDeepSeekBalance,
+  requestDeepSeekUsage,
+} from './provider-usage/deepseek.mjs';
+export {
+  ZHIPU_CN_BALANCE_URL,
+  ZHIPU_CN_USAGE_URL,
+  ZHIPU_INTL_USAGE_URL,
+  ZHIPU_PROVIDER,
+  ZHIPU_PROVIDER_ALIASES,
+  parseZhipuBalance,
+  parseZhipuQuota,
+  requestZhipuUsage,
+} from './provider-usage/zhipu.mjs';
+export { PROVIDER_USAGE_RESULT } from './provider-usage/common.mjs';
+
 export const PROVIDER_USAGE_TTL_MS = 60_000;
 export const PROVIDER_USAGE_LOCK_STALE_MS = 30_000;
 
 const CACHE_VERSION = 1;
 
-export const PROVIDER_USAGE_RESULT = Object.freeze({
-  SUCCESS: 'success',
-  UNAUTHORIZED: 'unauthorized',
-  TRANSIENT: 'transient',
-  INVALID: 'invalid',
-});
+/**
+ * Every registered usage adapter, in probe order. Selection walks this list and
+ * stops at the first adapter whose `accepts(config)` returns endpoints, so one
+ * host may be claimed by one adapter only; a second claim would make the winner
+ * depend on registry order. Exported so the registry invariants (unique ids,
+ * pairwise-disjoint `hosts`, contract shape) are testable against the shipped
+ * list rather than a copy of it.
+ */
+export const ADAPTERS = Object.freeze([
+  deepSeekAdapter,
+  openCodeGoAdapter,
+  zhipuAdapter,
+  moonshotAdapter,
+  miniMaxAdapter,
+  syntheticAdapter,
+  chutesAdapter,
+  openRouterAdapter,
+  deepInfraAdapter,
+  veniceAdapter,
+  ollamaAdapter,
+  commandCodeAdapter,
+  clinePassAdapter,
+  kiloAdapter,
+  vercelAiGatewayAdapter,
+]);
 
-function finiteAmount(value) {
-  if (typeof value !== 'number' && typeof value !== 'string') return null;
-  if (typeof value === 'string' && value.trim() === '') return null;
-  const amount = Number(value);
-  return Number.isFinite(amount) && amount >= 0 ? amount : null;
-}
-
-function normalizeBalanceInfo(info) {
-  if (!info || typeof info !== 'object') return null;
-  const currency = typeof info.currency === 'string' ? info.currency.toUpperCase() : '';
-  const total = finiteAmount(info.total ?? info.total_balance);
-  if (!/^[A-Z]{3}$/.test(currency) || total === null) return null;
-  const granted = finiteAmount(info.granted ?? info.granted_balance);
-  const toppedUp = finiteAmount(info.toppedUp ?? info.topped_up_balance);
-  return { currency, total, granted, toppedUp };
-}
-
-function normalizeUsage(usage) {
-  if (!usage || typeof usage !== 'object' || usage.kind !== 'balance') return null;
-  if (
-    typeof usage.label !== 'string'
-    || !/^[A-Za-z0-9][A-Za-z0-9 .&+-]{0,31}$/.test(usage.label)
-  ) {
-    return null;
+/**
+ * Pick the adapter that serves a provider config by its official base_url
+ * host. Returns null when no adapter accepts the URL (a proxy, a non-https
+ * URL, or a provider that has no usage endpoint at all).
+ * @param {{baseUrl: string|null}|null} config result of resolveProviderConfig
+ * @returns {{adapter: object, endpoints: object}|null}
+ */
+export function selectProviderUsageAdapter(config) {
+  if (!config) return null;
+  for (const adapter of ADAPTERS) {
+    const endpoints = adapter.accepts(config);
+    if (endpoints) return { adapter, endpoints };
   }
-  if (typeof usage.available !== 'boolean' || !Array.isArray(usage.balances)) return null;
-  const balances = usage.balances.map(normalizeBalanceInfo).filter(Boolean);
-  if (balances.length === 0) return null;
-  return {
-    kind: 'balance',
-    label: usage.label,
-    available: usage.available,
-    balances,
-  };
-}
-
-/** Parse DeepSeek's official /user/balance response into provider-neutral data. */
-export function parseDeepSeekBalance(json) {
-  if (!json || typeof json !== 'object' || typeof json.is_available !== 'boolean') return null;
-  return normalizeUsage({
-    kind: 'balance',
-    label: 'DeepSeek',
-    available: json.is_available,
-    balances: json.balance_infos,
-  });
-}
-
-function officialDeepSeekBaseUrl(value) {
-  try {
-    const parsed = new URL(value);
-    const pathname = parsed.pathname.replace(/\/$/, '');
-    return parsed.protocol === 'https:'
-      && parsed.hostname === 'api.deepseek.com'
-      && (parsed.port === '' || parsed.port === '443')
-      && (pathname === '' || pathname === '/v1')
-      && parsed.username === ''
-      && parsed.password === ''
-      && parsed.search === ''
-      && parsed.hash === '';
-  } catch {
-    return false;
-  }
-}
-
-function officialDeepSeekBalanceUrl(value) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'https:'
-      && parsed.hostname === 'api.deepseek.com'
-      && (parsed.port === '' || parsed.port === '443')
-      && parsed.pathname === '/user/balance'
-      && parsed.username === ''
-      && parsed.password === ''
-      && parsed.search === ''
-      && parsed.hash === '';
-  } catch {
-    return false;
-  }
+  return null;
 }
 
 function credentialFingerprint(provider, apiKey) {
@@ -139,17 +160,6 @@ export function providerUsagePaths({
   };
 }
 
-function providerUsageAdapter(provider) {
-  if (provider === DEEPSEEK_PROVIDER) {
-    return {
-      id: DEEPSEEK_PROVIDER,
-      accepts: (config) => officialDeepSeekBaseUrl(config.baseUrl),
-      request: requestDeepSeekUsage,
-    };
-  }
-  return null;
-}
-
 /**
  * Resolve the request credential the way the host does since Kimi Code
  * 2.0.1: a provider declares either a literal `api_key` or an `api_key_env`
@@ -176,22 +186,28 @@ function resolveProviderUsageContext({
   env = process.env,
   providerUsageDir = PROVIDER_USAGE_DIR,
 } = {}) {
-  const adapter = providerUsageAdapter(provider);
-  if (!adapter) return null;
   const config = resolveProviderConfig({ provider, configText });
-  const apiKey = config ? resolveCredential(config, env) : null;
-  if (!apiKey || !adapter.accepts(config)) {
-    return null;
-  }
+  if (!config) return null;
+  const selection = selectProviderUsageAdapter(config);
+  const apiKey = resolveCredential(config, env);
+  if (!selection || !apiKey) return null;
   const fingerprint = credentialFingerprint(provider, apiKey);
   const paths = providerUsagePaths({ provider, credentialFingerprint: fingerprint, providerUsageDir });
   if (!paths) return null;
   return {
-    adapter,
+    adapter: selection.adapter,
     apiKey,
+    endpoints: selection.endpoints,
     target: {
       provider,
-      adapter: adapter.id,
+      // The account label shown to diagnostics. It has always been the
+      // configured provider name (adapters no longer contribute a name), and
+      // the cache/lock buckets below stay keyed by that name.
+      adapter: provider,
+      // The adapter module that accepted this provider's base_url host. This
+      // is what host-based selection resolves to and is independent of the
+      // provider's name.
+      adapterId: selection.adapter.id,
       credentialFingerprint: fingerprint,
       ...paths,
     },
@@ -199,9 +215,11 @@ function resolveProviderUsageContext({
 }
 
 /**
- * Resolve an active provider into a supported, secret-free usage target.
- * A provider name alone is insufficient: DeepSeek also requires its official
- * base URL so an API key is never forwarded to a compatible third-party proxy.
+ * Resolve a configured provider into a supported, secret-free usage target.
+ * A provider name alone is insufficient: the provider table must exist and
+ * one registered adapter must accept its official base URL (see `hosts` on
+ * each adapter in src/provider-usage/) so an API key is never forwarded to a
+ * compatible third-party proxy.
  * The credential may be a literal `api_key` or an `api_key_env` variable read
  * from `env` (default `process.env`) at resolution time.
  */
@@ -391,36 +409,6 @@ export function ensureFreshProviderUsage({
   }
 }
 
-/** Fetch one DeepSeek balance response without mutating any local state.
- * The whole request — headers, body and JSON parse — shares one deadline, and
- * response bodies are size-capped and always released.
- * @returns {Promise<{status: string, category: string, parsed?: object,
- *   retryAfterSeen?: boolean, retryAfterMs?: number|null}>}
- */
-export async function requestDeepSeekUsage({
-  apiKey,
-  url = DEEPSEEK_BALANCE_URL,
-  timeoutMs = 8000,
-  maxBytes = MAX_RESPONSE_BYTES,
-  fetchImpl = globalThis.fetch,
-} = {}) {
-  if (
-    typeof apiKey !== 'string'
-    || apiKey.length === 0
-    || !officialDeepSeekBalanceUrl(url)
-  ) {
-    return { status: PROVIDER_USAGE_RESULT.INVALID, category: REQUEST_CATEGORY.INVALID_FORMAT };
-  }
-  return requestJsonWithLimits({
-    url,
-    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
-    timeoutMs,
-    maxBytes,
-    fetchImpl,
-    parse: parseDeepSeekBalance,
-  });
-}
-
 function removeFile(filePath) {
   try { fs.unlinkSync(filePath); } catch { /* absent or unreadable */ }
 }
@@ -470,6 +458,7 @@ export async function refreshProviderUsage({
     lockPath = context.target.lockPath;
     const result = await context.adapter.request({
       apiKey: context.apiKey,
+      endpoints: context.endpoints,
       timeoutMs,
       fetchImpl,
     });

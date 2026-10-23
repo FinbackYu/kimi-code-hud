@@ -21,9 +21,9 @@ import path from 'node:path';
 
 import { nodeCommand } from './command.mjs';
 import {
-  DEEPSEEK_PROVIDER,
   PROVIDER_USAGE_TTL_MS,
   resolveProviderUsageTarget,
+  selectProviderUsageAdapter,
 } from './provider-usage.mjs';
 import {
   MANAGED_KIMI_PROVIDER,
@@ -57,12 +57,12 @@ const METRICS_STATE_RE = /^metrics-[A-Za-z0-9_-]+\.json$/;
 const GIT_STATUS_CACHE_VERSION = 1;
 
 /**
- * Explain the credential side of an unusable DeepSeek balance target, or
+ * Explain the credential side of an unusable provider usage target, or
  * return null when the credential is not the blocker. Only variable NAMES
  * are reported — the doctor never prints key values.
  */
-function deepSeekCredentialNote(configText) {
-  const config = resolveProviderConfig({ provider: DEEPSEEK_PROVIDER, configText });
+function providerCredentialNote(provider, configText) {
+  const config = resolveProviderConfig({ provider, configText });
   if (!config) return 'missing api_key or api_key_env';
   const declared = [config.apiKey, config.apiKeyEnv].filter(
     (value) => typeof value === 'string' && value.length > 0,
@@ -74,6 +74,54 @@ function deepSeekCredentialNote(configText) {
   return typeof value === 'string' && value.length > 0
     ? null
     : `api_key_env "${config.apiKeyEnv}" is unset or empty`;
+}
+
+/**
+ * Report one provider's usage-adapter diagnostics (target resolution, cache
+ * age, refresh backoff) and return the current credential's cache stem so
+ * foreign-account leftovers can be reported separately, or null when the
+ * provider has no config table. Only non-reversible fingerprints are printed.
+ * Called only for providers whose base_url host already matched `adapter`.
+ */
+function reportProviderUsage({ add, provider, adapter, configText, groups, providerUsageDir, now }) {
+  if (findProviderTable(configText, provider) === null) return null;
+  const metric = adapter.metric;
+  const target = resolveProviderUsageTarget({ provider, configText, providerUsageDir });
+  if (target === null) {
+    const reason = providerCredentialNote(provider, configText)
+      || 'the provider name cannot form an account cache bucket';
+    add('providers', 'note', provider,
+      `provider table present but unusable for ${metric} (${reason}) — the ${metric} `
+      + 'stays hidden by design');
+    return null;
+  }
+  const group = groups.find((g) => g.provider === target.provider
+    && g.fingerprint === target.credentialFingerprint);
+  const dc = group ? group.cache : { state: 'missing' };
+  if (dc.state === 'fresh') {
+    add('providers', 'ok', provider,
+      `cache fresh, age ${formatDuration(dc.ageMs)} · account ${target.credentialFingerprint}`);
+  } else if (dc.state === 'stale') {
+    add('providers', 'note', provider,
+      `cache stale, age ${formatDuration(dc.ageMs)} — rendered dimmed · account ${target.credentialFingerprint}`);
+  } else if (dc.state === 'missing') {
+    add('providers', 'note', provider,
+      `no cache yet — the first render spawns a background refresh · account ${target.credentialFingerprint}`);
+  } else if (dc.state === 'corrupt' || dc.state === 'legacy') {
+    add('providers', 'warn', provider,
+      `${dc.state} cache record — ignored; the next successful refresh rewrites it`);
+  } else {
+    add('providers', 'warn', provider, 'cache exists but cannot be read');
+  }
+  const ds = group && group.statePresent ? group.state : undefined;
+  if (ds === null) {
+    add('providers', 'warn', `${provider} refresh state`,
+      'corrupt refresh state — ignored');
+  } else if (ds && now < ds.nextAttemptAt) {
+    add('providers', 'note', `${provider} refresh state`,
+      `backoff in effect after ${ds.failures} failure(s) (${ds.category}); next attempt ${formatUntil(ds.nextAttemptAt, now)}`);
+  }
+  return `${target.provider}-${target.credentialFingerprint}`;
 }
 
 /**
@@ -495,61 +543,40 @@ export function collectDoctorReport({
 
   // --- provider usage -------------------------------------------------------
   if (configToml.state === 'ok') {
-    const supported = new Set([MANAGED_KIMI_PROVIDER, DEEPSEEK_PROVIDER]);
-    const unsupported = configuredProviderNames(configToml.text)
-      .filter((name) => !supported.has(name));
-    if (unsupported.length > 0) {
+    // Adapters are chosen by each provider's base_url host, never by its name;
+    // the managed subscription provider is the quota consumer, not a usage
+    // adapter, so it is not counted here.
+    const configured = configuredProviderNames(configToml.text)
+      .filter((provider) => provider !== MANAGED_KIMI_PROVIDER)
+      .map((provider) => {
+        const config = resolveProviderConfig({ provider, configText: configToml.text });
+        return { provider, selection: config ? selectProviderUsageAdapter(config) : null };
+      });
+    const unadapted = configured
+      .filter((entry) => entry.selection === null)
+      .map((entry) => entry.provider);
+    if (unadapted.length > 0) {
       add('providers', 'note', 'usage targets',
-        `no usage adapter for: ${unsupported.join(', ')} — balances render only for `
-        + `${DEEPSEEK_PROVIDER}; quota bars only for ${MANAGED_KIMI_PROVIDER}`);
+        `no usage adapter for: ${unadapted.join(', ')} — an adapter is chosen by the `
+        + 'provider\'s base_url host, and no registered adapter serves it; check that '
+        + 'base_url points at the provider\'s official API host');
     }
     const groups = scanProviderGroups(p.providerUsageDir, now);
-    const target = resolveProviderUsageTarget({
-      provider: DEEPSEEK_PROVIDER,
-      configText: configToml.text,
-      providerUsageDir: p.providerUsageDir,
-    });
-    let currentStem = null;
-    if (findProviderTable(configToml.text, DEEPSEEK_PROVIDER) !== null) {
-      if (target === null) {
-        const reasons = [
-          deepSeekCredentialNote(configToml.text),
-          'base_url is not the official endpoint',
-        ].filter(Boolean).join(', or ');
-        add('providers', 'note', DEEPSEEK_PROVIDER,
-          `provider table present but unusable for balance (${reasons}) — the balance `
-          + 'stays hidden by design');
-      } else {
-        currentStem = `${target.provider}-${target.credentialFingerprint}`;
-        const group = groups.find((g) => g.provider === target.provider
-          && g.fingerprint === target.credentialFingerprint);
-        const dc = group ? group.cache : { state: 'missing' };
-        if (dc.state === 'fresh') {
-          add('providers', 'ok', DEEPSEEK_PROVIDER,
-            `cache fresh, age ${formatDuration(dc.ageMs)} · account ${target.credentialFingerprint}`);
-        } else if (dc.state === 'stale') {
-          add('providers', 'note', DEEPSEEK_PROVIDER,
-            `cache stale, age ${formatDuration(dc.ageMs)} — rendered dimmed · account ${target.credentialFingerprint}`);
-        } else if (dc.state === 'missing') {
-          add('providers', 'note', DEEPSEEK_PROVIDER,
-            `no cache yet — the first render spawns a background refresh · account ${target.credentialFingerprint}`);
-        } else if (dc.state === 'corrupt' || dc.state === 'legacy') {
-          add('providers', 'warn', DEEPSEEK_PROVIDER,
-            `${dc.state} cache record — ignored; the next successful refresh rewrites it`);
-        } else {
-          add('providers', 'warn', DEEPSEEK_PROVIDER, 'cache exists but cannot be read');
-        }
-        const ds = group && group.statePresent ? group.state : undefined;
-        if (ds === null) {
-          add('providers', 'warn', `${DEEPSEEK_PROVIDER} refresh state`,
-            'corrupt refresh state — ignored');
-        } else if (ds && now < ds.nextAttemptAt) {
-          add('providers', 'note', `${DEEPSEEK_PROVIDER} refresh state`,
-            `backoff in effect after ${ds.failures} failure(s) (${ds.category}); next attempt ${formatUntil(ds.nextAttemptAt, now)}`);
-        }
-      }
+    const currentStems = new Set();
+    for (const { provider, selection } of configured) {
+      if (selection === null) continue;
+      const stem = reportProviderUsage({
+        add,
+        provider,
+        adapter: selection.adapter,
+        configText: configToml.text,
+        groups,
+        providerUsageDir: p.providerUsageDir,
+        now,
+      });
+      if (stem !== null) currentStems.add(stem);
     }
-    const others = groups.filter((g) => `${g.provider}-${g.fingerprint}` !== currentStem);
+    const others = groups.filter((g) => !currentStems.has(`${g.provider}-${g.fingerprint}`));
     for (const group of others) {
       const parts = [];
       if (group.cache.state === 'fresh') parts.push(`cache fresh, age ${formatDuration(group.cache.ageMs)}`);

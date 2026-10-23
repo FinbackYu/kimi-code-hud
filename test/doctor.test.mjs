@@ -450,7 +450,13 @@ test('deepseek balance: official target with a fresh cache is ok; unusable confi
     '',
   ].join('\n'));
   const proxyRun = collect(proxy);
-  assert.match(one(proxyRun.report, 'providers', 'deepseek').detail, /balance stays hidden by design/);
+  // A proxy base_url host matches no adapter, so the provider is reported as
+  // unadapted instead of getting a per-provider line; the balance stays hidden
+  // by design and the exit code stays healthy.
+  const proxyTargets = one(proxyRun.report, 'providers', 'usage targets');
+  assert.match(proxyTargets.detail, /no usage adapter for: deepseek/);
+  assert.match(proxyTargets.detail, /check that base_url points at the provider's official API host/);
+  assert.equal(proxyRun.report.checks.some((c) => c.label === 'deepseek'), false);
   assert.equal(doctorExitCode(proxyRun.report), 0);
 
   const noKey = makeEnv();
@@ -925,4 +931,142 @@ test('bin --help documents the doctor entry point', () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /--doctor/);
   assert.match(result.stdout, /--share/);
+});
+
+test('opencode-go usage windows: official target reports cache state; proxy hides by design', () => {
+  const withKey = makeEnv();
+  seedConfigToml(withKey.paths, [
+    '',
+    '[providers.opencode-go]',
+    'type = "openai"',
+    'base_url = "https://opencode.ai/inference/go/openai/v1"',
+    'api_key = "oc_sk_synth"',
+    '',
+  ].join('\n'));
+  const configText = fs.readFileSync(withKey.paths.configTomlPath, 'utf8');
+  const target = resolveProviderUsageTarget({
+    provider: 'opencode-go',
+    configText,
+    providerUsageDir: withKey.paths.providerUsageDir,
+  });
+  assert.ok(target, 'official opencode-go config must resolve');
+  fs.mkdirSync(withKey.paths.providerUsageDir, { recursive: true });
+  fs.writeFileSync(target.cachePath, JSON.stringify({
+    version: 1,
+    provider: 'opencode-go',
+    credentialFingerprint: target.credentialFingerprint,
+    fetchedAt: NOW - 1000,
+    kind: 'windows',
+    label: 'OpenCode Go',
+    windows: [{ label: '5h', usedRatio: 0.01, resetAt: null }],
+  }));
+  const okCheck = one(collect(withKey).report, 'providers', 'opencode-go');
+  assert.equal(okCheck.level, 'ok');
+  assert.match(okCheck.detail, /cache fresh, age 1s/);
+
+  const proxy = makeEnv();
+  seedConfigToml(proxy.paths, [
+    '',
+    '[providers.opencode-go]',
+    'type = "openai"',
+    'base_url = "https://opencode.proxy.example/v1"',
+    'api_key = "oc_sk_synth"',
+    '',
+  ].join('\n'));
+  const proxyRun = collect(proxy);
+  assert.match(
+    one(proxyRun.report, 'providers', 'usage targets').detail,
+    /no usage adapter for: opencode-go/,
+  );
+});
+
+test('an official base_url host is what makes a provider adapted, not its name', () => {
+  const env = makeEnv();
+  seedConfigToml(env.paths, [
+    '',
+    '[providers.opencode-go]',
+    'type = "openai"',
+    'base_url = "https://opencode.ai/inference/go/openai/v1"',
+    'api_key = "oc_sk_synth"',
+    '',
+    '[providers.anthropic]',
+    'type = "anthropic"',
+    '',
+  ].join('\n'));
+  const { report } = collect(env);
+  const check = one(report, 'providers', 'usage targets');
+  assert.match(check.detail, /no usage adapter for: anthropic/);
+  assert.doesNotMatch(check.detail, /opencode-go,/);
+  assert.doesNotMatch(check.detail, /balance renders only for/);
+  assert.match(check.detail, /check that base_url points at the provider's official API host/);
+});
+
+test('zhipu coding-plan providers resolve by official host and report their cache state', () => {
+  const cn = makeEnv();
+  seedConfigToml(cn.paths, [
+    '',
+    '[providers."zhipuai-coding-plan"]',
+    'type = "openai"',
+    'base_url = "https://open.bigmodel.cn/api/paas/v4"',
+    'api_key = "zp_sk_synth"',
+    '',
+    '[providers.anthropic]',
+    'type = "anthropic"',
+    '',
+  ].join('\n'));
+  const configText = fs.readFileSync(cn.paths.configTomlPath, 'utf8');
+  const target = resolveProviderUsageTarget({
+    provider: 'zhipuai-coding-plan',
+    configText,
+    providerUsageDir: cn.paths.providerUsageDir,
+  });
+  assert.ok(target, 'official CN zhipu config must resolve');
+  fs.mkdirSync(cn.paths.providerUsageDir, { recursive: true });
+  fs.writeFileSync(target.cachePath, JSON.stringify({
+    version: 1,
+    provider: 'zhipuai-coding-plan',
+    credentialFingerprint: target.credentialFingerprint,
+    fetchedAt: NOW - 1000,
+    kind: 'balance',
+    label: 'Zhipu',
+    available: true,
+    balances: [{ currency: 'CNY', total: 15.39, granted: null, toppedUp: null }],
+  }));
+  const { report } = collect(cn);
+  const check = one(report, 'providers', 'zhipuai-coding-plan');
+  assert.equal(check.level, 'ok');
+  assert.match(check.detail, /cache fresh, age 1s/);
+  const targets = one(report, 'providers', 'usage targets');
+  assert.match(targets.detail, /no usage adapter for: anthropic/);
+  assert.doesNotMatch(targets.detail, /zhipuai-coding-plan,/);
+  assert.doesNotMatch(targets.detail, /GLM Coding Plan windows for/);
+  assert.match(targets.detail, /check that base_url points at the provider's official API host/);
+
+  const intl = makeEnv();
+  seedConfigToml(intl.paths, [
+    '',
+    '[providers.zai]',
+    'type = "openai"',
+    'base_url = "https://api.z.ai/api/paas/v4"',
+    'api_key = "zp_sk_synth"',
+    '',
+  ].join('\n'));
+  assert.match(
+    one(collect(intl).report, 'providers', 'zai').detail,
+    /no cache yet — the first render spawns a background refresh/,
+  );
+
+  const proxy = makeEnv();
+  seedConfigToml(proxy.paths, [
+    '',
+    '[providers."zhipu-coding-plan"]',
+    'type = "openai"',
+    'base_url = "https://open.bigmodel.cn.evil/api/paas/v4"',
+    'api_key = "zp_sk_synth"',
+    '',
+  ].join('\n'));
+  assert.match(
+    one(collect(proxy).report, 'providers', 'usage targets').detail,
+    /no usage adapter for: zhipu-coding-plan/,
+  );
 });
