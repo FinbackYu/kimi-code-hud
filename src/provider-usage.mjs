@@ -6,6 +6,18 @@
 //   provider-usage/deepseek.mjs     api.deepseek.com balance
 //   provider-usage/opencode-go.mjs  opencode.ai subscription windows
 //   provider-usage/zhipu.mjs        GLM Coding Plan windows + CN balance fallback
+//   provider-usage/moonshot.mjs     Moonshot Open Platform balance (intl + CN)
+//   provider-usage/minimax.mjs      MiniMax token-plan windows / balance by key prefix
+//   provider-usage/synthetic.mjs    synthetic.new subscription windows
+//   provider-usage/chutes.mjs       Chutes subscription windows
+//   provider-usage/openrouter.mjs   OpenRouter spending-cap windows
+//   provider-usage/deepinfra.mjs    DeepInfra prepaid balance
+//   provider-usage/venice.mjs       Venice billing balance (admin key)
+//   provider-usage/ollama.mjs       Ollama Cloud windows / balance
+//   provider-usage/command-code.mjs Command Code credit windows + balance
+//   provider-usage/clinepass.mjs    ClinePass plan windows
+//   provider-usage/kilo.mjs         Kilo Gateway prepaid balance
+//   provider-usage/vercel-ai-gateway.mjs  Vercel AI Gateway credits
 //
 // Every adapter module exports one frozen `ADAPTER`; the contract is spelled
 // out at the top of common.mjs. An adapter is selected by the configured
@@ -33,6 +45,18 @@ import { CONFIG_TOML_PATH, PROVIDER_USAGE_DIR } from './paths.mjs';
 import { ADAPTER as deepSeekAdapter } from './provider-usage/deepseek.mjs';
 import { ADAPTER as openCodeGoAdapter } from './provider-usage/opencode-go.mjs';
 import { ADAPTER as zhipuAdapter } from './provider-usage/zhipu.mjs';
+import { ADAPTER as moonshotAdapter } from './provider-usage/moonshot.mjs';
+import { ADAPTER as miniMaxAdapter } from './provider-usage/minimax.mjs';
+import { ADAPTER as syntheticAdapter } from './provider-usage/synthetic.mjs';
+import { ADAPTER as chutesAdapter } from './provider-usage/chutes.mjs';
+import { ADAPTER as openRouterAdapter } from './provider-usage/openrouter.mjs';
+import { ADAPTER as deepInfraAdapter } from './provider-usage/deepinfra.mjs';
+import { ADAPTER as veniceAdapter } from './provider-usage/venice.mjs';
+import { ADAPTER as ollamaAdapter } from './provider-usage/ollama.mjs';
+import { ADAPTER as commandCodeAdapter } from './provider-usage/command-code.mjs';
+import { ADAPTER as clinePassAdapter } from './provider-usage/clinepass.mjs';
+import { ADAPTER as kiloAdapter } from './provider-usage/kilo.mjs';
+import { ADAPTER as vercelAiGatewayAdapter } from './provider-usage/vercel-ai-gateway.mjs';
 import { PROVIDER_USAGE_RESULT, normalizeUsage } from './provider-usage/common.mjs';
 
 export {
@@ -65,15 +89,29 @@ export const PROVIDER_USAGE_LOCK_STALE_MS = 30_000;
 const CACHE_VERSION = 1;
 
 /**
- * Every registered usage adapter. Selection walks this list in order and stops
- * at the first adapter whose `accepts(config)` returns endpoints, so one host
- * may be claimed by one adapter only; a second claim would make the winner
- * depend on registry order.
+ * Every registered usage adapter, in probe order. Selection walks this list and
+ * stops at the first adapter whose `accepts(config)` returns endpoints, so one
+ * host may be claimed by one adapter only; a second claim would make the winner
+ * depend on registry order. Exported so the registry invariants (unique ids,
+ * pairwise-disjoint `hosts`, contract shape) are testable against the shipped
+ * list rather than a copy of it.
  */
-const ADAPTERS = Object.freeze([
+export const ADAPTERS = Object.freeze([
   deepSeekAdapter,
   openCodeGoAdapter,
   zhipuAdapter,
+  moonshotAdapter,
+  miniMaxAdapter,
+  syntheticAdapter,
+  chutesAdapter,
+  openRouterAdapter,
+  deepInfraAdapter,
+  veniceAdapter,
+  ollamaAdapter,
+  commandCodeAdapter,
+  clinePassAdapter,
+  kiloAdapter,
+  vercelAiGatewayAdapter,
 ]);
 
 /**
@@ -179,9 +217,9 @@ function resolveProviderUsageContext({
 /**
  * Resolve a configured provider into a supported, secret-free usage target.
  * A provider name alone is insufficient: the provider table must exist and
- * one registered adapter must accept its official base URL
- * (api.deepseek.com, opencode.ai, open.bigmodel.cn or api.z.ai) so an API key
- * is never forwarded to a compatible third-party proxy.
+ * one registered adapter must accept its official base URL (see `hosts` on
+ * each adapter in src/provider-usage/) so an API key is never forwarded to a
+ * compatible third-party proxy.
  * The credential may be a literal `api_key` or an `api_key_env` variable read
  * from `env` (default `process.env`) at resolution time.
  */

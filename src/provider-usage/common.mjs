@@ -1,7 +1,8 @@
 // Shared base for the per-provider usage adapters in this directory.
 //
-// Each adapter module (deepseek.mjs, opencode-go.mjs, zhipu.mjs, and every
-// future one) exports one frozen `ADAPTER` object with this exact shape:
+// Each adapter module in this directory (every module registered in
+// ../provider-usage.mjs) exports one frozen `ADAPTER` object with this exact
+// shape:
 //
 //   ADAPTER = {
 //     // Stable registry identity, unique across adapters. Also names the
