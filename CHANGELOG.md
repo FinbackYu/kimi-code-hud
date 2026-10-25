@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-26
+
 ### Changed
 
 - Report Cache as a token-weighted ratio over the five most recent main-agent
@@ -13,6 +15,7 @@ The project follows [Semantic Versioning](https://semver.org/).
   value after 30 minutes without a new prompt or completed step.
 - Cap the displayed Cache percentage at 99% so high or complete hit rates
   never round up to 100%.
+- Update showcase model labels and generated images to K3.1 Pro (PR #63).
 
 ## [0.9.0] - 2026-10-23
 
@@ -701,7 +704,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.1
 [0.9.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.0
 [0.8.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.5
 [0.8.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.4
