@@ -146,7 +146,7 @@ test('v7 projection backfill persists its cursor, retries, then swaps atomically
     thinkingLevel: null,
     goal: null,
     swarmMode: false,
-    cacheScanV: 2,
+    cacheScanV: 3,
     backfillScanV: 7,
   }));
 
@@ -192,7 +192,7 @@ test('projection backfill catches a main wire that keeps growing between frames'
     v: 7,
     agents: { main: { offset: historical.length, samples: [], lastMedian: null } },
     modelAlias: 'old',
-    cacheScanV: 2,
+    cacheScanV: 3,
     backfillScanV: 7,
   }));
 
@@ -226,7 +226,7 @@ test('an inode change abandons an unfinished projection and restarts at byte zer
     v: 7,
     agents: { main: { offset: oldWire.length, samples: [], lastMedian: null } },
     modelAlias: 'visible-old',
-    cacheScanV: 2,
+    cacheScanV: 3,
     backfillScanV: 7,
   }));
   getMetrics(fx.id, {
@@ -322,7 +322,7 @@ test('50 MiB damaged history catches up across frames without duplicate cache or
   assert.equal(state.agents.main.discardingLine, false);
   assert.equal(metrics.modelAlias, 'caught-up');
   assert.deepEqual(state.agents.main.samples.map((sample) => sample.v), [10, 20, 30]);
-  assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500 });
+  assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500, stale: false });
   assert.equal(metrics.tps, 20);
   assert.ok(MAX_PARTIAL_LINE_BYTES < damaged.length);
 });
@@ -376,29 +376,38 @@ test('cache migration cut short by a small frame budget resumes until complete',
   let metrics = getMetrics(fx.id, {
     sessionsRoot: fx.sessionsRoot,
     stateDir: fx.stateDir,
+    now: EVENT_TIME + 1000,
     readBudgetBytes: tailBudget,
   });
   let state = readState(fx.statePath);
-  assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 300, inputTokens: 500 });
+  assert.deepEqual(metrics.cache, {
+    hitRate: 0.6, readTokens: 300, inputTokens: 500, stale: false,
+  });
   assert.equal(state.cacheScanV, undefined);
 
-  // A larger budget rescans from the reset counters up to the still-saved
+  // A larger budget rescans from the reset window up to the still-saved
   // offset, then folds the appended row live — every row counts exactly once.
   fs.appendFileSync(fx.wires.main, `${stepEnd(30, EVENT_TIME + 2)}\n`);
   metrics = getMetrics(fx.id, {
     sessionsRoot: fx.sessionsRoot,
     stateDir: fx.stateDir,
+    now: EVENT_TIME + 1000,
     readBudgetBytes: WIRE_READ_BUDGET_BYTES,
   });
   state = readState(fx.statePath);
-  assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500 });
-  assert.equal(state.cacheScanV, 2);
+  assert.deepEqual(metrics.cache, {
+    hitRate: 0.6, readTokens: 900, inputTokens: 1500, stale: false,
+  });
+  assert.equal(state.cacheScanV, 3);
 
   // The persisted marker stops further rescans, so nothing is counted twice.
   metrics = getMetrics(fx.id, {
     sessionsRoot: fx.sessionsRoot,
     stateDir: fx.stateDir,
+    now: EVENT_TIME + 1000,
     readBudgetBytes: WIRE_READ_BUDGET_BYTES,
   });
-  assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500 });
+  assert.deepEqual(metrics.cache, {
+    hitRate: 0.6, readTokens: 900, inputTokens: 1500, stale: false,
+  });
 });

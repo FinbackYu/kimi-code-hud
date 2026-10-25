@@ -46,7 +46,9 @@ test('sanitized host payload and wire fixtures lock every layout/theme/color con
   fs.writeFileSync(path.join(agentDir, 'wire.jsonl'), wireText);
   const metrics = getMetrics(payload.sessionId, { sessionsRoot, stateDir, now: NOW });
   assert.equal(metrics.tps, 30);
-  assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500 });
+  assert.deepEqual(metrics.cache, {
+    hitRate: 0.6, readTokens: 900, inputTokens: 1500, stale: false,
+  });
 
   const actual = {};
   for (const layout of ['compact', 'normal']) {

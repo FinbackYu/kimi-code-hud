@@ -16,8 +16,9 @@ import {
   stepEnd as wireStepEnd,
   turnPrompt,
 } from './.helpers.mjs';
+import { CACHE_TTL_MS } from '../src/metrics-constants.mjs';
 
-// Session-state lifecycle: locating session directories, incremental wire reads and rotation, sampling windows, persisted-state migrations and backfills, cumulative cache usage and payload bookkeeping.
+// Session-state lifecycle: locating session directories, incremental wire reads and rotation, sampling windows, persisted-state migrations and backfills, recent cache usage and payload bookkeeping.
 
 function stepEnd(options) {
   return wireStepEnd({
@@ -450,9 +451,9 @@ test('getMetrics migrates v6 global median into per-agent buckets without cross-
       thinkingLevel: null,
       goal: null,
       swarmMode: false,
-      cacheScanV: 2,
+      cacheScanV: 3,
       backfillScanV: 8,
-      cache: { readTokens: 0, inputTokens: 0 },
+      cache: { samples: [], lastMessageAt: null },
     }),
   );
   getMetrics(id, { sessionsRoot: root, stateDir, now: EVENT_TIME });
@@ -567,7 +568,7 @@ test('getMetrics fresh sessions derive tracked rows without a separate backfill 
   assert.equal(state.backfillScanV, 10); // marker still set, no rescan later
 });
 
-test('getMetrics persists and incrementally updates session-cumulative cache usage', () => {
+test('getMetrics persists and incrementally updates recent cache usage', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
@@ -586,7 +587,9 @@ test('getMetrics persists and incrementally updates session-cumulative cache usa
   );
 
   let m = getMetrics(id, opts);
-  assert.deepEqual(m.cache, { hitRate: 0.6, readTokens: 300, inputTokens: 500 });
+  assert.deepEqual(m.cache, {
+    hitRate: 0.6, readTokens: 300, inputTokens: 500, stale: false,
+  });
 
   fs.appendFileSync(
     wirePath,
@@ -601,17 +604,22 @@ test('getMetrics persists and incrementally updates session-cumulative cache usa
     }) + '\n',
   );
   m = getMetrics(id, opts);
-  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000 });
+  assert.deepEqual(m.cache, {
+    hitRate: 0.4, readTokens: 400, inputTokens: 1000, stale: false,
+  });
 
   const persisted = JSON.parse(
     fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'),
   );
-  assert.equal(persisted.cache.readTokens, 400);
-  assert.equal(persisted.cache.inputTokens, 1000);
-  assert.equal(persisted.cacheScanV, 2);
+  assert.deepEqual(persisted.cache.samples, [
+    { readTokens: 300, inputTokens: 500 },
+    { readTokens: 100, inputTokens: 500 },
+  ]);
+  assert.equal(persisted.cache.lastMessageAt, EVENT_TIME);
+  assert.equal(persisted.cacheScanV, 3);
 });
 
-test('getMetrics keeps the session cache value unchanged across a new prompt', () => {
+test('getMetrics keeps the recent cache value across prompts and expires only its freshness', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
@@ -624,11 +632,19 @@ test('getMetrics keeps the session cache value unchanged across a new prompt', (
     hitRate: 67840 / 68792,
     readTokens: 67840,
     inputTokens: 68792,
+    stale: false,
   };
   assert.deepEqual(getMetrics(id, opts).cache, expected);
+  assert.deepEqual(
+    getMetrics(id, { ...opts, now: EVENT_TIME + CACHE_TTL_MS }).cache,
+    { ...expected, stale: true },
+  );
 
-  fs.appendFileSync(wirePath, turnPrompt('second') + '\n');
-  assert.deepEqual(getMetrics(id, opts).cache, expected);
+  fs.appendFileSync(wirePath, turnPrompt('second', EVENT_TIME + CACHE_TTL_MS) + '\n');
+  assert.deepEqual(
+    getMetrics(id, { ...opts, now: EVENT_TIME + CACHE_TTL_MS }).cache,
+    expected,
+  );
 });
 
 test('cache migration restores only usage before the old offset then reads new bytes once', () => {
@@ -671,7 +687,9 @@ test('cache migration restores only usage before the old offset then reads new b
 
   const m = getMetrics(id, { sessionsRoot: root, stateDir, now: FRESH_NOW });
   assert.equal(m.tps, 150); // only the newly appended TPS row was added
-  assert.deepEqual(m.cache, { hitRate: 0.4, readTokens: 400, inputTokens: 1000 });
+  assert.deepEqual(m.cache, {
+    hitRate: 0.4, readTokens: 400, inputTokens: 1000, stale: false,
+  });
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
   assert.deepEqual(state.agents.main.samples.map((s) => s.v), [100, 200, 300, 100]);
 });
@@ -701,7 +719,7 @@ test('bounded cache migration counts tail step.end rows without their prompt', (
 
   const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
   // The prompt lies beyond the 1 MiB tail, but the step.end inside the tail
-  // still counts toward the cumulative session ratio.
+  // still contributes to the recent-request ratio.
   const restored = getMetrics(id, opts).cache;
   assert.notEqual(restored, null);
 
@@ -711,8 +729,7 @@ test('bounded cache migration counts tail step.end rows without their prompt', (
       stepEnd({ output: 100, streamMs: 1000, ttftMs: 400, turnId: '2' }) + '\n',
   );
   const m = getMetrics(id, opts).cache;
-  // The new step.end folds in cumulatively; identical usage doubles the
-  // session counters.
+  // Both identical samples remain inside the five-request window.
   assert.equal(m.inputTokens, restored.inputTokens * 2);
   assert.equal(m.readTokens, restored.readTokens * 2);
 });

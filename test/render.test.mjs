@@ -524,6 +524,19 @@ test('cache segment has no semantic threshold color', () => {
   assert.ok(!line.includes('\x1b[32mCache'));
   assert.ok(!line.includes('\x1b[33mCache'));
   assert.ok(!line.includes('\x1b[31mCache'));
+  assert.ok(!line.includes('\x1b[90mCache'));
+});
+
+test('stale cache stays visible in muted gray in every layout', () => {
+  const cache = { ...CACHE_METRIC, stale: true };
+  for (const layout of ['compact', 'normal']) {
+    const [line] = renderHud(baseCtx({ layout, color: true, metrics: { cache } }));
+    assert.ok(line.includes('\x1b[90mCache 92%\x1b[0m'), `${layout}: ${line}`);
+  }
+
+  const [plain] = renderHud(baseCtx({ color: false, metrics: { cache } }));
+  assert.ok(plain.includes('Cache 92%'));
+  assert.ok(!plain.includes('\x1b['));
 });
 
 test('stale TPS stays visible in muted gray', () => {

@@ -1,54 +1,83 @@
+import { CACHE_MAX_SAMPLES, CACHE_TTL_MS } from './metrics-constants.mjs';
+
 /**
- * Session-cumulative prompt-cache metrics reconstructed from the main agent's
- * wire journal. The caller owns persistence; this module only mutates the
- * supplied state and derives a render-safe metric.
+ * Recent prompt-cache metrics reconstructed from the main agent's wire
+ * journal. The caller owns persistence; this module only mutates the supplied
+ * state and derives a render-safe metric.
  */
 
 function emptyCache() {
   return {
-    readTokens: 0,
-    inputTokens: 0,
+    samples: [],
+    lastMessageAt: null,
   };
-}
-
-function ensureCacheState(state) {
-  const cache = state.cache;
-  const validCounters =
-    validUsageNumber(cache?.readTokens) &&
-    validUsageNumber(cache?.inputTokens) &&
-    cache.readTokens <= cache.inputTokens;
-  if (!cache || typeof cache !== 'object' || !validCounters) {
-    state.cache = emptyCache();
-  }
-}
-
-/**
- * Reset the session cache counters (wire truncated/rotated, restore retry).
- * @param {object} state mutated in place
- */
-export function resetCacheState(state) {
-  state.cache = emptyCache();
 }
 
 function validUsageNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+function validTimestamp(value) {
+  return validUsageNumber(value);
+}
+
+function validSample(sample) {
+  return sample &&
+    typeof sample === 'object' &&
+    validUsageNumber(sample.readTokens) &&
+    validUsageNumber(sample.inputTokens) &&
+    sample.inputTokens > 0 &&
+    sample.readTokens <= sample.inputTokens;
+}
+
+function ensureCacheState(state) {
+  const cache = state.cache;
+  const valid =
+    cache &&
+    typeof cache === 'object' &&
+    Array.isArray(cache.samples) &&
+    cache.samples.length <= CACHE_MAX_SAMPLES &&
+    cache.samples.every(validSample) &&
+    (cache.lastMessageAt === null || validTimestamp(cache.lastMessageAt));
+  if (!valid) state.cache = emptyCache();
+}
+
 /**
- * Fold one wire row into the session cache counters. step.end accumulates
- * cumulatively — the metric describes the whole session, not the current
- * turn. usage.record is deliberately ignored because it duplicates the
- * step.end usage. A step.end without complete usage fields is skipped
- * rather than poisoning the ratio.
+ * Reset the recent cache samples and freshness anchor (wire truncated/rotated,
+ * restore retry).
+ * @param {object} state mutated in place
+ */
+export function resetCacheState(state) {
+  state.cache = emptyCache();
+}
+
+function noteMessage(cache, time) {
+  if (
+    validTimestamp(time) &&
+    (cache.lastMessageAt === null || time > cache.lastMessageAt)
+  ) {
+    cache.lastMessageAt = time;
+  }
+}
+
+/**
+ * Fold one wire row into the recent cache window. Each complete step.end keeps
+ * one token-weighted sample; usage.record is deliberately ignored because it
+ * duplicates the step.end usage. Prompt and step timestamps refresh the idle
+ * anchor without changing the ratio itself.
  * @param {object} state mutated in place
  * @param {object} row parsed wire.jsonl line
  */
 export function applyCacheWireRow(state, row) {
   ensureCacheState(state);
 
-  if (row?.type !== 'context.append_loop_event') return;
-  const event = row.event;
-  if (!event || event.type !== 'step.end') return;
+  const prompt = row?.type === 'turn.prompt';
+  const event = row?.event;
+  if (!prompt && (row?.type !== 'context.append_loop_event' || event?.type !== 'step.end')) {
+    return;
+  }
+  noteMessage(state.cache, row.time);
+  if (prompt) return;
 
   const usage = event.usage;
   const fields = [
@@ -58,32 +87,46 @@ export function applyCacheWireRow(state, row) {
   ];
   if (!fields.every(validUsageNumber)) return;
 
-  state.cache.readTokens += usage.inputCacheRead;
-  state.cache.inputTokens +=
+  const inputTokens =
     usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation;
+  if (!validUsageNumber(inputTokens) || inputTokens <= 0) return;
+  state.cache.samples.push({
+    readTokens: usage.inputCacheRead,
+    inputTokens,
+  });
+  if (state.cache.samples.length > CACHE_MAX_SAMPLES) {
+    state.cache.samples.splice(0, state.cache.samples.length - CACHE_MAX_SAMPLES);
+  }
 }
 
 /**
- * Return the render-safe session cache metric, or null when nothing has been
- * counted yet. The ratio is session-cumulative, so between turns it is
- * already the latest complete value — no freshness flag is attached.
+ * Return the token-weighted metric for the newest requests, or null when no
+ * positive input has been counted. The last value stays visible after the idle
+ * TTL but is marked stale so the renderer can dim it.
  * @param {object} state
- * @returns {{hitRate: number, readTokens: number, inputTokens: number}|null}
+ * @param {number} [now]
+ * @returns {{hitRate: number, readTokens: number, inputTokens: number, stale: boolean}|null}
  */
-export function cacheMetricFromState(state) {
+export function cacheMetricFromState(state, now = Date.now()) {
   ensureCacheState(state);
   const cache = state.cache;
+  const readTokens = cache.samples.reduce((sum, sample) => sum + sample.readTokens, 0);
+  const inputTokens = cache.samples.reduce((sum, sample) => sum + sample.inputTokens, 0);
   if (
-    !Number.isFinite(cache.inputTokens) ||
-    cache.inputTokens <= 0 ||
-    !Number.isFinite(cache.readTokens) ||
-    cache.readTokens < 0
+    !Number.isFinite(inputTokens) ||
+    inputTokens <= 0 ||
+    !Number.isFinite(readTokens) ||
+    readTokens < 0
   ) {
     return null;
   }
   return {
-    hitRate: cache.readTokens / cache.inputTokens,
-    readTokens: cache.readTokens,
-    inputTokens: cache.inputTokens,
+    hitRate: readTokens / inputTokens,
+    readTokens,
+    inputTokens,
+    stale:
+      !validTimestamp(now) ||
+      cache.lastMessageAt === null ||
+      now - cache.lastMessageAt >= CACHE_TTL_MS,
   };
 }

@@ -101,7 +101,7 @@ const SCENARIOS = [
     },
     baselineReadings(metrics) {
       assert.equal(metrics.tps, 30);
-      assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500 });
+      assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500, stale: false });
     },
   },
   {
@@ -156,7 +156,7 @@ const SCENARIOS = [
     },
     baselineReadings(metrics) {
       assert.equal(metrics.tps, 30);
-      assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500 });
+      assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500, stale: false });
     },
     renderChecks(rendered) {
       // The rows must not leak into badge state either: no [swarm] badge.
@@ -268,7 +268,7 @@ const SCENARIOS = [
       // appended record classes — so the comparison covers a session where every
       // reducer contributed.
       assert.equal(metrics.tps, 30);
-      assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500 });
+      assert.deepEqual(metrics.cache, { hitRate: 0.6, readTokens: 900, inputTokens: 1500, stale: false });
       assert.equal(metrics.modelAlias, 'kimi-code/k3');
       assert.equal(metrics.thinkingLevel, 'high');
       assert.equal(metrics.compactionMs, 400);

@@ -226,7 +226,7 @@ export function summarizeMetrics(state, { now = Date.now(), agentNames = null } 
       hostVersion: state.hostVersion ?? null,
       swarmMode: state.swarmMode === true,
       towerMode: state.towerMode === true,
-      cache: cacheMetricFromState(state),
+      cache: cacheMetricFromState(state, now),
       modelUsage: sessionUsageMetricFromState(state, agentNames),
       tpsTotal,
       tpsAgents,

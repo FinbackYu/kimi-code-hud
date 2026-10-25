@@ -470,7 +470,7 @@ function fleetLabel(count, includesMain) {
   return `${count} ${count === 1 ? 'agent' : 'agents'}`;
 }
 
-function cacheSegment({ metrics }) {
+function cacheSegment({ metrics, color, C }) {
   const cache = metrics?.cache;
   if (
     !cache ||
@@ -481,7 +481,8 @@ function cacheSegment({ metrics }) {
   ) {
     return null;
   }
-  return `Cache ${Math.round(cache.hitRate * 100)}%`;
+  const text = `Cache ${Math.round(cache.hitRate * 100)}%`;
+  return cache.stale === true ? colorize(color, C.muted, text) : text;
 }
 
 /**
