@@ -481,7 +481,7 @@ function cacheSegment({ metrics, color, C }) {
   ) {
     return null;
   }
-  const text = `Cache ${Math.round(cache.hitRate * 100)}%`;
+  const text = `Cache ${Math.min(99, Math.round(cache.hitRate * 100))}%`;
   return cache.stale === true ? colorize(color, C.muted, text) : text;
 }
 

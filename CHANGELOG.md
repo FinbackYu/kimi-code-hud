@@ -11,6 +11,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Report Cache as a token-weighted ratio over the five most recent main-agent
   model steps instead of cumulative session history, and dim the retained
   value after 30 minutes without a new prompt or completed step.
+- Cap the displayed Cache percentage at 99% so high or complete hit rates
+  never round up to 100%.
 
 ## [0.9.0] - 2026-10-23
 

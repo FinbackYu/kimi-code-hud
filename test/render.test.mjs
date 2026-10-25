@@ -498,6 +498,16 @@ test('cache hit rate appears after speed and before quota in every layout', () =
   }
 });
 
+test('cache percentage caps rounded values at 99 in every layout', () => {
+  for (const layout of ['compact', 'normal']) {
+    for (const hitRate of [0.995, 0.999, 1]) {
+      const [line] = renderHud(baseCtx({ layout, metrics: { cache: { hitRate } } }));
+      assert.ok(line.includes('Cache 99%'), `${layout} ${hitRate}: ${line}`);
+      assert.ok(!line.includes('Cache 100%'), `${layout} ${hitRate}: ${line}`);
+    }
+  }
+});
+
 test('cache zero rate is shown while unavailable or invalid rates are omitted', () => {
   const [zero] = renderHud(baseCtx({
     metrics: {
