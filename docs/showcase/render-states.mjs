@@ -35,7 +35,7 @@ const iso = (ms) => new Date(ms).toISOString();
 /* ── 基础数据：各状态在此之上做最小覆盖 ── */
 
 const basePayload = {
-  model: 'K3',
+  model: 'K3.1 Pro',
   cwd: '/workspace/kimi-code-hud',
   gitBranch: 'main',
   contextTokens: 31457, // 3% of 1M

@@ -59,7 +59,7 @@ export { SESSIONS_ROOT, findSessionDir, findWirePath, CACHE_BACKFILL_MAX_BYTES, 
  * full_compaction.begin/complete/cancel anchor the compaction timer (main
  * agent only, and only between turns — a mid-turn auto-compaction is not
  * tracked). The main agent additionally feeds the state-level handlers —
- * the session cache counters, config.update (model alias + thinking level),
+ * the recent cache window, config.update (model alias + thinking level),
  * goal ops, the background-task registry and the swarm/tower mode journals.
  * @param {object} state mutated in place
  * @param {object} row parsed wire.jsonl line
@@ -97,13 +97,14 @@ function isCacheBackfillLine(line) {
 }
 
 /**
- * Rebuild the session-cumulative cache counters from the bounded tail before
- * the saved metrics byte offset. The read is capped so an upgrade cannot turn
- * the 300ms hot path into an unbounded historical scan. Every complete
- * step.end in the tail counts, so no prompt-boundary alignment is needed.
- * A read cut short by the frame budget leaves the done marker unset so a
- * later frame with a larger budget can finish the scan; only a complete read
- * (or one stopped by the hard cap) is marked done.
+ * Rebuild the recent-request cache window and message-time anchor from the
+ * bounded tail before the saved metrics byte offset. The read is capped so an
+ * upgrade cannot turn the 300ms hot path into an unbounded historical scan.
+ * Every complete step.end in the tail is folded in order, leaving only the
+ * newest samples, so no prompt-boundary alignment is needed. A read cut short
+ * by the frame budget leaves the done marker unset so a later frame with a
+ * larger budget can finish the scan; only a complete read (or one stopped by
+ * the hard cap) is marked done.
  */
 function restoreCacheState(wirePath, state, maxBytes = CACHE_BACKFILL_MAX_BYTES) {
   const end = Math.max(0, Math.floor(state.agents?.main?.offset ?? 0));

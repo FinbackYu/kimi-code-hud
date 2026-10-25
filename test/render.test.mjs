@@ -498,6 +498,16 @@ test('cache hit rate appears after speed and before quota in every layout', () =
   }
 });
 
+test('cache percentage caps rounded values at 99 in every layout', () => {
+  for (const layout of ['compact', 'normal']) {
+    for (const hitRate of [0.995, 0.999, 1]) {
+      const [line] = renderHud(baseCtx({ layout, metrics: { cache: { hitRate } } }));
+      assert.ok(line.includes('Cache 99%'), `${layout} ${hitRate}: ${line}`);
+      assert.ok(!line.includes('Cache 100%'), `${layout} ${hitRate}: ${line}`);
+    }
+  }
+});
+
 test('cache zero rate is shown while unavailable or invalid rates are omitted', () => {
   const [zero] = renderHud(baseCtx({
     metrics: {
@@ -524,6 +534,19 @@ test('cache segment has no semantic threshold color', () => {
   assert.ok(!line.includes('\x1b[32mCache'));
   assert.ok(!line.includes('\x1b[33mCache'));
   assert.ok(!line.includes('\x1b[31mCache'));
+  assert.ok(!line.includes('\x1b[90mCache'));
+});
+
+test('stale cache stays visible in muted gray in every layout', () => {
+  const cache = { ...CACHE_METRIC, stale: true };
+  for (const layout of ['compact', 'normal']) {
+    const [line] = renderHud(baseCtx({ layout, color: true, metrics: { cache } }));
+    assert.ok(line.includes('\x1b[90mCache 92%\x1b[0m'), `${layout}: ${line}`);
+  }
+
+  const [plain] = renderHud(baseCtx({ color: false, metrics: { cache } }));
+  assert.ok(plain.includes('Cache 92%'));
+  assert.ok(!plain.includes('\x1b['));
 });
 
 test('stale TPS stays visible in muted gray', () => {
