@@ -495,7 +495,8 @@ function cacheSegment({ metrics, color, C }) {
 function formatUsageWindow({ label, entry, stale, layout, color, useLevelColor, now, C }) {
   const fraction = quotaFraction(entry);
   if (fraction === null) return null;
-  const pct = `${Math.round(fraction * 100)}%`;
+  const percentage = fraction < 1 ? Math.min(99, Math.round(fraction * 100)) : Math.round(fraction * 100);
+  const pct = `${percentage}%`;
   const countdown = formatCountdown(entry.resetAt, now);
   const suffix = countdown ? ` ${countdown}` : '';
   const dim = (text) => colorize(color, C.muted, text);

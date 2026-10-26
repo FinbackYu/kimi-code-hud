@@ -84,6 +84,19 @@ test('ratio quota keeps freshness, reset countdown and finite display boundaries
   assert.doesNotMatch(invalid, /5h|7d|NaN/);
 });
 
+test('ratio quota only displays 100% when usage reaches the full allowance', () => {
+  for (const layout of ['normal', 'compact']) {
+    for (const [usedRatio, expected] of [[0.994, '99%'], [0.995, '99%'], [0.999, '99%'], [1, '100%'], [1.2, '120%']]) {
+      const [line] = renderHud(baseCtx({
+        layout,
+        quota: quotaAt(null, [{ label: '5h', usedRatio }]),
+      }));
+      assert.match(line, new RegExp(`5h (?:█+ +)?${expected.replace('%', '\\%')}`));
+      if (usedRatio < 1) assert.doesNotMatch(line, /5h (?:█+ +)?100%/);
+    }
+  }
+});
+
 test('bar renders 10 cells graded by usage', () => {
   assert.equal(bar(0, false), ' '.repeat(10));
   assert.equal(bar(0.31, false), `███${' '.repeat(7)}`);
