@@ -99,40 +99,48 @@ test('keeps only the newest five requests so a cache miss lowers the ratio', () 
   });
 });
 
-test('turn.prompt leaves the ratio untouched and refreshes the idle anchor', () => {
+test('turn.prompt leaves a fresh ratio untouched without extending sample lifetime', () => {
   const state = makeState();
-  applyCacheWireRow(state, stepEnd('1', usage(), NOW - CACHE_TTL_MS));
-  assert.deepEqual(metric(state), {
-    hitRate: 0.6,
-    readTokens: 300,
-    inputTokens: 500,
-    stale: true,
-  });
-
-  applyCacheWireRow(state, prompt());
-  assert.deepEqual(metric(state), {
+  applyCacheWireRow(state, stepEnd('1', usage()));
+  applyCacheWireRow(state, prompt(NOW + 1000));
+  assert.deepEqual(metric(state, NOW + 1000), {
     hitRate: 0.6,
     readTokens: 300,
     inputTokens: 500,
     stale: false,
   });
-
-  applyCacheWireRow(state, stepEnd('2', usage({ inputCacheRead: 0 })));
-  const m = metric(state);
-  assert.equal(m.readTokens, 300);
-  assert.equal(m.inputTokens, 700);
+  assert.equal(metric(state, NOW + CACHE_TTL_MS), null);
 });
 
-test('marks the unchanged value stale exactly thirty minutes after the last message', () => {
+test('excludes expired samples even when fewer than five fresh samples remain', () => {
+  const state = makeState();
+  applyCacheWireRow(state, stepEnd('old', usage({
+    inputOther: 0,
+    inputCacheRead: 100,
+    inputCacheCreation: 0,
+  }), NOW - CACHE_TTL_MS - 1));
+  applyCacheWireRow(state, stepEnd('fresh', usage({
+    inputOther: 100,
+    inputCacheRead: 0,
+    inputCacheCreation: 0,
+  })));
+
+  assert.equal(state.cache.samples.length, 2);
+  assert.deepEqual(metric(state), {
+    hitRate: 0,
+    readTokens: 0,
+    inputTokens: 100,
+    stale: false,
+  });
+});
+
+test('expires samples exactly thirty minutes after their step', () => {
   const state = makeState();
   applyCacheWireRow(state, stepEnd('1', usage()));
   const fresh = metric(state, NOW + CACHE_TTL_MS - 1);
-  const stale = metric(state, NOW + CACHE_TTL_MS);
   assert.equal(fresh.stale, false);
-  assert.equal(stale.stale, true);
-  assert.equal(stale.hitRate, fresh.hitRate);
-  assert.equal(stale.readTokens, fresh.readTokens);
-  assert.equal(stale.inputTokens, fresh.inputTokens);
+  assert.equal(fresh.hitRate, 0.6);
+  assert.equal(metric(state, NOW + CACHE_TTL_MS), null);
 });
 
 test('an older message timestamp cannot move the freshness anchor backwards', () => {
@@ -228,10 +236,21 @@ test('usage.record is ignored to avoid double counting step.end', () => {
   assert.equal(metric(state)?.readTokens, 300);
 });
 
-test('a metric without a reliable message timestamp renders as stale', () => {
+test('a step without a reliable timestamp cannot enter the time window', () => {
   const state = makeState();
   applyCacheWireRow(state, stepEnd('1', usage(), null));
-  assert.equal(metric(state).stale, true);
+  assert.equal(metric(state), null);
+  assert.equal(state.cache.samples.length, 0);
+});
+
+test('persisted samples without timestamps are not counted', () => {
+  const state = {
+    cache: {
+      samples: [{ readTokens: 300, inputTokens: 500 }],
+      lastMessageAt: NOW,
+    },
+  };
+  assert.equal(metric(state), null);
 });
 
 test('resetCacheState clears the samples back to a hidden metric', () => {

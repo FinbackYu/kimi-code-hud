@@ -300,7 +300,7 @@ test('a legacy pendingBase64 cache migrates and recovers the pending record once
     thinkingLevel: null,
     goal: null,
     swarmMode: false,
-    cacheScanV: 3,
+    cacheScanV: 4,
     backfillScanV: 10,
     sessionUsage: {
       v: 1,
@@ -362,7 +362,7 @@ test('a legacy backfill reader migrates without persisting its pending content',
     thinkingLevel: null,
     goal: null,
     swarmMode: false,
-    cacheScanV: 3,
+    cacheScanV: 4,
     backfillScanV: 8,
     backfill: {
       version: 10,
