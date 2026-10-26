@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-26
+
 ### Fixed
 
 - Restrict Cache to the newest five main-agent model steps within the last 30
@@ -711,7 +713,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.2
 [0.9.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.1
 [0.9.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.0
 [0.8.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.8.5
