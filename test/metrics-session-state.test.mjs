@@ -451,7 +451,7 @@ test('getMetrics migrates v6 global median into per-agent buckets without cross-
       thinkingLevel: null,
       goal: null,
       swarmMode: false,
-      cacheScanV: 3,
+      cacheScanV: 4,
       backfillScanV: 8,
       cache: { samples: [], lastMessageAt: null },
     }),
@@ -612,14 +612,14 @@ test('getMetrics persists and incrementally updates recent cache usage', () => {
     fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'),
   );
   assert.deepEqual(persisted.cache.samples, [
-    { readTokens: 300, inputTokens: 500 },
-    { readTokens: 100, inputTokens: 500 },
+    { readTokens: 300, inputTokens: 500, time: EVENT_TIME },
+    { readTokens: 100, inputTokens: 500, time: EVENT_TIME },
   ]);
   assert.equal(persisted.cache.lastMessageAt, EVENT_TIME);
-  assert.equal(persisted.cacheScanV, 3);
+  assert.equal(persisted.cacheScanV, 4);
 });
 
-test('getMetrics keeps the recent cache value across prompts and expires only its freshness', () => {
+test('getMetrics expires old cache samples and a new prompt does not revive them', () => {
   const { root, id, wirePath } = makeSession();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-state-'));
   const opts = { sessionsRoot: root, stateDir, now: FRESH_NOW };
@@ -635,15 +635,30 @@ test('getMetrics keeps the recent cache value across prompts and expires only it
     stale: false,
   };
   assert.deepEqual(getMetrics(id, opts).cache, expected);
-  assert.deepEqual(
+  assert.equal(
     getMetrics(id, { ...opts, now: EVENT_TIME + CACHE_TTL_MS }).cache,
-    { ...expected, stale: true },
+    null,
   );
 
   fs.appendFileSync(wirePath, turnPrompt('second', EVENT_TIME + CACHE_TTL_MS) + '\n');
+  assert.equal(
+    getMetrics(id, { ...opts, now: EVENT_TIME + CACHE_TTL_MS }).cache,
+    null,
+  );
+
+  fs.appendFileSync(wirePath, stepEnd({
+    output: 100,
+    streamMs: 1000,
+    ttftMs: 400,
+    turnId: '2',
+    time: EVENT_TIME + CACHE_TTL_MS,
+    inputOther: 100,
+    inputCacheRead: 0,
+    inputCacheCreation: 0,
+  }) + '\n');
   assert.deepEqual(
     getMetrics(id, { ...opts, now: EVENT_TIME + CACHE_TTL_MS }).cache,
-    expected,
+    { hitRate: 0, readTokens: 0, inputTokens: 100, stale: false },
   );
 });
 

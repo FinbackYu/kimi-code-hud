@@ -146,7 +146,7 @@ test('v7 projection backfill persists its cursor, retries, then swaps atomically
     thinkingLevel: null,
     goal: null,
     swarmMode: false,
-    cacheScanV: 3,
+    cacheScanV: 4,
     backfillScanV: 7,
   }));
 
@@ -192,7 +192,7 @@ test('projection backfill catches a main wire that keeps growing between frames'
     v: 7,
     agents: { main: { offset: historical.length, samples: [], lastMedian: null } },
     modelAlias: 'old',
-    cacheScanV: 3,
+    cacheScanV: 4,
     backfillScanV: 7,
   }));
 
@@ -226,7 +226,7 @@ test('an inode change abandons an unfinished projection and restarts at byte zer
     v: 7,
     agents: { main: { offset: oldWire.length, samples: [], lastMedian: null } },
     modelAlias: 'visible-old',
-    cacheScanV: 3,
+    cacheScanV: 4,
     backfillScanV: 7,
   }));
   getMetrics(fx.id, {
@@ -398,7 +398,7 @@ test('cache migration cut short by a small frame budget resumes until complete',
   assert.deepEqual(metrics.cache, {
     hitRate: 0.6, readTokens: 900, inputTokens: 1500, stale: false,
   });
-  assert.equal(state.cacheScanV, 3);
+  assert.equal(state.cacheScanV, 4);
 
   // The persisted marker stops further rescans, so nothing is counted twice.
   metrics = getMetrics(fx.id, {

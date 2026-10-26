@@ -6,6 +6,13 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Restrict Cache to the newest five main-agent model steps within the last 30
+  minutes. Older steps no longer count or reappear after a new prompt, while a
+  fresh session shows its ratio from the first valid step instead of waiting
+  for five samples.
+
 ## [0.9.1] - 2026-10-26
 
 ### Changed
