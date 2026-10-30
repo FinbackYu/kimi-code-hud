@@ -1,7 +1,7 @@
 # HUD capabilities
 
 - Last verified: 2026-10-30
-- HUD behavior baseline: `v0.9.2` (`0b52448`)
+- HUD behavior baseline: `v0.9.3` (`2be3e44`)
 - Kimi Code baseline: `2.4.0` (`f26e4d91ef8d5d233f6c20b42a150f96924d4f5e`)
 - Release status (2026-10-30): 2.4.0 is the audited source/fixture baseline.
   The range is not linear — its merge-base `ce0834a8f3` sits behind both
@@ -11,7 +11,8 @@
   manifest grows 65 → 67 with `mcp.server_failed` and
   `mcp.server_failure_resolved`, both folded as no-ops. The HUD now also mirrors
   the 2.3.2+ replay rule that ignores legacy `trigger: "tool"` swarm entries
-  (issue #62, see [docs/upstream-2.4.0-review.md](docs/upstream-2.4.0-review.md)).
+  (issue #62, fixed in HUD v0.9.3; see
+  [docs/upstream-2.4.0-review.md](docs/upstream-2.4.0-review.md)).
   KI-20's real host acceptance, KI-8's live fullscreen frame, and a real
   managed-account / DeepSeek smoke remain unverified.
 
@@ -46,7 +47,7 @@ does not need to be redrawn by the command.
 |---|---|---|---|
 | permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color; Never Ask still waits for Plan-mode plan review | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
 | plan mode | `plan` in the mode slot; only the user can enter Plan mode, and every plan waits for review | Reads `planMode` | covered, presentation variant |
-| swarm mode | `swarm` in the mode slot; replay ignores legacy `swarm_mode.enter` rows with `trigger: "tool"` | Rebuilds state from main-wire `swarm_mode.enter` / `swarm_mode.exit` with the same legacy-tool exclusion; a future `payload.swarmMode` also works | covered since HUD 0.2.7; legacy replay fixed for issue #62 |
+| swarm mode | `swarm` in the mode slot; replay ignores legacy `swarm_mode.enter` rows with `trigger: "tool"` | Rebuilds state from main-wire `swarm_mode.enter` / `swarm_mode.exit` with the same legacy-tool exclusion; a future `payload.swarmMode` also works | covered since HUD 0.2.7; legacy replay fixed in HUD v0.9.3 (issue #62) |
 | tower mode | separate orchestration state | Rebuilds state from main-wire `tower_mode.enter` / `tower_mode.exit`; optional enter `sessionId` is metadata only; a future `payload.towerMode` also works; 2.2.0 dropped the optional `base` field and the `tower.base` state, which the HUD never consumed | covered |
 | goal | status, elapsed time, turns, optional turn budget | Rebuilds `goal.create` / `goal.update` / `goal.clear` / `forked`; renders a shortened badge — status lives on the goal word's color (active blue, blocked amber, paused muted), turns and optional turn budget kept, elapsed clock dropped | covered, presentation variant |
 | model and thinking | display name plus `thinking` or `thinking: <effort>` | Uses payload model plus wire/config snapshot; renders bare effort (`K3 high`). Every config-derived value — an explicit `[thinking].effort` key included — stays muted until the first wire row confirms it, because the top `max` tier is never persisted to config.toml and config can silently lag the current choice ([KI-5](KNOWN_ISSUES.md#ki-5-lazy-start-effort-follows-configtoml-where-the-top-effort-tier-is-never-persisted)) | covered, presentation variant |

@@ -6,6 +6,29 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-30
+
+### Fixed
+
+- Keep incomplete quota windows below 100%: ratios from 99.5% up to (but not
+  including) 100% now display 99%, while actual full usage and over-usage still
+  display their exact rounded percentage.
+- Stabilize the dark theme with a fixed Catppuccin Mocha truecolor palette for
+  badges, model and state colors, quota bars and their empty tracks, so terminal
+  ANSI palette remapping can no longer distort the HUD.
+- Ignore legacy `swarm_mode.enter` records with `trigger: "tool"` during replay,
+  matching the host's 2.3.2+ behavior. An unfinished old session can no longer
+  revive a stale `[swarm]` badge or distort fleet-speed composition (#62, PR #67).
+
+### Changed
+
+- Advance the audited compatibility baseline to Kimi Code 2.4.0 (non-linear
+  range from 2.3.1, 49 commits and 705 changed paths). The status-line payload,
+  footer slots, Git status model and managed-quota surface are unchanged; the
+  persisted wire manifest grows 65 → 67 with `mcp.server_failed` and
+  `mcp.server_failure_resolved`, both covered as neutral row classes (PR #67,
+  `docs/upstream-2.4.0-review.md`).
+
 ## [0.9.2] - 2026-10-26
 
 ### Fixed
@@ -713,7 +736,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.3
 [0.9.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.2
 [0.9.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.1
 [0.9.0]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.0
