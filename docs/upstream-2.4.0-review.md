@@ -92,10 +92,9 @@ remain manual acceptance gaps, not passes inferred from source or fixtures.
 ## Watch carry-over
 
 - [HUD #62](https://github.com/FinbackYu/kimi-code-hud/issues/62), upstream
-  #4384: implementation and source/fixture checklist items are covered on the
-  branch. A triage comment was posted without editing the monitor-owned title
-  or body. The issue stays open until the branch lands and the next HUD release
-  note records the user-visible fix.
+  #4384: implementation and source/fixture checklist items are covered. The
+  monitor-owned title and body were left untouched. The fix ships in HUD v0.9.3
+  (PR #67), whose release note completes the remaining checklist item.
 - The open remote issue inventory contained no other issue and no other open
   `upstream-watch` item. Repo-Overwatch's local report tree has no report after
   2026-09-03, so there is no additional unconsumed WATCH input from that tree.

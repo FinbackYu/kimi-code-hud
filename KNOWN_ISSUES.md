@@ -1,7 +1,7 @@
 # Known issues
 
 - Last verified: 2026-10-30
-- HUD behavior baseline: `v0.9.2` (`0b52448`)
+- HUD behavior baseline: `v0.9.3` (`2be3e44`)
 - Kimi Code baseline: `2.4.0` (`f26e4d91ef8d5d233f6c20b42a150f96924d4f5e`)
 
 This file tracks open footer parity problems, information boundaries, and
@@ -930,3 +930,30 @@ Admission criteria for a new adapter (enforced by review, not by code):
 
 A provider that fails any criterion stays listed here instead of shipping a
 best-effort probe.
+
+## KI-25: Legacy tool-triggered swarm replay revived the badge
+
+Status: closed (fixed in HUD `v0.9.3`, issue #62)
+
+Affected upstream slot: `swarm`
+
+Kimi Code 2.3.2 changed replay semantics for old sessions: both the engine's
+`swarmOps` state and the transcript's `foldFacts` ignore a `swarm_mode.enter`
+whose `trigger` is `tool`. The record shape remains valid so older journals stay
+readable, but an interrupted tool-triggered run no longer means that swarm mode
+is active. The HUD previously treated every enter record as active, so the same
+unfinished journal could restore a false `[swarm]` badge and alter fleet-speed
+composition.
+
+Resolution:
+
+- `src/metrics-session-meta.mjs` uses the upstream predicate: `tool` enters are
+  ignored, other and legacy missing triggers still enable the badge, and every
+  `swarm_mode.exit` disables it;
+- `test/metrics-wire-folding.test.mjs` covers a tool-only row, tool followed by
+  manual, tool followed by exit, and the missing-trigger compatibility case;
+- `test/fixtures/wire-events-legacy-tool-swarm.jsonl` fails the old reducer in
+  the direct fold, persisted-state and rendered-line comparisons, while the
+  fixed implementation matches the stripped baseline and emits no badge;
+- an isolated real `bin/kimi-hud.mjs` check renders no `[swarm]` for the legacy
+  tool fixture and renders it normally for a manual enter.
