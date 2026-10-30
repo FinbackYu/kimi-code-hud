@@ -61,11 +61,11 @@ The HUD keeps its own settings in `~/.kimi-code-hud/config.json` (JSON; unknown 
 | `KIMI_HUD_HOME` | directory | Override the HUD's own config and cache root (default `~/.kimi-code-hud`) |
 | `KIMI_CODE_HOME` | directory | Override the Kimi Code data root (default `~/.kimi-code`; every `~/.kimi-code` path in this README means this default) |
 
-With `KIMI_HUD_THEME=auto` (or unset with no host `theme`) the palette is resolved from `COLORFGBG` with a dark fallback — a status line can't run the host's OSC 11 query on the 300ms hot path; custom theme names fall back to dark. On light, badges (model name, `[plan]`, `[Ask When Needed]`, `[swarm]`, `[tower]`, `[Never Ask]`) render bold, the amber/teal are brighter than the host defaults (`#D97706`/`#14B8A6`), and the quota bars use calmer truecolor hues (`#B91C1C`/`#D97706`/`#0E7A38`) instead of glaring ANSI red. Dark mode is unchanged: bars keep terminal-remapped ANSI colors.
+With `KIMI_HUD_THEME=auto` (or unset with no host `theme`) the palette is resolved from `COLORFGBG` with a dark fallback — a status line can't run the host's OSC 11 query on the 300ms hot path; custom theme names fall back to dark. Dark uses a fixed Catppuccin Mocha truecolor palette (`#A6E3A1`/`#F9E2AF`/`#F38BA8` for the green/yellow/red bars), including badges, muted values and the bar track, so terminal ANSI palette remapping cannot change its hues. On light, badges (model name, `[plan]`, `[Ask When Needed]`, `[swarm]`, `[tower]`, `[Never Ask]`) render bold, the amber/teal are brighter than the host defaults (`#D97706`/`#14B8A6`), and the quota bars use calmer truecolor hues (`#B91C1C`/`#D97706`/`#0E7A38`) instead of glaring ANSI red.
 
 ### Permission badges
 
-- Official wording (default): `[Always Ask]` (manual — faded primary blue, dark `#54658A` / light `#7D92B8`, quieter than the default foreground and always present so the left edge stays put), `[Ask When Needed]` (yolo — amber, matching the host), `[Never Ask]` (auto — bright red, for contrast with the amber);
+- Official wording (default): `[Always Ask]` (manual — gray-blue, dark `#6C7086` / light `#7D92B8`, quieter than the default foreground and always present so the left edge stays put), `[Ask When Needed]` (yolo — peach on dark, amber on light), `[Never Ask]` (auto — pink on dark, bright red on light, for contrast with yolo);
 - `short` wording renders `[manual]` / `[yolo]` / `[auto]` with the same color rules.
 
 ## Temporary off / uninstall

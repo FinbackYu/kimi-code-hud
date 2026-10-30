@@ -61,11 +61,11 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 | `KIMI_HUD_HOME` | 目录路径 | 覆盖 HUD 自有配置与缓存根（默认 `~/.kimi-code-hud`） |
 | `KIMI_CODE_HOME` | 目录路径 | 覆盖 Kimi Code 数据根（默认 `~/.kimi-code`，本文出现的 `~/.kimi-code` 均指未设置时的默认路径） |
 
-`KIMI_HUD_THEME` 为 `auto`（或未设置且宿主无 `theme`）时经 `COLORFGBG` 判定深浅、回退 dark——状态行无法在 300ms 热路径上执行宿主的 OSC 11 查询；自定义主题名回退 dark。light 下徽标（模型名、`[plan]`、`[Ask When Needed]`、`[swarm]`、`[tower]`、`[Never Ask]`）加粗显示，琥珀/青色比宿主默认更亮（`#D97706`/`#14B8A6`），额度柱体从刺眼的 ANSI 红改为柔和真彩色（`#B91C1C`/`#D97706`/`#0E7A38`）；dark 模式不变，柱体 ANSI 色由终端按自身主题重映射。
+`KIMI_HUD_THEME` 为 `auto`（或未设置且宿主无 `theme`）时经 `COLORFGBG` 判定深浅、回退 dark——状态行无法在 300ms 热路径上执行宿主的 OSC 11 查询；自定义主题名回退 dark。dark 使用固定的 Catppuccin Mocha 真彩色（绿/黄/红柱体 `#A6E3A1`/`#F9E2AF`/`#F38BA8`），徽章、暗显与柱体空槽也全部固定，不受终端 ANSI palette 重映射影响。light 下徽标（模型名、`[plan]`、`[Ask When Needed]`、`[swarm]`、`[tower]`、`[Never Ask]`）加粗显示，琥珀/青色比宿主默认更亮（`#D97706`/`#14B8A6`），额度柱体从刺眼的 ANSI 红改为柔和真彩色（`#B91C1C`/`#D97706`/`#0E7A38`）。
 
 ### 权限徽标
 
-- 默认（official 措辞）：`[Always Ask]`（manual 档，褪色蓝 dark `#54658A` / light `#7D92B8`——比默认前景安静，常驻以保持行首对齐）、`[Ask When Needed]`（yolo 档，琥珀黄，对齐宿主）、`[Never Ask]`（auto 档，亮红，便于与琥珀区分）；
+- 默认（official 措辞）：`[Always Ask]`（manual 档，灰蓝 dark `#6C7086` / light `#7D92B8`——比默认前景安静，常驻以保持行首对齐）、`[Ask When Needed]`（yolo 档，dark 桃色 / light 琥珀黄）、`[Never Ask]`（auto 档，dark 粉红 / light 亮红，便于与 yolo 区分）；
 - `short` 措辞下为 `[manual]` / `[yolo]` / `[auto]`，配色规则不变。
 
 ## 临时关闭 / 卸载

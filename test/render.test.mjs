@@ -103,23 +103,23 @@ test('bar renders 10 cells graded by usage', () => {
   assert.equal(bar(0.62, false), `██████${' '.repeat(4)}`);
   assert.equal(bar(1, false), '██████████');
   assert.equal(bar(2, false), '██████████'); // clamped
-  assert.ok(bar(0.9, true).includes('\x1b[31m'));  // >=85% red
-  assert.ok(bar(0.7, true).includes('\x1b[33m'));  // >=60% yellow
-  assert.ok(bar(0.1, true).includes('\x1b[32m'));  // <60% green
-  assert.ok(bar(0.1, true).includes('\x1b[48;5;238m')); // dark empty track
-  assert.ok(!bar(1, true).includes('\x1b[48;5;238m'));  // full bar: no track cells
+  assert.ok(bar(0.9, true).includes('\x1b[38;2;243;139;168m')); // >=85% red
+  assert.ok(bar(0.7, true).includes('\x1b[38;2;249;226;175m')); // >=60% yellow
+  assert.ok(bar(0.1, true).includes('\x1b[38;2;166;227;161m')); // <60% green
+  assert.ok(bar(0.1, true).includes('\x1b[48;2;69;71;90m')); // dark empty track
+  assert.ok(!bar(1, true).includes('\x1b[48;2;69;71;90m'));  // full bar: no track cells
   assert.ok(!bar(0.1, false).includes('\x1b['));        // plain stays uncolored
 });
 
 test('dim bar keeps a muted fill over the visible track for stale gauges', () => {
   assert.equal(
     bar(0.31, true, undefined, { dim: true }),
-    `\x1b[90m███\x1b[0m\x1b[48;5;238m${' '.repeat(7)}\x1b[0m`,
+    `\x1b[38;2;147;153;178m███\x1b[0m\x1b[48;2;69;71;90m${' '.repeat(7)}\x1b[0m`,
   );
   // A 0% stale gauge still shows the track strip — with the track gone the
   // bar used to vanish entirely once the empty cells stopped being ░ glyphs.
-  assert.equal(bar(0, true, undefined, { dim: true }), `\x1b[48;5;238m${' '.repeat(10)}\x1b[0m`);
-  assert.equal(bar(1, true, undefined, { dim: true }), `\x1b[90m${'█'.repeat(10)}\x1b[0m`);
+  assert.equal(bar(0, true, undefined, { dim: true }), `\x1b[48;2;69;71;90m${' '.repeat(10)}\x1b[0m`);
+  assert.equal(bar(1, true, undefined, { dim: true }), `\x1b[38;2;147;153;178m${'█'.repeat(10)}\x1b[0m`);
   assert.equal(bar(0.31, false, undefined, { dim: true }), `███${' '.repeat(7)}`); // NO_COLOR plain
 });
 
@@ -225,7 +225,7 @@ test('provider balance reports unavailable and dims stale cache', () => {
       balances: [{ currency: 'CNY', total: 1 }],
     },
   }));
-  assert.match(stale, /\x1b\[90mDeepSeek Balance ¥1\.00\x1b\[0m/);
+  assert.match(stale, /\x1b\[38;2;147;153;178mDeepSeek Balance ¥1\.00\x1b\[0m/);
 });
 
 test('provider cost names the session scope and marks the local estimate', () => {
@@ -303,7 +303,7 @@ test('provider balance and session cost combine under one official brand name', 
     ],
     layout: 'normal', color: true,
   })[0];
-  assert.match(staleCombined, /\x1b\[90mDeepSeek Balance ¥110\.00\x1b\[0m · Session Cost ≈¥0\.0042/);
+  assert.match(staleCombined, /\x1b\[38;2;147;153;178mDeepSeek Balance ¥110\.00\x1b\[0m · Session Cost ≈¥0\.0042/);
 
   const costOnly = renderHud({
     payload: basePayload(), metrics: null, quota: null, gitDirty: false,
@@ -353,7 +353,7 @@ test('model thinking suffix from session thinkingLevel (normal and compact)', ()
 test('provisional thinking suffix renders muted until wire-confirmed', () => {
   const withLevel = (metrics, layout = 'normal') =>
     renderHud(baseCtx({ layout, color: true, metrics }))[0];
-  const MUTED = '\x1b[90m';
+  const MUTED = '\x1b[38;2;147;153;178m';
   const RESET = '\x1b[0m';
 
   // Config-inferred effort (lazy start, no wire row yet): muted suffix.
@@ -375,7 +375,7 @@ test('provisional thinking suffix renders muted until wire-confirmed', () => {
   // 'off' renders no suffix in either state; the model name stays primary
   // and is immediately followed by the segment separator.
   const offProvisional = withLevel({ tps: 47, ttftMs: 1300, thinkingLevel: 'off', thinkingProvisional: true });
-  assert.ok(offProvisional.includes('\x1b[38;2;79;168;255mK3\x1b[0m │'));
+  assert.ok(offProvisional.includes('\x1b[38;2;137;180;250mK3\x1b[0m │'));
   assert.ok(!offProvisional.includes(' off'));
   // color=false emits no color codes, so both states render identically.
   const plain = renderHud(baseCtx({
@@ -411,7 +411,7 @@ test('dynamic terminal text drops OSC, CSI, ESC, BEL, C0, DEL, and C1 controls',
     },
   });
   const [line] = renderHud(ctx);
-  assert.ok(line.includes('\x1b[38;2;79;168;255mK3red\x1b[0m high'));
+  assert.ok(line.includes('\x1b[38;2;137;180;250mK3red\x1b[0m high'));
   assert.ok(line.includes('project git:(maingreen*)'));
   assert.ok(line.includes('DeepSeek Balance EUR 1.00'));
   assert.ok(line.includes('5h '));
@@ -547,14 +547,14 @@ test('cache segment has no semantic threshold color', () => {
   assert.ok(!line.includes('\x1b[32mCache'));
   assert.ok(!line.includes('\x1b[33mCache'));
   assert.ok(!line.includes('\x1b[31mCache'));
-  assert.ok(!line.includes('\x1b[90mCache'));
+  assert.ok(!line.includes('\x1b[38;2;147;153;178mCache'));
 });
 
 test('stale cache stays visible in muted gray in every layout', () => {
   const cache = { ...CACHE_METRIC, stale: true };
   for (const layout of ['compact', 'normal']) {
     const [line] = renderHud(baseCtx({ layout, color: true, metrics: { cache } }));
-    assert.ok(line.includes('\x1b[90mCache 92%\x1b[0m'), `${layout}: ${line}`);
+    assert.ok(line.includes('\x1b[38;2;147;153;178mCache 92%\x1b[0m'), `${layout}: ${line}`);
   }
 
   const [plain] = renderHud(baseCtx({ color: false, metrics: { cache } }));
@@ -565,10 +565,10 @@ test('stale cache stays visible in muted gray in every layout', () => {
 test('stale TPS stays visible in muted gray', () => {
   const metrics = { tps: 47, tpsStale: true, ttftMs: 1300 };
   const [normal] = renderHud(baseCtx({ layout: 'normal', color: true, metrics }));
-  assert.ok(normal.includes('\x1b[90m⚡ 47 t/s · TTFT 1.3s\x1b[0m'));
+  assert.ok(normal.includes('\x1b[38;2;147;153;178m⚡ 47 t/s · TTFT 1.3s\x1b[0m'));
 
   const [compact] = renderHud(baseCtx({ layout: 'compact', color: true, metrics }));
-  assert.ok(compact.includes('\x1b[90m⚡ 47\x1b[0m'));
+  assert.ok(compact.includes('\x1b[38;2;147;153;178m⚡ 47\x1b[0m'));
 
   // Same text without color when colors are disabled.
   const [plain] = renderHud(baseCtx({ layout: 'normal', metrics }));
@@ -578,17 +578,17 @@ test('stale TPS stays visible in muted gray', () => {
   // A fresh window is not muted.
   const [fresh] = renderHud(baseCtx({ layout: 'normal', color: true, metrics: { tps: 47, tpsStale: false, ttftMs: 1300 } }));
   assert.ok(fresh.includes('⚡ 47 t/s'));
-  assert.ok(!fresh.includes('\x1b[90m⚡'));
+  assert.ok(!fresh.includes('\x1b[38;2;147;153;178m⚡'));
 });
 
 test('live gen timer stays bright when the stale speed dims', () => {
   const metrics = { tps: 47, tpsStale: true, ttftMs: 1300, turnStartedAt: NOW - 3000 };
   const [normal] = renderHud(baseCtx({ layout: 'normal', color: true, metrics }));
-  assert.ok(normal.includes('\x1b[90m⚡ 47 t/s\x1b[0m · gen 3s'));
-  assert.ok(!normal.includes('\x1b[90m⚡ 47 t/s · gen'));
+  assert.ok(normal.includes('\x1b[38;2;147;153;178m⚡ 47 t/s\x1b[0m · gen 3s'));
+  assert.ok(!normal.includes('\x1b[38;2;147;153;178m⚡ 47 t/s · gen'));
 
   const [compact] = renderHud(baseCtx({ layout: 'compact', color: true, metrics }));
-  assert.ok(compact.includes('\x1b[90m⚡ 47\x1b[0m gen 3s'));
+  assert.ok(compact.includes('\x1b[38;2;147;153;178m⚡ 47\x1b[0m gen 3s'));
 });
 
 test('width defense downgrades normal -> compact', () => {
@@ -603,28 +603,28 @@ test('width defense downgrades normal -> compact', () => {
   assert.ok(line.includes('Cache 92%')); // compact retains the percentage
 });
 
-test('color badges: yolo warning amber, auto bright red, plan primary blue', () => {
+test('color badges use the fixed dark truecolor slots', () => {
   const [line] = renderHud(baseCtx({
     color: true,
     payload: basePayload({ permissionMode: 'yolo', planMode: true }),
   }));
-  assert.ok(line.includes('\x1b[38;2;232;168;56m[Ask When Needed]\x1b[0m'));
-  assert.ok(line.includes('\x1b[38;2;79;168;255m[plan]\x1b[0m'));
+  assert.ok(line.includes('\x1b[38;2;250;179;135m[Ask When Needed]\x1b[0m'));
+  assert.ok(line.includes('\x1b[38;2;137;180;250m[plan]\x1b[0m'));
   const [auto] = renderHud(baseCtx({
     color: true,
     payload: basePayload({ permissionMode: 'auto' }),
   }));
-  assert.ok(auto.includes('\x1b[91m[Never Ask]\x1b[0m'));
+  assert.ok(auto.includes('\x1b[38;2;243;139;168m[Never Ask]\x1b[0m'));
   const [man] = renderHud(baseCtx({ color: true }));
-  assert.ok(man.includes('\x1b[38;2;84;101;138m[Always Ask]\x1b[0m'));
-  assert.ok(!man.includes('\x1b[90m[Always Ask]'));
+  assert.ok(man.includes('\x1b[38;2;108;112;134m[Always Ask]\x1b[0m'));
+  assert.ok(!man.includes('\x1b[38;2;147;153;178m[Always Ask]'));
 });
 
 test('light theme swaps badges to bold brighter truecolor', () => {
   // Default (no theme) stays on the dark palette.
   const [def] = renderHud(baseCtx({ color: true, payload: basePayload({ planMode: true }) }));
-  assert.ok(def.includes('\x1b[38;2;79;168;255mK3\x1b[0m'));
-  assert.ok(def.includes('\x1b[38;2;79;168;255m[plan]\x1b[0m'));
+  assert.ok(def.includes('\x1b[38;2;137;180;250mK3\x1b[0m'));
+  assert.ok(def.includes('\x1b[38;2;137;180;250m[plan]\x1b[0m'));
 
   const [light] = renderHud(baseCtx({
     color: true,
@@ -635,7 +635,7 @@ test('light theme swaps badges to bold brighter truecolor', () => {
   assert.ok(light.includes('\x1b[1m\x1b[38;2;21;101;192m[plan]\x1b[0m'));
   assert.ok(light.includes('\x1b[1m\x1b[38;2;217;119;6m[Ask When Needed]\x1b[0m'));  // bold amber #D97706
   assert.ok(light.includes('\x1b[1m\x1b[38;2;20;184;166m[swarm]\x1b[0m')); // bold teal #14B8A6
-  assert.ok(!light.includes('\x1b[38;2;79;168;255m'));                    // no dark leftovers
+  assert.ok(!light.includes('\x1b[38;2;137;180;250m'));                    // no dark leftovers
 
   // The auto badge keeps its ANSI bright red but goes bold in light.
   const [lightAuto] = renderHud(baseCtx({
@@ -645,15 +645,15 @@ test('light theme swaps badges to bold brighter truecolor', () => {
   }));
   assert.ok(lightAuto.includes('\x1b[1;91m[Never Ask]\x1b[0m'));
 
-  // Explicit dark matches the default: no bold, ANSI auto.
+  // Explicit dark matches the default: fixed truecolor without bold.
   const [dark] = renderHud(baseCtx({
     color: true,
     theme: 'dark',
     payload: basePayload({ permissionMode: 'yolo', planMode: true, swarmMode: true }),
   }));
-  assert.ok(dark.includes('\x1b[38;2;79;168;255m[plan]\x1b[0m'));
-  assert.ok(dark.includes('\x1b[38;2;232;168;56m[Ask When Needed]\x1b[0m'));
-  assert.ok(dark.includes('\x1b[38;2;91;192;190m[swarm]\x1b[0m'));
+  assert.ok(dark.includes('\x1b[38;2;137;180;250m[plan]\x1b[0m'));
+  assert.ok(dark.includes('\x1b[38;2;250;179;135m[Ask When Needed]\x1b[0m'));
+  assert.ok(dark.includes('\x1b[38;2;148;226;213m[swarm]\x1b[0m'));
 });
 
 test('light theme tones the quota bar down to calmer truecolor hues', () => {
@@ -661,9 +661,9 @@ test('light theme tones the quota bar down to calmer truecolor hues', () => {
     { used: 25, limit: 100, resetAt: '2026-08-02T12:00:00Z' },
     [{ label: '5h', used: 90, limit: 100, resetAt: '2026-07-30T12:18:00Z' }],
   );
-  // Dark (and default) bars keep the terminal-remapped ANSI levels.
+  // Dark uses the fixed Catppuccin red and truecolor track.
   const [dark] = renderHud(baseCtx({ color: true, theme: 'dark', quota: hotQuota }));
-  assert.ok(dark.includes('\x1b[31m█████████\x1b[0m\x1b[48;5;238m \x1b[0m'));
+  assert.ok(dark.includes('\x1b[38;2;243;139;168m█████████\x1b[0m\x1b[48;2;69;71;90m \x1b[0m'));
   // Light swaps the glaring ANSI red for the host's light error hue; the
   // mid-level amber matches the badge amber.
   const [light] = renderHud(baseCtx({ color: true, theme: 'light', quota: hotQuota }));
@@ -682,9 +682,9 @@ test('compact layout colors the quota percentage by level, green stays default',
   // Yellow (>=60%) and red (>=85%) paint the bare percentage, taking over
   // the level signal the compact layout's missing bar would carry.
   const [yellow] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAtLevel(70) }));
-  assert.ok(yellow.includes('5h \x1b[33m70%\x1b[0m ~2h18m'));
+  assert.ok(yellow.includes('5h \x1b[38;2;249;226;175m70%\x1b[0m ~2h18m'));
   const [red] = renderHud(baseCtx({ layout: 'compact', color: true, quota: quotaAtLevel(90) }));
-  assert.ok(red.includes('5h \x1b[31m90%\x1b[0m ~2h18m'));
+  assert.ok(red.includes('5h \x1b[38;2;243;139;168m90%\x1b[0m ~2h18m'));
   // Light theme uses its calmer truecolor hues; colors off stays plain.
   const [light] = renderHud(baseCtx({
     layout: 'compact', color: true, theme: 'light', quota: quotaAtLevel(90),
@@ -700,7 +700,7 @@ test('swarm badge renders in accent cyan when payload exposes swarmMode', () => 
     color: true,
     payload: basePayload({ swarmMode: true }),
   }));
-  assert.ok(line.includes('\x1b[38;2;91;192;190m[swarm]\x1b[0m'));
+  assert.ok(line.includes('\x1b[38;2;148;226;213m[swarm]\x1b[0m'));
   const [plain] = renderHud(baseCtx({ payload: basePayload({ swarmMode: true }) }));
   assert.ok(plain.startsWith('[Always Ask] [swarm] '));
 });
@@ -710,7 +710,7 @@ test('swarm badge renders from wire-derived metrics.swarmMode (payload has no fi
     color: true,
     metrics: { tps: 47, ttftMs: 1300, swarmMode: true },
   }));
-  assert.ok(line.includes('\x1b[38;2;91;192;190m[swarm]\x1b[0m'));
+  assert.ok(line.includes('\x1b[38;2;148;226;213m[swarm]\x1b[0m'));
   const [plain] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, swarmMode: true } }));
   assert.ok(plain.startsWith('[Always Ask] [swarm] '));
   const [off] = renderHud(baseCtx({ metrics: { tps: 47, ttftMs: 1300, swarmMode: false } }));
@@ -771,19 +771,19 @@ test('goal badge colors: the three states differ only in color', () => {
   const goal = { status: 'active', turnsUsed: 1 };
   const [line] = renderHud(baseCtx({ color: true, metrics: { goal } }));
   // active: primary-blue word, brackets/turns in the default foreground
-  assert.ok(line.includes('[\x1b[38;2;79;168;255mgoal\x1b[0m 1 turn]'), line);
+  assert.ok(line.includes('[\x1b[38;2;137;180;250mgoal\x1b[0m 1 turn]'), line);
   const [blocked] = renderHud(baseCtx({
     color: true,
     metrics: { goal: { ...goal, status: 'blocked' } },
   }));
-  // blocked: same shape as active, warning-amber word
-  assert.ok(blocked.includes('[\x1b[38;2;232;168;56mgoal\x1b[0m 1 turn]'), blocked);
+  // blocked: same shape as active, warning-colored word
+  assert.ok(blocked.includes('[\x1b[38;2;250;179;135mgoal\x1b[0m 1 turn]'), blocked);
   const [paused] = renderHud(baseCtx({
     color: true,
     metrics: { goal: { ...goal, status: 'paused' } },
   }));
   // paused: the whole badge goes muted
-  assert.ok(paused.includes('\x1b[90m[goal 1 turn]\x1b[0m'), paused);
+  assert.ok(paused.includes('\x1b[38;2;147;153;178m[goal 1 turn]\x1b[0m'), paused);
 });
 
 test('fleet speed shows total, head count and per-agent average', () => {
@@ -794,7 +794,7 @@ test('fleet speed shows total, head count and per-agent average', () => {
   assert.ok(compact.includes('⚡ 305 (12@25)'));
   // A fleet is never painted as stale.
   const [colored] = renderHud(baseCtx({ layout: 'normal', color: true, metrics }));
-  assert.ok(!colored.includes('\x1b[90m⚡'));
+  assert.ok(!colored.includes('\x1b[38;2;147;153;178m⚡'));
 });
 
 test('fleet head count names the main agent when it feeds the figures', () => {
@@ -907,7 +907,7 @@ test('settle grace keeps just-settled gen and compaction figures bright', () => 
     metrics: { tps: 47, ttftMs: 1300, genSettledMs: 83 * 60_000, genSettledAt: NOW - 60_000 },
   }));
   assert.ok(hot.includes('⚡ 47 t/s · gen 1h23m'));
-  assert.ok(!hot.includes('\x1b[90m'));
+  assert.ok(!hot.includes('\x1b[38;2;147;153;178m'));
 
   // 60s+1: the TPS dim and the muted gen suffix both come back (two muted
   // spans — base then suffix).
@@ -915,8 +915,8 @@ test('settle grace keeps just-settled gen and compaction figures bright', () => 
     layout: 'normal', color: true,
     metrics: { tps: 47, tpsStale: true, ttftMs: 1300, genSettledMs: 83 * 60_000, genSettledAt: NOW - 60_001 },
   }));
-  assert.ok(cooled.includes('\x1b[90m⚡ 47 t/s\x1b[0m'));
-  assert.ok(cooled.includes('\x1b[90m · gen 1h23m\x1b[0m'));
+  assert.ok(cooled.includes('\x1b[38;2;147;153;178m⚡ 47 t/s\x1b[0m'));
+  assert.ok(cooled.includes('\x1b[38;2;147;153;178m · gen 1h23m\x1b[0m'));
 
   // Compact tier follows the same grace.
   const [compactHot] = renderHud(baseCtx({
@@ -924,12 +924,12 @@ test('settle grace keeps just-settled gen and compaction figures bright', () => 
     metrics: { tps: 47, genSettledMs: 5000, genSettledAt: NOW - 30_000 },
   }));
   assert.ok(compactHot.includes('⚡ 47 gen 5s'));
-  assert.ok(!compactHot.includes('\x1b[90m'));
+  assert.ok(!compactHot.includes('\x1b[38;2;147;153;178m'));
   const [compactCooled] = renderHud(baseCtx({
     layout: 'compact', color: true,
     metrics: { tps: 47, tpsStale: true, genSettledMs: 5000, genSettledAt: NOW - 60_001 },
   }));
-  assert.ok(compactCooled.includes('\x1b[90m⚡ 47\x1b[0m \x1b[90mgen 5s\x1b[0m'));
+  assert.ok(compactCooled.includes('\x1b[38;2;147;153;178m⚡ 47\x1b[0m \x1b[38;2;147;153;178mgen 5s\x1b[0m'));
 
   // Without a speed reading the settled total stands alone, bright in the
   // grace and muted after it.
@@ -938,12 +938,12 @@ test('settle grace keeps just-settled gen and compaction figures bright', () => 
     metrics: { tps: null, ttftMs: 1300, genSettledMs: 5000, genSettledAt: NOW - 10_000 },
   }));
   assert.ok(soloHot.includes('⚡ gen 5s'));
-  assert.ok(!soloHot.includes('\x1b[90m'));
+  assert.ok(!soloHot.includes('\x1b[38;2;147;153;178m'));
   const [soloCooled] = renderHud(baseCtx({
     layout: 'normal', color: true,
     metrics: { tps: null, ttftMs: 1300, genSettledMs: 5000, genSettledAt: NOW - 60_001 },
   }));
-  assert.ok(soloCooled.includes('\x1b[90m⚡ gen 5s\x1b[0m'));
+  assert.ok(soloCooled.includes('\x1b[38;2;147;153;178m⚡ gen 5s\x1b[0m'));
 });
 
 test('settle grace covers a finished compaction the same way', () => {
@@ -953,15 +953,15 @@ test('settle grace covers a finished compaction the same way', () => {
     metrics: { tps: 47, ttftMs: 1300, compactionMs: 30_000, compactedAt: NOW - 60_000 },
   }));
   assert.ok(hot.includes('⚡ 47 t/s · compacted 30s'));
-  assert.ok(!hot.includes('\x1b[90m'));
+  assert.ok(!hot.includes('\x1b[38;2;147;153;178m'));
 
   // 60s+1: back to the muted post-settle dim (muted base, muted suffix).
   const [cooled] = renderHud(baseCtx({
     layout: 'normal', color: true,
     metrics: { tps: 47, tpsStale: true, ttftMs: 1300, compactionMs: 30_000, compactedAt: NOW - 60_001 },
   }));
-  assert.ok(cooled.includes('\x1b[90m⚡ 47 t/s\x1b[0m'));
-  assert.ok(cooled.includes('\x1b[90m · compacted 30s\x1b[0m'));
+  assert.ok(cooled.includes('\x1b[38;2;147;153;178m⚡ 47 t/s\x1b[0m'));
+  assert.ok(cooled.includes('\x1b[38;2;147;153;178m · compacted 30s\x1b[0m'));
 
   // Without a speed reading the compacted duration stands alone with the
   // same grace.
@@ -970,12 +970,12 @@ test('settle grace covers a finished compaction the same way', () => {
     metrics: { tps: null, ttftMs: null, compactionMs: 30_000, compactedAt: NOW - 5_000 },
   }));
   assert.ok(soloHot.includes('compacted 30s'));
-  assert.ok(!soloHot.includes('\x1b[90m'));
+  assert.ok(!soloHot.includes('\x1b[38;2;147;153;178m'));
   const [soloCooled] = renderHud(baseCtx({
     layout: 'normal', color: true,
     metrics: { tps: null, ttftMs: null, compactionMs: 30_000, compactedAt: NOW - 60_001 },
   }));
-  assert.ok(soloCooled.includes('\x1b[90mcompacted 30s\x1b[0m'));
+  assert.ok(soloCooled.includes('\x1b[38;2;147;153;178mcompacted 30s\x1b[0m'));
 });
 
 test('fleet gen ticker appends to the fleet speed format', () => {
@@ -1091,7 +1091,7 @@ test('finished compaction holds the TTFT slot dimmed, drops in compact tier', ()
   // finished duration renders with the muted dim.
   const metrics = { tps: 47, ttftMs: 1300, compactionMs: 30_000 };
   const [normal] = renderHud(baseCtx({ layout: 'normal', metrics, color: true }));
-  assert.ok(normal.includes('⚡ 47 t/s\x1b[90m · compacted 30s\x1b[0m'));
+  assert.ok(normal.includes('⚡ 47 t/s\x1b[38;2;147;153;178m · compacted 30s\x1b[0m'));
   assert.ok(!normal.includes('TTFT'));
   const [compact] = renderHud(baseCtx({ layout: 'compact', metrics }));
   assert.ok(!compact.includes('compacted'));
@@ -1132,7 +1132,7 @@ test('task badges pluralize, hide at zero and paint primary blue', () => {
     color: true,
     metrics: { tasks: { bash: 1, agents: 0 } },
   }));
-  assert.ok(colored.includes('\x1b[38;2;79;168;255m[1 task running]\x1b[0m'));
+  assert.ok(colored.includes('\x1b[38;2;137;180;250m[1 task running]\x1b[0m'));
 });
 
 // --- H02: quota age contract ------------------------------------------------
@@ -1154,7 +1154,7 @@ test('quota one tick past the TTL dims without the [stale] marker (aging tier)',
   const [ansi] = renderHud(baseCtx({ layout: 'normal', color: true, quota: aging }));
   assert.match(
     ansi,
-    /\x1b\[90m5h \x1b\[0m\x1b\[90m███\x1b\[0m\x1b\[48;5;238m {7}\x1b\[0m\x1b\[90m 31% ~2h18m\x1b\[0m/,
+    /\x1b\[38;2;147;153;178m5h \x1b\[0m\x1b\[38;2;147;153;178m███\x1b\[0m\x1b\[48;2;69;71;90m {7}\x1b\[0m\x1b\[38;2;147;153;178m 31% ~2h18m\x1b\[0m/,
   );
   assert.ok(!ansi.includes('[stale]'));
 });
@@ -1172,7 +1172,7 @@ test('quota past the one-hour mark gains the plain [stale] marker', () => {
   const [ansi] = renderHud(baseCtx({ layout: 'normal', color: true, quota: marked }));
   assert.match(
     ansi,
-    /\x1b\[90m7d \x1b\[0m\x1b\[90m██\x1b\[0m\x1b\[48;5;238m {8}\x1b\[0m\x1b\[90m 25% ~3d2h\x1b\[0m\x1b\[90m \[stale\]\x1b\[0m/,
+    /\x1b\[38;2;147;153;178m7d \x1b\[0m\x1b\[38;2;147;153;178m██\x1b\[0m\x1b\[48;2;69;71;90m {8}\x1b\[0m\x1b\[38;2;147;153;178m 25% ~3d2h\x1b\[0m\x1b\[38;2;147;153;178m \[stale\]\x1b\[0m/,
   );
 });
 
@@ -1186,7 +1186,7 @@ test('quota age tiers hold at the exact boundaries', () => {
   const fresh = at(QUOTA_TTL_MS);
   assert.ok(fresh.includes('5h 31%'));
   assert.ok(!fresh.includes('[stale]'));
-  assert.ok(!fresh.includes('\x1b[90m5h'));
+  assert.ok(!fresh.includes('\x1b[38;2;147;153;178m5h'));
   // TTL+1 and =1h: aging — dimmed without the marker.
   assert.ok(!at(QUOTA_TTL_MS + 1).includes('[stale]'));
   const hourOld = at(QUOTA_STALE_MARK_MS);
@@ -1289,9 +1289,9 @@ test('provider usage windows share the quota gauge presentation', () => {
     },
   }));
   // Stale dims brand, label, bar and figures separately, like stale quota.
-  assert.match(stale, /\x1b\[90mOpenCode Go\x1b\[0m/);
-  assert.match(stale, /\x1b\[90m5h \x1b\[0m/);
-  assert.match(stale, /\x1b\[90m 50%\x1b\[0m/);
+  assert.match(stale, /\x1b\[38;2;147;153;178mOpenCode Go\x1b\[0m/);
+  assert.match(stale, /\x1b\[38;2;147;153;178m5h \x1b\[0m/);
+  assert.match(stale, /\x1b\[38;2;147;153;178m 50%\x1b\[0m/);
 
   const [invalid] = renderHud(baseCtx({
     quota: null,

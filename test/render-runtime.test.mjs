@@ -832,13 +832,13 @@ test('runtime renders config-derived effort muted until a wire row confirms', as
   // Even the explicit [thinking] effort is provisional: the host does not
   // persist the top tier, so config-derived values render muted.
   const explicit = await run(explicitConfig);
-  assert.ok(explicit.line.includes('\x1b[90m high\x1b[0m'), explicit.line);
+  assert.ok(explicit.line.includes('\x1b[38;2;147;153;178m high\x1b[0m'), explicit.line);
 
   // Dropping the key leaves only the model default, still muted — the
   // config-basis change re-resolves the same session's snapshot.
   const provisional = await run(explicitConfig.replace('effort = "high"\n', ''));
-  assert.ok(provisional.line.includes('\x1b[90m low\x1b[0m'), provisional.line);
-  assert.ok(!provisional.line.includes('\x1b[90m high'), provisional.line);
+  assert.ok(provisional.line.includes('\x1b[38;2;147;153;178m low\x1b[0m'), provisional.line);
+  assert.ok(!provisional.line.includes('\x1b[38;2;147;153;178m high'), provisional.line);
 });
 
 test('runtime renders cached OpenCode Go usage windows for the aliased model', async () => {
