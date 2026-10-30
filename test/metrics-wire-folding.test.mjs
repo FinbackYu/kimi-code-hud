@@ -337,3 +337,25 @@ test('processWireChunk swarm_mode.exit without enter stays off', () => {
   processWireChunk(state, '{"type":"swarm_mode.exit","time":1}\n');
   assert.equal(state.swarmMode, false);
 });
+
+test('processWireChunk ignores legacy tool-triggered swarm enters', () => {
+  const tool = '{"type":"swarm_mode.enter","trigger":"tool","time":1}';
+  const manual = '{"type":"swarm_mode.enter","trigger":"manual","time":2}';
+  const exit = '{"type":"swarm_mode.exit","time":2}';
+
+  const alone = makeState();
+  processWireChunk(alone, tool + '\n');
+  assert.equal(alone.swarmMode, false);
+
+  const enabled = makeState();
+  processWireChunk(enabled, [tool, manual].join('\n') + '\n');
+  assert.equal(enabled.swarmMode, true);
+
+  const exited = makeState();
+  processWireChunk(exited, [tool, exit].join('\n') + '\n');
+  assert.equal(exited.swarmMode, false);
+
+  const legacy = makeState();
+  processWireChunk(legacy, '{"type":"swarm_mode.enter","time":1}\n');
+  assert.equal(legacy.swarmMode, true);
+});

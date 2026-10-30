@@ -30,7 +30,7 @@ Kimi Code CLI 的自定义底部状态栏（HUD）——零依赖 Node.js 脚本
 | 推荐运行时 | 处于上游维护窗口内的 Node.js LTS（撰写本文时为 22 / 24） | 日常开发与发布验证以此为准 |
 | 尽力兼容运行时 | 满足最低要求 **Node.js ≥ 18** 的所有版本（最低要求不变） | 已结束上游官方维护（EOL）的版本（如 18 / 20）不做主动测试；相关问题按尽力兼容处理 |
 | 操作系统 | macOS / Linux / Windows | macOS 是维护者的主要开发与动态验证环境；Linux 由 CI 自动化测试覆盖（实际矩阵以 [`.github/workflows/test.yml`](.github/workflows/test.yml) 为准）；Windows 为尽力兼容——Git 探针已按 Windows 约定做可信可执行解析（含 `PATHEXT`，见 [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)），**2026-09-18 已在 Windows 11 + Windows Terminal 真实环境完成 HUD 动态验证**（真实 PTY 下全屏模式的逐帧渲染、行 1 刷新、行 2 归属、额度刷新与冷启动耗时，当时用的是 2.0.0 与上线前的 `KIMI_CODE_TUI_FULL_SCREEN=1` 开关，当前入口是 `tui.toml` 的 `tui_mode = "fullscreen"`，证据见 [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)）；窗口 resize、`/reload-tui` 热重载与失败回退仍未实测 |
-| Kimi Code 宿主 | 源码与合成 fixture 基线 **2.3.1**；真实 TUI 验收待完成 | 逐版本契约审计与固定的上游提交见 [CAPABILITIES.md](CAPABILITIES.md) |
+| Kimi Code 宿主 | 源码与合成 fixture 基线 **2.4.0**；真实 TUI 验收待完成 | 逐版本契约审计与固定的上游提交见 [CAPABILITIES.md](CAPABILITIES.md) |
 
 CI 矩阵的增删是测试覆盖的变化，不构成支持契约的扩张或收缩；支持范围以本节为准。跨操作系统的交互式宿主矩阵（真实 TUI、终端模拟器、插件生命周期）已补齐 Windows 一行（Windows 11 + Windows Terminal，见 [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)），macOS Terminal 与 Linux PTY 组合仍在补齐。
 
@@ -80,7 +80,7 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 
 - 速度样本只接纳流式 ≥250ms、≤1000 t/s 的 `step.end`，取最近 10 分钟内最多 5 个的中位数；预热与窗口过期以暗灰显示，模型切换重新预热；
 - 模型/thinking 优先取 wire（`profile.bind`、会话内切换的 `config.update` 与每次请求的 `llm.request`），只有 wire 记录会让 effort 以默认色显示；wire 未到达的懒启动阶段解析全局 `config.toml`，config 来源（含显式 `[thinking].effort` 键）一律灰显——顶档 effort 宿主不落盘会使 config 无声过期，HUD 无法判断 config 是否仍代表当前选择；解析结果按会话快照 `~/.kimi-code-hud/sessions/thinking-<sessionId>.json` 固定并记录 config 依据，依据变化即重解析，wire 确认过的会话不受其他会话 `/effort` 改写全局配置的影响。懒启动阶段 max 档只能显示模型默认值或旧值（[KI-5](KNOWN_ISSUES.md#ki-5-lazy-start-effort-follows-configtoml-where-the-top-effort-tier-is-never-persisted)）；
-- goal / swarm / tower 状态从主 agent wire 的 `goal.*` / `swarm_mode.*` / `tower_mode.*` 事件折叠；后台任务徽章从 `task.started` / `task.terminated` 与 `tasks/<taskId>.json` 旁车双源合并（取较新记录），只计 `running`（被标 `lost` 后仍有新写入的续跑子代理除外，上游 issue MoonshotAI/kimi-code#3350）；
+- goal / swarm / tower 状态从主 agent wire 的 `goal.*` / `swarm_mode.*` / `tower_mode.*` 事件折叠；与宿主 2.3.2+ 的回放语义一致，旧会话里 `trigger: "tool"` 的 `swarm_mode.enter` 不再点亮 `[swarm]`；后台任务徽章从 `task.started` / `task.terminated` 与 `tasks/<taskId>.json` 旁车双源合并（取较新记录），只计 `running`（被标 `lost` 后仍有新写入的续跑子代理除外，上游 issue MoonshotAI/kimi-code#3350）；
 - 配额仅对可归因到 `managed:kimi-code` 的模型显示与刷新；provider 余额/成本/用量窗口在币种未知、自建代理、未知模型、混合 provider ledger 或显示名跨 provider 歧义时失败关闭；
 - 会话成本本地计算，价格表以 **2026-08-09** 官方定价核对，不含服务端工具费等修正所以始终带 `≈`；DeepSeek 缓存命中字段在宿主补齐映射前按未命中价保守估算，数值可能偏高；
 - 用量分级着色 <60% 绿 / <85% 黄 / ≥85% 红；可见宽度超过 200 字符自动 normal→compact 降级。
@@ -119,7 +119,7 @@ provider 余额 / 用量窗口按**该 provider 的 `base_url` 官方 host** 选
 
 ## 能力与已知问题
 
-- [能力清单](CAPABILITIES.md)：Kimi Code 2.3.1 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
+- [能力清单](CAPABILITIES.md)：Kimi Code 2.4.0 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
 - [已知问题](KNOWN_ISSUES.md)：Git、终端宽度、失败帧与全屏动态验证缺口及验收条件。
 
 ## 隐私与安全

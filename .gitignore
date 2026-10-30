@@ -11,6 +11,7 @@ docs/*
 !docs/upstream-2.1.0-review.md
 !docs/upstream-2.2.0-review.md
 !docs/upstream-2.3.1-review.md
+!docs/upstream-2.4.0-review.md
 docs/showcase/*
 !docs/showcase/README.md
 !docs/showcase/export-assets.py

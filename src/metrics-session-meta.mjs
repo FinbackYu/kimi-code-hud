@@ -42,8 +42,10 @@ export function applySessionMetaRow(state, row, agent = 'main') {
     }
     return;
   }
-  if (row?.type === 'swarm_mode.enter' || row?.type === 'swarm_mode.exit') {
-    state.swarmMode = row.type === 'swarm_mode.enter';
+  if (row?.type === 'swarm_mode.enter') {
+    if (row.trigger !== 'tool') state.swarmMode = true;
+  } else if (row?.type === 'swarm_mode.exit') {
+    state.swarmMode = false;
   }
   if (row?.type === 'tower_mode.enter' || row?.type === 'tower_mode.exit') {
     state.towerMode = row.type === 'tower_mode.enter';
