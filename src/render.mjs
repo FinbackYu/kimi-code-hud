@@ -7,35 +7,34 @@ import { QUOTA_AGE, quotaAge } from './quota.mjs';
 const ESC = '\x1b[';
 const RESET = `${ESC}0m`;
 
-/** 24-bit truecolor foreground, matching the host's theme hex values. */
+/** 24-bit truecolor foreground. */
 function rgb(r, g, b) {
   return `${ESC}38;2;${r};${g};${b}m`;
 }
 
-// The ANSI slots are theme-independent (the terminal remaps them per its own
-// theme); only the badges and bar levels follow the resolved theme. Base hex
-// values from the host's tui/theme/colors.ts dark and light palettes.
+/** 24-bit truecolor background. */
+function bgRgb(r, g, b) {
+  return `${ESC}48;2;${r};${g};${b}m`;
+}
+
 const ANSI = {
-  green: `${ESC}32m`,
-  yellow: `${ESC}33m`,
-  red: `${ESC}31m`,
-  brightYellow: `${ESC}93m`,
-  brightRed: `${ESC}91m`,
-  muted: `${ESC}90m`, // bright black / gray — inferred/provisional values
+  muted: `${ESC}90m`, // bright black / gray — light inferred/provisional values
 };
 
+// Catppuccin Mocha, fixed in truecolor so terminal palette remapping cannot
+// change the HUD's hues. The track uses a truecolor background for the same
+// reason; keeping ░ for empty cells would dither into dots in common fonts.
 const DARK = {
-  ...ANSI,
-  warning: rgb(232, 168, 56), // #E8A838 — auto/yolo badges
-  primary: rgb(79, 168, 255), // #4FA8FF — plan badge
-  accent: rgb(91, 192, 190), //  #5BC0BE — orchestration badges
-  dim: rgb(84, 101, 138), //     #54658A — manual badge (faded primary)
-  barRed: ANSI.red,
-  barYellow: ANSI.yellow,
-  barGreen: ANSI.green,
-  barTrack: `${ESC}48;5;238m`, // 256-gray empty track — ░ dithers into dots
-                                // in common fonts (Cascadia Mono renders it
-                                // as sparse halftone, which reads as dirt)
+  warning: rgb(250, 179, 135), // #FAB387 — yolo/goal blocked
+  primary: rgb(137, 180, 250), // #89B4FA — plan/model/active goal
+  accent: rgb(148, 226, 213), //  #94E2D5 — orchestration badges
+  dim: rgb(108, 112, 134), //     #6C7086 — manual badge
+  brightRed: rgb(243, 139, 168), // #F38BA8 — auto badge
+  muted: rgb(147, 153, 178), //   #9399B2 — inferred/provisional values
+  barRed: rgb(243, 139, 168), //  #F38BA8
+  barYellow: rgb(249, 226, 175), // #F9E2AF
+  barGreen: rgb(166, 227, 161), // #A6E3A1
+  barTrack: bgRgb(69, 71, 90), //  #45475A
 };
 
 // Light theme: badges go bold — short labels need the extra weight on a
@@ -54,7 +53,7 @@ const LIGHT = {
   barRed: rgb(185, 28, 28), //                #B91C1C — host light error
   barYellow: rgb(217, 119, 6), //             #D97706 — matches the badge amber
   barGreen: rgb(14, 122, 56), //              #0E7A38 — host light success
-  barTrack: `${ESC}48;5;251m`, //             256-gray empty track (see DARK)
+  barTrack: `${ESC}48;5;251m`, //             256-gray empty track
 };
 
 const BAR_WIDTH = 10;
@@ -139,8 +138,8 @@ function colorize(enabled, color, str) {
   return enabled ? `${color}${str}${RESET}` : str;
 }
 
-/** Usage-graded bar color: <60% green, <85% yellow, >=85% red. The palette
- * decides the concrete hues — ANSI on dark, truecolor on light. */
+/** Usage-graded bar color: <60% green, <85% yellow, >=85% red. Both themes
+ * use fixed truecolor hues for the fill. */
 function levelColor(frac, C = DARK) {
   if (frac >= 0.85) return C.barRed;
   if (frac >= 0.6) return C.barYellow;
@@ -250,10 +249,10 @@ function stripAnsi(s) {
 function badges(payload, color, swarmOn, towerOn, C, permissionNames = 'official') {
   const out = [];
   // Host renders auto/yolo in warning amber with its own display names;
-  // auto keeps bright red here per user preference to stay distinct from
-  // the yolo amber. The always-present manual badge renders in a faded
-  // primary blue — quieter than the default foreground, hue-separated from
-  // the muted gray that stays reserved for inferred/degraded values.
+  // auto stays red/pink here to remain distinct from yolo's warning color.
+  // The always-present manual badge renders in gray-blue — quieter than the
+  // default foreground, hue-separated from the muted gray reserved for
+  // inferred/degraded values.
   const labels = PERMISSION_BADGE_LABELS[permissionNames === 'short' ? 'short' : 'official'];
   if (payload.permissionMode === 'yolo') out.push(colorize(color, C.warning, labels.yolo));
   else if (payload.permissionMode === 'auto') out.push(colorize(color, C.brightRed, labels.auto));
@@ -275,7 +274,7 @@ function badges(payload, color, swarmOn, towerOn, C, permissionNames = 'official
  * Goal badge in the built-in footer's goal slot (`mode → goal → model`):
  * `[goal 7 turns]` (`3/10 turns` with a turn budget). All three states
  * share the same shape and differ only in color: the word "goal" carries
- * the status color — active = primary blue, blocked = warning amber —
+ * the status color — active = primary blue, blocked = warning color —
  * with the brackets and turn count in the default foreground; paused
  * renders the whole badge muted. The status-line payload carries no goal
  * field; the state comes from the wire journal's goal ops. Shown in every
@@ -495,7 +494,8 @@ function cacheSegment({ metrics, color, C }) {
 function formatUsageWindow({ label, entry, stale, layout, color, useLevelColor, now, C }) {
   const fraction = quotaFraction(entry);
   if (fraction === null) return null;
-  const pct = `${Math.round(fraction * 100)}%`;
+  const percentage = fraction < 1 ? Math.min(99, Math.round(fraction * 100)) : Math.round(fraction * 100);
+  const pct = `${percentage}%`;
   const countdown = formatCountdown(entry.resetAt, now);
   const suffix = countdown ? ` ${countdown}` : '';
   const dim = (text) => colorize(color, C.muted, text);

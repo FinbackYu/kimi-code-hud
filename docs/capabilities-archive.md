@@ -532,3 +532,49 @@ Baseline delta (2.2.0 → 2.3.1), reviewed 2026-10-23:
   manifest/manager files, `managed-usage.ts`, `region.ts`, the usage/task/goal/
   swarm/tower/compaction op files, and the `wire.jsonl` path plus `tasks/`
   sidecar layout.
+
+Baseline delta (2.3.1 → 2.4.0), reviewed 2026-10-30:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.4.0`, tag object
+  `b8f43387e0b4af152fbdcb3c6f78c432f15fb649`, peeled commit
+  `f26e4d91ef8d5d233f6c20b42a150f96924d4f5e`. The range is not linear: the
+  merge-base `ce0834a8f301b89cc4523499a3e074c36851de8f` is behind both
+  endpoints, and the 49 commits / 705 changed paths (+36,823/−11,475) carry
+  2.3.2 and 2.3.3 through release-sync merges.
+  [Full review](upstream-2.4.0-review.md).
+- `status-line-command.ts` (blob `6482a4ac7c`), `footer.ts` (`d9fd3868f3`),
+  `git-status.ts` (`380015fecb`), `tui/config.ts`, `thinking-config.ts`, the
+  plugin manifest/manager and `managed-usage.ts` are byte-identical at both
+  endpoints. The 10-field payload, 300 ms host ceiling, first-line contract,
+  footer slots, Git cache and managed-quota response parser therefore carry
+  over without a consumer change.
+- Upstream 2.3.2 changed replay of legacy `swarm_mode.enter` rows whose
+  `trigger` is `tool`: both `swarmOps` and transcript `foldFacts` now ignore
+  them. The HUD previously lit `[swarm]` for every enter row; issue #62 fixes
+  `src/metrics-session-meta.mjs` to use the same predicate, with reducer,
+  persisted-state and render counterexamples plus manual/exit/legacy-missing-
+  trigger controls.
+- The Event2 persisted manifest grows 65 → 67 with `mcp.server_failed` and
+  `mcp.server_failure_resolved` (`agentId`, `serverName`, `transport`, optional
+  `error`, and `resolution` on recovery). The HUD has no MCP-failure projection;
+  `wire-events-mcp-failures.jsonl` proves both record classes and the optional-
+  error shape fold as no-ops without leaking diagnostics into the footer.
+- Presentation parity: the three permission display names are unchanged, but
+  Never Ask descriptions and the `/auto` tip now disclose that Plan-mode plans
+  still wait for review. Plan entry becomes user-only, `/import-sessions` joins
+  the slash registry (43 → 44), `/provider refresh [providerId]` is added, and
+  the old input-area todo panel / `Ctrl-T` shortcut is removed. None of those
+  descriptive texts or shortcuts is reproduced by the HUD; the `planMode`
+  boolean and permission stable ids are unchanged.
+- `config.toml` adds only `[mcp].reconnect_initial_delay_ms` and
+  `reconnect_max_delay_ms` in the SDK schema, both unread by the HUD. Managed
+  `/usages` and credential-file handling are unchanged. PR #4311 adds logged-out
+  region inference (`region.json`, marker/cache/local signals); it does not add
+  a credential or change the HUD's authenticated env → oauth-ref → official-
+  endpoint whitelist, so the HUD does not consume it.
+- Idle web/desktop sessions can unload after 30 minutes and later resume as
+  `reclaimed`; this suppresses duplicate SessionStart/SessionEnd hooks but does
+  not change the session directory or wire layout. Normal startup/resume hook
+  semantics are unchanged. Claude/Codex imports write the standard layout via
+  `migration-legacy`; subagent partial-output work changes task output text,
+  not `task.started` / `task.terminated` or sidecar schemas.

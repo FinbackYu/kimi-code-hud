@@ -87,14 +87,14 @@ const STATES = [
     id: 'auto',
     group: '权限与模式徽标',
     label: '[Never Ask] 自动审批',
-    note: '亮红徽标，permissionMode = auto',
+    note: '粉红徽标，permissionMode = auto',
     ctx: ctx({ payload: { permissionMode: 'auto' } }),
   },
   {
     id: 'yolo',
     group: '权限与模式徽标',
     label: '[Ask When Needed] 跳过全部确认',
-    note: '琥珀徽标，permissionMode = yolo',
+    note: '桃色徽标，permissionMode = yolo',
     ctx: ctx({ payload: { permissionMode: 'yolo' } }),
   },
   {
@@ -134,7 +134,7 @@ const STATES = [
     id: 'goal-blocked',
     group: '权限与模式徽标',
     label: '[goal] 目标受阻',
-    note: 'goal 一词琥珀色；无预算时显示累计轮次',
+    note: 'goal 一词桃色；无预算时显示累计轮次',
     ctx: ctx({
       metrics: {
         goal: { status: 'blocked', turnsUsed: 7 },
@@ -284,6 +284,8 @@ function ansiToHtml(line) {
     const codes = (m[1] === '' ? '0' : m[1]).split(';');
     if (codes[0] === '38' && codes[1] === '2' && codes.length === 5) {
       color = `rgb(${codes[2]},${codes[3]},${codes[4]})`;
+    } else if (codes[0] === '48' && codes[1] === '2' && codes.length === 5) {
+      bg = `rgb(${codes[2]},${codes[3]},${codes[4]})`;
     } else if (codes[0] === '48' && codes[1] === '5' && codes.length === 3) {
       // 256 色灰阶轨道（232–255 梯度：8 + 10·(n−232)），即额度柱体的空槽
       const n = Number.parseInt(codes[2], 10);

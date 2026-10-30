@@ -20,7 +20,7 @@ const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtur
 const WIRE_FIXTURE = path.join(FIXTURES, 'wire-events-tower.jsonl');
 const AFTER_FIXTURE = 1785456011000;
 
-const TOWER_DARK = '\x1b[38;2;91;192;190m[tower]\x1b[0m';
+const TOWER_DARK = '\x1b[38;2;148;226;213m[tower]\x1b[0m';
 const TOWER_LIGHT = '\x1b[1m\x1b[38;2;20;184;166m[tower]\x1b[0m';
 
 function makeSession({ agents = ['main'] } = {}) {

@@ -1,8 +1,8 @@
 # Known issues
 
-- Last verified: 2026-10-26
+- Last verified: 2026-10-30
 - HUD behavior baseline: `v0.9.2` (`0b52448`)
-- Kimi Code baseline: `2.3.1` (`684bae9ea6a437f3bae98bba1dcb797a917d500b`)
+- Kimi Code baseline: `2.4.0` (`f26e4d91ef8d5d233f6c20b42a150f96924d4f5e`)
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -148,7 +148,7 @@ Affected upstream slot: `model` / status-line payload
 The built-in footer renders the host's in-memory session state
 (`state.thinkingEffort`), so it always shows the current runtime effort. The
 custom status line has no such field: `StatusLinePayload` (10 fields,
-unchanged through 2.0.2) carries no thinking-effort entry.
+unchanged through 2.4.0) carries no thinking-effort entry.
 
 In-session switches: the original finding, verified against 0.34.0 wires, was
 that a switch emits no local event the HUD could read. That is no longer true:
@@ -266,7 +266,7 @@ Status: partially verified (Windows row recorded 2026-09-18)
 
 Affected area: Kimi Code fullscreen TUI (first reviewed at 0.36.0–0.38.0; 2.1.0 promoted it to the persistent `tui_mode` preference)
 
-Entry procedure at the 2.3.1 baseline: set `tui_mode = "fullscreen"` in
+Entry procedure at the 2.4.0 baseline: set `tui_mode = "fullscreen"` in
 `~/.kimi-code/tui.toml`, or pick the fullscreen layout in `/settings`; both
 take effect after restarting Kimi Code. The pre-2.1.0 switch
 `KIMI_CODE_TUI_FULL_SCREEN=1` is no longer part of the upstream documentation —
@@ -327,6 +327,12 @@ still cannot change the status-line payload, the first-line contract or line-2
 ownership. The 2.3.x line also makes the host's Git read asynchronous (see
 KI-2), which is invisible to fullscreen layout. No live 2.3.x fullscreen frame
 is recorded either, so the Windows row still describes 2.0.0 only.
+
+2.4.0 review: fullscreen docks and transcript cards changed, but
+`status-line-command.ts` and `footer.ts` remain byte-identical (blobs
+`6482a4ac7c` and `d9fd3868f3`). The static payload, first-line, timeout and
+line-ownership contract therefore carries over. No live 2.4.0 fullscreen frame
+was exercised, so the Windows row still describes 2.0.0 only.
 
 Still open: resize behavior, `/reload-tui`, and failure-frame fallback are
 not yet exercised. The classic conhost window could not be produced on this
@@ -567,6 +573,11 @@ resume path ever emits `subagent.started` or `task.started`; the fixture
 `test/fixtures/wire-events-subagent-cancelled.jsonl` already carries all five
 classes for that future reduction.
 
+2.4.0 review: the subagent changes return partial output after a stopped run;
+they do not add a task-resume record or change the `task.started` /
+`task.terminated` and sidecar schemas. The observed lost-then-resumed gap is
+therefore not closed by this release, and the bounded heuristic stays.
+
 Acceptance criteria for closing as a HUD problem:
 
 - upstream journals `task.started` (or an equivalent `task.resumed`) on the
@@ -765,7 +776,7 @@ countdowns, freshness and expiry. No real credentials or user data were used.
 
 ## KI-20: Git status probe still runs repository-configured clean filters
 
-Status: fixed in v0.8.5 (PR #50); real host acceptance pending (2.2.0 and 2.3.x)
+Status: fixed in v0.8.5 (PR #50); real host acceptance pending (2.2.0, 2.3.x and 2.4.0)
 
 Affected area: Git dirty probe / untrusted workspace execution
 

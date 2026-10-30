@@ -529,6 +529,82 @@ const SCENARIOS = [
       assert.equal(metrics.tps, 30);
     },
   },
+  {
+    /**
+     * Kimi Code 2.4.0 grows the Event2 persisted manifest 65 → 67 with
+     * mcp.server_failed and mcp.server_failure_resolved. Server names,
+     * transports, errors and resolutions are host diagnostics, not HUD facts.
+     */
+    label: 'MCP failure records',
+    fixture: 'wire-events-mcp-failures.jsonl',
+    fixtureTitle: 'fixture interleaves MCP failure and recovery records into a normal session',
+    fold: 'noop',
+    foldTitle: 'processWireChunk folds MCP failure records without touching the state',
+    baselineTitle: 'MCP failure records leave metrics, state and render identical to baseline',
+    rowsUnder(wireText) {
+      return wireText.split('\n').filter((line) => line && /"type":"mcp\.server_/.test(line));
+    },
+    baseline(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && !/"type":"mcp\.server_/.test(line))
+        .join('\n') + '\n';
+    },
+    fixtureChecks(wireText, baselineText) {
+      const parsed = this.rowsUnder(wireText).map((line) => JSON.parse(line));
+      assert.deepEqual(parsed.map((row) => row.type), [
+        'mcp.server_failed',
+        'mcp.server_failure_resolved',
+        'mcp.server_failed',
+      ]);
+      assert.equal(parsed[0].transport, 'stdio');
+      assert.equal(parsed[0].error, 'synthetic connection failure');
+      assert.equal(parsed[1].resolution, 'recovered');
+      assert.equal(parsed[2].transport, 'http');
+      assert.equal(parsed[2].error, undefined);
+      assert.equal(baselineText, REFERENCE);
+      assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
+    },
+    baselineReadings(metrics) {
+      assert.equal(metrics.tps, 30);
+    },
+  },
+  {
+    /**
+     * Since Kimi Code 2.3.2, replay ignores legacy tool-triggered swarm enters
+     * while retaining the record shape for old journals. The HUD must make the
+     * same distinction so an unfinished historical run cannot revive [swarm].
+     */
+    label: 'legacy tool-triggered swarm',
+    fixture: 'wire-events-legacy-tool-swarm.jsonl',
+    fixtureTitle: 'fixture appends a legacy tool-triggered swarm enter to the reference wire',
+    fold: 'noop',
+    foldTitle: 'processWireChunk folds a tool-triggered swarm enter without touching the state',
+    baselineTitle: 'a legacy tool-triggered swarm enter leaves metrics, state and render at baseline',
+    rowsUnder(wireText) {
+      return wireText.split('\n').filter((line) => line && /"trigger":"tool"/.test(line));
+    },
+    baseline(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && !/"trigger":"tool"/.test(line))
+        .join('\n') + '\n';
+    },
+    fixtureChecks(wireText, baselineText) {
+      const parsed = this.rowsUnder(wireText).map((line) => JSON.parse(line));
+      assert.equal(parsed.length, 1);
+      assert.equal(parsed[0].type, 'swarm_mode.enter');
+      assert.equal(parsed[0].agentId, 'main');
+      assert.equal(baselineText, REFERENCE);
+      assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
+    },
+    baselineReadings(metrics) {
+      assert.equal(metrics.tps, 30);
+    },
+    renderChecks(rendered) {
+      assert.ok(rendered.every((line) => !line.includes('[swarm]')));
+    },
+  },
 ];
 
 const readFixture = (scenario) => fs.readFileSync(path.join(FIXTURES, scenario.fixture), 'utf8');

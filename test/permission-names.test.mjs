@@ -50,7 +50,7 @@ test('render: manual badge renders in the faded-blue dim slot in both namings', 
   for (const permissionNames of ['official', 'short']) {
     const [line] = renderHud({ ...namingCtx(permissionNames, 'manual'), color: true });
     const label = permissionNames === 'short' ? '[manual]' : '[Always Ask]';
-    assert.ok(line.includes(`\x1b[38;2;84;101;138m${label}\x1b[0m`));
-    assert.ok(!line.includes(`\x1b[90m${label}`));
+    assert.ok(line.includes(`\x1b[38;2;108;112;134m${label}\x1b[0m`));
+    assert.ok(!line.includes(`\x1b[38;2;147;153;178m${label}`));
   }
 });

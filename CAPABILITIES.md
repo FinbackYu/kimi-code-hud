@@ -1,20 +1,18 @@
 # HUD capabilities
 
-- Last verified: 2026-10-26
+- Last verified: 2026-10-30
 - HUD behavior baseline: `v0.9.2` (`0b52448`)
-- Kimi Code baseline: `2.3.1` (`684bae9ea6a437f3bae98bba1dcb797a917d500b`)
-- Release status (2026-10-23): 2.3.1 is the audited source/fixture baseline.
-  The range is not linear — its merge-base `c69bd6c5a0` sits behind both
-  endpoints, and the 37 commits / 481 changed paths (+27,446/−8,387) include
-  the 2.3.0 release. The status-line payload and the footer line-1 slots are
-  unchanged, but the host now resolves its Git status through an asynchronous
-  cache, so a first-frame `gitBranch: null` is a normal state rather than a
-  host failure; the HUD's HEAD fallback therefore moved onto the regular
-  display path (issue #54, see
-  [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer)
-  and [docs/upstream-2.3.1-review.md](docs/upstream-2.3.1-review.md)). The
-  persisted manifest grows 64 → 65 with `changeNotifier.snapshot`, folded as a
-  no-op. KI-20's real host acceptance, KI-8's live fullscreen frame, and a real
+- Kimi Code baseline: `2.4.0` (`f26e4d91ef8d5d233f6c20b42a150f96924d4f5e`)
+- Release status (2026-10-30): 2.4.0 is the audited source/fixture baseline.
+  The range is not linear — its merge-base `ce0834a8f3` sits behind both
+  endpoints, and the 49 commits / 705 changed paths (+36,823/−11,475) carry the
+  2.3.2 and 2.3.3 changes through release-sync merges. The status-line payload,
+  footer line-1 slots and Git status files are byte-identical. The persisted
+  manifest grows 65 → 67 with `mcp.server_failed` and
+  `mcp.server_failure_resolved`, both folded as no-ops. The HUD now also mirrors
+  the 2.3.2+ replay rule that ignores legacy `trigger: "tool"` swarm entries
+  (issue #62, see [docs/upstream-2.4.0-review.md](docs/upstream-2.4.0-review.md)).
+  KI-20's real host acceptance, KI-8's live fullscreen frame, and a real
   managed-account / DeepSeek smoke remain unverified.
 
 This is the canonical inventory of footer coverage, readable data, and
@@ -25,16 +23,16 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/684bae9ea6a437f3bae98bba1dcb797a917d500b/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/684bae9ea6a437f3bae98bba1dcb797a917d500b/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/684bae9ea6a437f3bae98bba1dcb797a917d500b/apps/kimi-code/src/utils/git/git-status.ts)
-- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/684bae9ea6a437f3bae98bba1dcb797a917d500b/packages/agent-core-v2/docs/wire-manifest.d.ts) — 65 types in the released 2.3.1 manifest
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/684bae9ea6a437f3bae98bba1dcb797a917d500b/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/f26e4d91ef8d5d233f6c20b42a150f96924d4f5e/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/f26e4d91ef8d5d233f6c20b42a150f96924d4f5e/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/f26e4d91ef8d5d233f6c20b42a150f96924d4f5e/apps/kimi-code/src/utils/git/git-status.ts)
+- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/f26e4d91ef8d5d233f6c20b42a150f96924d4f5e/packages/agent-core-v2/docs/wire-manifest.d.ts) — 67 types in the released 2.4.0 manifest
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/f26e4d91ef8d5d233f6c20b42a150f96924d4f5e/apps/kimi-code/src/tui/commands/registry.ts)
 
-Per-release baseline audit history (0.32.0 → 2.3.1, including the #3970
+Per-release baseline audit history (0.32.0 → 2.4.0, including the #3970
 prep) lives in
 [docs/capabilities-archive.md](docs/capabilities-archive.md). The sections
-below describe the current contract against the pinned 2.3.1 baseline; new
+below describe the current contract against the pinned 2.4.0 baseline; new
 release audits are appended to the archive instead of growing this file.
 
 ## Footer coverage
@@ -44,11 +42,11 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 2.3.1 | HUD reviewed branch | Status |
+| Official line-1 slot or state | Upstream 2.4.0 | HUD reviewed branch | Status |
 |---|---|---|---|
-| permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
-| plan mode | `plan` in the mode slot | Reads `planMode` | covered, presentation variant |
-| swarm mode | `swarm` in the mode slot | Rebuilds state from main-wire `swarm_mode.enter` / `swarm_mode.exit`; a future `payload.swarmMode` also works | covered since HUD 0.2.7 |
+| permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color; Never Ask still waits for Plan-mode plan review | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
+| plan mode | `plan` in the mode slot; only the user can enter Plan mode, and every plan waits for review | Reads `planMode` | covered, presentation variant |
+| swarm mode | `swarm` in the mode slot; replay ignores legacy `swarm_mode.enter` rows with `trigger: "tool"` | Rebuilds state from main-wire `swarm_mode.enter` / `swarm_mode.exit` with the same legacy-tool exclusion; a future `payload.swarmMode` also works | covered since HUD 0.2.7; legacy replay fixed for issue #62 |
 | tower mode | separate orchestration state | Rebuilds state from main-wire `tower_mode.enter` / `tower_mode.exit`; optional enter `sessionId` is metadata only; a future `payload.towerMode` also works; 2.2.0 dropped the optional `base` field and the `tower.base` state, which the HUD never consumed | covered |
 | goal | status, elapsed time, turns, optional turn budget | Rebuilds `goal.create` / `goal.update` / `goal.clear` / `forked`; renders a shortened badge — status lives on the goal word's color (active blue, blocked amber, paused muted), turns and optional turn budget kept, elapsed clock dropped | covered, presentation variant |
 | model and thinking | display name plus `thinking` or `thinking: <effort>` | Uses payload model plus wire/config snapshot; renders bare effort (`K3 high`). Every config-derived value — an explicit `[thinking].effort` key included — stays muted until the first wire row confirms it, because the top `max` tier is never persisted to config.toml and config can silently lag the current choice ([KI-5](KNOWN_ISSUES.md#ki-5-lazy-start-effort-follows-configtoml-where-the-top-effort-tier-is-never-persisted)) | covered, presentation variant |
@@ -69,7 +67,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 2.3.1. HUD installation, configuration, and lifecycle
+built into Kimi Code 2.4.0. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 
@@ -94,7 +92,7 @@ commands are documented in [README.md](README.md#安装) and
 | Hybrid provider usage | same host rule; the shape depends on the account or key: `zhipuai-coding-plan` (`open.bigmodel.cn`, `api.z.ai`), `minimax` (`api.minimax.io`, `api.minimax.cn`, `api.minimaxi.com`), `venice` (`api.venice.ai`), `ollama` (`ollama.com`, `www.ollama.com`, `api.ollama.com`), `command-code` (`api.commandcode.ai`) | usage windows when the account reports them, otherwise a currency balance; Zhipu's CN region falls back to `Zhipu Balance ¥N.NN` when the plan itself is unusable | available, automatic; the GLM quota service reports every error as HTTP 200 plus a body `code`, MiniMax's key prefix selects the surface (`sk-api-*` balance vs token-plan windows), Venice's DIEM accounts render a `1d` allowance window, and Ollama / Command Code prefer windows over their fallback balance |
 | OpenAI / Anthropic API cost | use a supported model through the official direct API; no admin credential is required | `OpenAI Session Cost ≈$N.NN` / `Anthropic Session Cost ≈$N.NN`, including main and all subagents when every nonzero ledger row belongs to that provider | available, automatic; mixed-provider or unresolved ledgers hide the whole estimate rather than undercounting; local standard-price estimate, not balance or server bill |
 | layout | set `{"layout":"normal"}` or `{"layout":"compact"}` in `~/.kimi-code-hud/config.json`, or set `KIMI_HUD_LAYOUT` | normal or compact field set | available |
-| color and theme | set `NO_COLOR=1` or `KIMI_HUD_NO_COLOR=1`; optionally set `KIMI_HUD_THEME=dark\|light` | plain text or the selected ANSI palette | available |
+| color and theme | set `NO_COLOR=1` or `KIMI_HUD_NO_COLOR=1`; optionally set `KIMI_HUD_THEME=dark\|light` | plain text, fixed Catppuccin Mocha truecolor on dark, or the selected light palette | available |
 
 `--refresh-quota` and `--refresh-provider-usage` are troubleshooting/internal
 commands; normal quota and provider-usage refreshes do not require invoking
@@ -131,8 +129,10 @@ which must never enter the session usage ledger (only `usage.record` feeds
 it). In 2.3.1 the manifest grows again, 64 → 65, with
 `changeNotifier.snapshot` (`agentId`, `agentsMdHash`, `agentsMdFiles`,
 `skillsHash`, `subagentNames`, optional `modelPool`) as a change-notifier
-blob state; the HUD has no projection for it. The
-physical schema stays append-only `{type, …payload, time}` lines, and every
+blob state. In 2.4.0 it grows 65 → 67 with `mcp.server_failed` and
+`mcp.server_failure_resolved`, carrying server name, transport, optional error
+and recovery resolution; the HUD has no projection for any of these records.
+The physical schema stays append-only `{type, …payload, time}` lines, and every
 HUD reducer gates on exact known types, so these records fold as no-ops; the
 raw-journal versus active-chain boundary is tracked in
 [KI-18](KNOWN_ISSUES.md#ki-18-undo-branch-records-stay-in-the-wire-journal-hud-folds-the-raw-stream).

@@ -1,6 +1,6 @@
-// Theme resolution for the badge palette. Only the three truecolor slots
-// (primary/accent/warning) follow the theme; the ANSI colors are remapped
-// by the terminal itself and need no handling.
+// Theme resolution for the badge and quota palettes. Dark is fixed in
+// truecolor; light mixes truecolor accents/bar fills with terminal ANSI for
+// its auto badge, muted values and empty track.
 //
 // Sources, in order:
 // 1. KIMI_HUD_THEME=dark|light — explicit override (debugging, custom themes)
