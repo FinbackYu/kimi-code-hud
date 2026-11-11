@@ -8,7 +8,8 @@
   endpoints, and the 82 commits / 1,513 changed files (+77,274/−92,878) carry
   2.4.1 and 2.5.0–2.5.3. The status-line payload and runner are byte-identical.
   The footer adds an environment slot and routes remote cwd/Git through core;
-  issue #69 remains open for the HUD's local dirty-probe boundary. The persisted
+  the reviewed #69 fix skips local dirty probes for locally unverifiable paths,
+  while KI-2 retains the identical-local-path ambiguity. The persisted
   manifest grows 67 → 69: `runtime.set_binding` becomes `environment.set_binding`
   and two `tool_select.*` records arrive, all folded as no-ops (see
   [docs/upstream-2.5.3-review.md](docs/upstream-2.5.3-review.md)).
@@ -54,7 +55,7 @@ does not need to be redrawn by the command.
 | background Agent | `[N agent(s) running]` for running `agent` tasks | Same reducer; `agent` kind is counted and badged separately; a lost-then-resumed agent counts while its own wire stays fresh — [KI-15](KNOWN_ISSUES.md#ki-15-a-resumed-background-agent-was-invisible-to-the-task-badges) | covered — [KI-1](KNOWN_ISSUES.md#ki-1-background-task-badges-are-absent) closed |
 | environment | remote environment id, connection state and first error line; local renders nothing | No status-line field exposes it; the HUD does not currently reduce `environment.set_binding` or draw an environment badge | missing / readable-but-unrendered |
 | cwd | home-aware path shortened to at most three segments; a remote binding uses its remote cwd | Normal shows only `basename(cwd)`; compact omits cwd | intentional degradation |
-| Git | branch, diff `+N/-N` or `±`, ahead/behind, and linked PR number from core's asynchronous Git service; remote sessions report the remote repository | Payload branch when the host has one, else the HUD's own cached HEAD read, plus a synchronous local dirty check — rendered as `git:(branch*)` | degraded — [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer); a payload branch always wins, but remote cwd has no accompanying environment marker, so the local dirty probe can be absent or misattributed (issue #69); HUD probe avoids filter-capable worktree conversion ([KI-20](KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters)) |
+| Git | branch, diff `+N/-N` or `±`, ahead/behind, and linked PR number from core's asynchronous Git service; remote sessions report the remote repository | Payload branch when the host has one, else the HUD's own cached HEAD read; dirty state is probed only when a local symbolic HEAD is verifiable — rendered as `git:(branch*)` | degraded — [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer); issue #69's guard keeps a locally unverifiable remote cwd branch-only without invoking Git, while an identical local repository path can still be misattributed because the payload has no environment marker; HUD probe avoids filter-capable worktree conversion ([KI-20](KNOWN_ISSUES.md#ki-20-git-status-probe-still-runs-repository-configured-clean-filters)) |
 | rotating tips | width-aware, weighted 10-second rotation | omitted | intentional omission |
 | tool-output shortcut | fixed `ctrl+o expand` / `ctrl+o collapse` moves to line 2 when a custom command owns line 1 | host draws it subject to width and higher-priority hints | host-owned, preserved |
 | Context and transient hint | context percentage and exact current/max tokens; transient hint at left | still rendered by the host on line 2 | host-owned, preserved; the reported value follows `[token_counting]` strategy |

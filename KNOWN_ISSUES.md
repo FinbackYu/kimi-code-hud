@@ -76,15 +76,24 @@ overrides a host-supplied branch.
 
 Kimi Code 2.5.0 (#4649, included in the 2.5.3 baseline) routes the host's Git
 read through core and supplies a remote session's `cwd` and `gitBranch`. The
-10-field payload still has no environment/remote marker. The HUD can show that
-branch, but its dirty `*` remains a local probe: a remote-only path degrades to
-branch-only, while a path that also names a local repository can incorrectly
-borrow that repository's dirty state. The null-branch HEAD fallback has the same
-path-collision ambiguity; it is not a safe remote detector. Issue #69 tracks the
-resulting correctness gap. A local-HEAD precondition can prevent probes for
-nonexistent/non-repository paths, but cannot by itself distinguish a remote path
-from an identical local one; no complete fix should claim otherwise without an
-authoritative environment signal.
+10-field payload still has no environment/remote marker. Before issue #69 was
+fixed, a payload-supplied branch sent every cwd straight to the local dirty
+probe; a remote-only path never gained a trustworthy `*`, and a path shared with
+a local repository could borrow its state.
+
+The #69 fix applies the filesystem-only symbolic-HEAD precondition to every
+dirty probe, including frames with a payload branch. A locally unverifiable cwd
+now keeps the host branch as branch-only and never invokes Git; a verified local
+repository retains the existing dirty result and payload-branch priority. The
+null-branch fallback already used the same precondition. The fixture is
+`status-line-payload-remote.json`, with runtime proof that the old implementation
+probed while the fixed one does not, plus a real local-repository control.
+
+Residual boundary: if a remote cwd also names a local symbolic-branch repository,
+the payload still cannot distinguish the two, so that repository's dirty state
+can be borrowed. Neither the null-branch fallback nor the new guard is a remote
+detector. Removing that ambiguity requires an authoritative host signal; it is
+not claimed fixed here.
 
 The dirty probe itself is now bounded by a cross-process 15-second, 64-cwd
 cache and runs with `GIT_OPTIONAL_LOCKS=0`; this closes the per-frame scan/lock-contention
@@ -103,10 +112,12 @@ Acceptance criteria:
 - keep a payload-supplied branch authoritative over the HUD's own HEAD read,
   and keep a null payload branch from producing a branch the host would not
   show (detached HEAD, non-repository);
-- cover a 2.5+ remote payload fixture and prove that a locally unverifiable cwd
-  never invokes the dirty probe, while a verified local repository keeps `*`;
-  document or resolve the identical-local-path collision without claiming that
-  the payload exposes a remote marker;
+- ✅ cover a 2.5+ remote payload fixture and prove that a locally unverifiable
+  cwd never invokes the dirty probe, while a verified local repository keeps
+  `*`; an isolated real-CLI render also stays branch-only and creates no Git
+  status cache;
+- ✅ document the identical-local-path collision without claiming that the
+  payload exposes a remote marker; resolving it needs a future host signal;
 - preserve the current silent render fallback.
 
 ## KI-3: Layout downgrade is not terminal-width aware

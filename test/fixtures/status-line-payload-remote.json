@@ -1,0 +1,12 @@
+{
+  "model": "K3",
+  "cwd": "/remote/example/project",
+  "gitBranch": "feature/remote",
+  "permissionMode": "manual",
+  "planMode": false,
+  "contextUsage": 0.625,
+  "contextTokens": 163840,
+  "maxContextTokens": 262144,
+  "sessionId": "remote-contract-session",
+  "version": "2.5.3"
+}

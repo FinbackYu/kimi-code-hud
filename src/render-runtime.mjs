@@ -203,9 +203,15 @@ export async function renderStatusLine({
   const payloadBranch = Boolean(payload.gitBranch);
   if (gitBudget >= GIT_MIN_REMAINING_MS) {
     const readStatus = dependencies.readGitStatus || readGitStatus;
+    const readHead = dependencies.readHeadBranch || readHeadBranch;
     const gitOptions = { timeoutMs: gitBudget - 2, cachePath: paths.gitStatusCachePath };
     if (payloadBranch) {
-      gitDirty = readStatus(payload.cwd, gitOptions).dirty;
+      // A 2.5+ remote session can supply a branch for a cwd that does not exist
+      // locally. Keep the host branch, but only probe dirty state after a
+      // filesystem-only check proves that a local symbolic HEAD exists.
+      if (readHead(payload.cwd, env)) {
+        gitDirty = readStatus(payload.cwd, gitOptions).dirty;
+      }
     } else if (typeof payload.cwd === 'string' && payload.cwd !== '') {
       // Since upstream PR #4201 shipped in 2.3.0, the host's Git status cache
       // is asynchronous: a first frame in a repository legitimately carries a
@@ -213,7 +219,6 @@ export async function renderStatusLine({
       // to show" or "not known yet": the HUD reads HEAD itself, but only after
       // the filesystem-only check proves a symbolic branch exists. A payload
       // branch always wins over this read.
-      const readHead = dependencies.readHeadBranch || readHeadBranch;
       if (readHead(payload.cwd, env)) {
         const status = readStatus(payload.cwd, gitOptions);
         if (status.branch) {

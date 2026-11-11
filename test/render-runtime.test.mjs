@@ -204,6 +204,7 @@ test('runtime passes a context-matching quota cache to render and refresh', asyn
       }),
       getMetrics: () => metrics(),
       ensureFreshQuota: (options) => { refreshOptions = options; },
+      readHeadBranch: () => 'main',
       readGitStatus: (_cwd, options) => {
         gitTimeout = options.timeoutMs;
         gitCachePath = options.cachePath;
@@ -348,12 +349,44 @@ test('runtime fills a null payload branch from its own HEAD probe', async (t) =>
   assert.ok(cold.line.includes('git:(main*)'));
 });
 
-test('runtime keeps the payload branch authoritative over the probe', async () => {
-  const result = await renderColdGitFrame({ gitBranch: 'main' }, {
-    readGitStatus: () => ({ branch: 'probe-branch', dirty: true }),
+test('runtime keeps the payload branch authoritative over the probe', async (t) => {
+  const { cwd } = gitRepository(t);
+  fs.writeFileSync(path.join(cwd, 'tracked.txt'), 'second\n');
+  let probes = 0;
+  const result = await renderColdGitFrame({ gitBranch: 'main', cwd }, {
+    readGitStatus: () => {
+      probes += 1;
+      return { branch: 'probe-branch', dirty: true };
+    },
   });
+  assert.equal(probes, 1);
   assert.ok(result.line.includes('git:(main*)'));
   assert.ok(!result.line.includes('probe-branch'));
+});
+
+test('runtime renders a remote-only payload branch without probing local Git', async () => {
+  const fixture = JSON.parse(fs.readFileSync(
+    path.join(FIXTURES, 'status-line-payload-remote.json'),
+    'utf8',
+  ));
+  let headReads = 0;
+  let probes = 0;
+  const result = await renderColdGitFrame(fixture, {
+    readHeadBranch: (cwd) => {
+      headReads += 1;
+      assert.equal(cwd, fixture.cwd);
+      return null;
+    },
+    readGitStatus: () => {
+      probes += 1;
+      return { branch: 'local-branch', dirty: true };
+    },
+  });
+  assert.equal(headReads, 1);
+  assert.equal(probes, 0);
+  assert.ok(result.line.includes('git:(feature/remote)'));
+  assert.ok(!result.line.includes('feature/remote*'));
+  assert.ok(!result.line.includes('local-branch'));
 });
 
 test('runtime skips the Git probe when there is no symbolic HEAD to show', async (t) => {
