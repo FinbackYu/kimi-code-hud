@@ -571,6 +571,55 @@ const SCENARIOS = [
   },
   {
     /**
+     * Kimi Code 2.5.3 renames runtime.set_binding to environment.set_binding
+     * and adds the two durable tool_select records. Their cwd, descriptions and
+     * tool schemas are host data, not HUD projections.
+     */
+    label: 'environment and tool-select records',
+    fixture: 'wire-events-2.5.3.jsonl',
+    fixtureTitle: 'fixture interleaves environment and tool-select records into a normal session',
+    fold: 'noop',
+    foldTitle: 'processWireChunk folds environment and tool-select records without touching the state',
+    baselineTitle: 'environment and tool-select records leave metrics, state and render identical to baseline',
+    rowsUnder(wireText) {
+      return wireText.split('\n').filter(
+        (line) => line && /"type":"(?:environment\.set_binding|tool_select\.)/.test(line),
+      );
+    },
+    baseline(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && !/"type":"(?:environment\.set_binding|tool_select\.)/.test(line))
+        .join('\n') + '\n';
+    },
+    fixtureChecks(wireText, baselineText) {
+      const parsed = this.rowsUnder(wireText).map((line) => JSON.parse(line));
+      assert.deepEqual(parsed.map((row) => row.type), [
+        'environment.set_binding',
+        'tool_select.initialized',
+        'tool_select.tools_changed',
+      ]);
+      assert.equal(parsed[0].cwd, '/remote/example');
+      assert.equal(parsed[1].tools[0].description, 'MUST_NOT_RENDER_TOOL_DESCRIPTION');
+      assert.equal(
+        parsed[1].tools[0].parameters.properties.query.default,
+        'MUST_NOT_RENDER_TOOL_SCHEMA',
+      );
+      assert.equal(parsed[2].added[0].description, 'MUST_NOT_RENDER_CHANGED_TOOL');
+      assert.equal(baselineText, REFERENCE);
+      assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
+    },
+    baselineReadings(metrics) {
+      assert.equal(metrics.tps, 30);
+    },
+    renderChecks(rendered) {
+      for (const line of rendered) {
+        assert.doesNotMatch(line, /MUST_NOT_RENDER|example-remote|remote\/example/);
+      }
+    },
+  },
+  {
+    /**
      * Since Kimi Code 2.3.2, replay ignores legacy tool-triggered swarm enters
      * while retaining the record shape for old journals. The HUD must make the
      * same distinction so an unfinished historical run cannot revive [swarm].

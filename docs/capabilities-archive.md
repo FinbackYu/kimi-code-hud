@@ -578,3 +578,41 @@ Baseline delta (2.3.1 → 2.4.0), reviewed 2026-10-30:
   semantics are unchanged. Claude/Codex imports write the standard layout via
   `migration-legacy`; subagent partial-output work changes task output text,
   not `task.started` / `task.terminated` or sidecar schemas.
+
+
+Baseline delta (2.4.0 → 2.5.3), reviewed 2026-11-11:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.5.3`, tag object
+  `cf71981af39152921167175b46124c6c7e82b132`, peeled commit
+  `5af9942e9fb789b6a1530830575b3768499932e9` (published 2026-11-10 13:06 UTC).
+  The range is not linear: merge-base `78b72fe456ac730a1970ded9bb0d28f8b584ab95`
+  is behind both endpoints, and the 82 commits / 1,513 changed files
+  (+77,274/−92,878) include 2.4.1 and 2.5.0–2.5.3.
+  [Full review](upstream-2.5.3-review.md).
+- `status-line-command.ts` remains blob `6482a4ac7c`: the 10-field payload,
+  first-line rule, capture cap, 300 ms host deadline and cached-frame behavior
+  are unchanged. The footer gains an environment slot and #4649 routes remote
+  cwd/Git through core, but no environment/remote field reaches the payload.
+- Issue #69 remains a P1 consumer follow-up: the HUD can show the remote branch,
+  while its dirty marker still comes from a local probe. Missing local paths
+  degrade to branch-only; an identical local repository path can misattribute
+  dirty state. The null-branch HEAD fallback has the same ambiguity. A local
+  symbolic-HEAD guard is only a partial fix and must not claim to resolve that
+  collision without an authoritative environment signal.
+- The Event2 manifest grows 67 → 69: `runtime.set_binding` becomes
+  `environment.set_binding`, and `tool_select.initialized` /
+  `tool_select.tools_changed` arrive. `wire-events-2.5.3.jsonl` proves their
+  cwd/descriptions/schemas leave metrics, persisted state and rendering
+  unchanged. Unread payload deltas also include changeNotifier workspace fields,
+  goal.update objective, turn.ended requestId replacing traceId, and
+  task.terminated dropping outputTail.
+- Plugin locale/marketplace additions, the environment allowlist item, host
+  config additions/removals and model-refresh comparison changes do not alter
+  HUD installation or its consumed model/quota fields. Managed usage and managed
+  model ingestion are byte-identical; permission names and the 44 slash-command
+  names are unchanged.
+- KI-8's current stable entry procedure remains valid: PR #4771 is outside the
+  2.5.3 tag. Its commented tui_mode default, per-process boolean override,
+  experimental fullscreen default and terminal fallback are #70 prep only.
+  Live 2.5.3 TUI/remote/fork, managed-account/DeepSeek and KI-20 real-host
+  acceptance remain unverified.

@@ -1,8 +1,8 @@
 # Known issues
 
-- Last verified: 2026-10-30
+- Last verified: 2026-11-11
 - HUD behavior baseline: `v0.9.3` (`2be3e44`)
-- Kimi Code baseline: `2.4.0` (`f26e4d91ef8d5d233f6c20b42a150f96924d4f5e`)
+- Kimi Code baseline: `2.5.3` (`5af9942e9fb789b6a1530830575b3768499932e9`)
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -74,6 +74,18 @@ after a filesystem-only check proves a symbolic branch exists — a detached
 HEAD or a non-repository still renders nothing, matching the host. It never
 overrides a host-supplied branch.
 
+Kimi Code 2.5.0 (#4649, included in the 2.5.3 baseline) routes the host's Git
+read through core and supplies a remote session's `cwd` and `gitBranch`. The
+10-field payload still has no environment/remote marker. The HUD can show that
+branch, but its dirty `*` remains a local probe: a remote-only path degrades to
+branch-only, while a path that also names a local repository can incorrectly
+borrow that repository's dirty state. The null-branch HEAD fallback has the same
+path-collision ambiguity; it is not a safe remote detector. Issue #69 tracks the
+resulting correctness gap. A local-HEAD precondition can prevent probes for
+nonexistent/non-repository paths, but cannot by itself distinguish a remote path
+from an identical local one; no complete fix should claim otherwise without an
+authoritative environment signal.
+
 The dirty probe itself is now bounded by a cross-process 15-second, 64-cwd
 cache and runs with `GIT_OPTIONAL_LOCKS=0`; this closes the per-frame scan/lock-contention
 risk tracked separately in KI-11, but does not add the missing fidelity here.
@@ -91,6 +103,10 @@ Acceptance criteria:
 - keep a payload-supplied branch authoritative over the HUD's own HEAD read,
   and keep a null payload branch from producing a branch the host would not
   show (detached HEAD, non-repository);
+- cover a 2.5+ remote payload fixture and prove that a locally unverifiable cwd
+  never invokes the dirty probe, while a verified local repository keeps `*`;
+  document or resolve the identical-local-path collision without claiming that
+  the payload exposes a remote marker;
 - preserve the current silent render fallback.
 
 ## KI-3: Layout downgrade is not terminal-width aware
@@ -148,7 +164,7 @@ Affected upstream slot: `model` / status-line payload
 The built-in footer renders the host's in-memory session state
 (`state.thinkingEffort`), so it always shows the current runtime effort. The
 custom status line has no such field: `StatusLinePayload` (10 fields,
-unchanged through 2.4.0) carries no thinking-effort entry.
+unchanged through 2.5.3) carries no thinking-effort entry.
 
 In-session switches: the original finding, verified against 0.34.0 wires, was
 that a switch emits no local event the HUD could read. That is no longer true:
@@ -266,7 +282,7 @@ Status: partially verified (Windows row recorded 2026-09-18)
 
 Affected area: Kimi Code fullscreen TUI (first reviewed at 0.36.0–0.38.0; 2.1.0 promoted it to the persistent `tui_mode` preference)
 
-Entry procedure at the 2.4.0 baseline: set `tui_mode = "fullscreen"` in
+Entry procedure at the 2.5.3 baseline: set `tui_mode = "fullscreen"` in
 `~/.kimi-code/tui.toml`, or pick the fullscreen layout in `/settings`; both
 take effect after restarting Kimi Code. The pre-2.1.0 switch
 `KIMI_CODE_TUI_FULL_SCREEN=1` is no longer part of the upstream documentation —
@@ -333,6 +349,15 @@ is recorded either, so the Windows row still describes 2.0.0 only.
 `6482a4ac7c` and `d9fd3868f3`). The static payload, first-line, timeout and
 line-ownership contract therefore carries over. No live 2.4.0 fullscreen frame
 was exercised, so the Windows row still describes 2.0.0 only.
+
+2.5.3 review: `status-line-command.ts` remains byte-identical
+(`6482a4ac7c`); `tui/config.ts` only adds the built-in `environment` item, and
+the payload builder still emits the same 10 fields. The entry procedure above
+therefore remains current. Upstream PR #4771 (per-process boolean fullscreen
+override and fullscreen-by-experimental-default) is not in the 2.5.3 tag, so it
+does not supersede this stable-baseline wording; its fixture and documentation
+changes remain prep for the release that actually contains it. No live 2.5.3
+fullscreen frame was exercised.
 
 Still open: resize behavior, `/reload-tui`, and failure-frame fallback are
 not yet exercised. The classic conhost window could not be produced on this
@@ -776,7 +801,7 @@ countdowns, freshness and expiry. No real credentials or user data were used.
 
 ## KI-20: Git status probe still runs repository-configured clean filters
 
-Status: fixed in v0.8.5 (PR #50); real host acceptance pending (2.2.0, 2.3.x and 2.4.0)
+Status: fixed in v0.8.5 (PR #50); real host acceptance pending (2.2.0–2.5.3)
 
 Affected area: Git dirty probe / untrusted workspace execution
 
