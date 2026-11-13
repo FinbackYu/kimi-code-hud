@@ -168,6 +168,34 @@ test('preserves other sections and status_line keys', () => {
   );
 });
 
+test('preserves 2.6.1 transcript settings and the commented tui_mode default', () => {
+  const { home, pluginRoot, toml } = setup();
+  const original = [
+    'theme = "auto"',
+    '# tui_mode = "regular" # "regular" | "fullscreen" ("fullscreen" is experimental)',
+    'copy_on_select = true',
+    '',
+    '[transcript]',
+    'tool_call_density = "compact"',
+    'thinking = "grouped"',
+    '',
+    '[status_line]',
+    'items = ["model", "cwd"]',
+    '',
+  ].join('\n');
+  fs.writeFileSync(toml, original);
+  const env = { KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot };
+
+  runHook(env);
+  const out = fs.readFileSync(toml, 'utf8');
+  const commandLine = expectedStatusLine(pluginRoot);
+  assert.equal(out, original.replace('[status_line]\n', `[status_line]\n${commandLine}\n`));
+  assert.equal(out.replace(`${commandLine}\n`, ''), original);
+
+  runHook(env);
+  assert.equal(fs.readFileSync(toml, 'utf8'), out);
+});
+
 test('is idempotent across runs', () => {
   const { home, pluginRoot, toml } = setup();
   const env = { KIMI_CODE_HOME: home, KIMI_PLUGIN_ROOT: pluginRoot };

@@ -616,3 +616,45 @@ Baseline delta (2.4.0 → 2.5.3), reviewed 2026-11-11:
   experimental fullscreen default and terminal fallback are #70 prep only.
   Live 2.5.3 TUI/remote/fork, managed-account/DeepSeek and KI-20 real-host
   acceptance remain unverified.
+
+Baseline delta (2.5.3 → 2.6.1), reviewed 2026-11-13:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.6.1`, tag object
+  `be40a45d36d3a856bfcb5b4366073a88f52f9033`, peeled commit
+  `30e3ce442ae850a7461b80f2ce209cd73a301d02` (published 2026-11-13 07:11 UTC).
+  The range is not linear: merge-base `244819a526026f8b26177b9780a64889c18fa18c`
+  is behind both endpoints, and the 102 commits / 1,205 changed files
+  (+74,207/−75,893) include 2.6.0 and 2.6.1. [Full review](upstream-2.6.1-review.md).
+- `status-line-command.ts` remains blob `6482a4ac7c`: 10 fields, first-line
+  output, 65,536-byte capture and the 300 ms host deadline are unchanged. The
+  payload's cwd now comes from `sessionWorkDir`, selecting the remote binding or
+  current local primary; the HUD already consumes that value directly. KI-2's
+  identical-local-path ambiguity remains because no environment field was added.
+- The Event2 persisted manifest drops 69 → 67: `task.waitDelivered`,
+  `turn.step.interrupted` and `turn.step.retrying` are removed,
+  `interruptionReminder.requested` is added, and journal metadata gains
+  `min_protocol_version: "1.5"`. None of those rows feeds a HUD projection.
+  `wire-events-2.6.1.jsonl` proves no-op folding and sanitized rendering.
+- `turn.prompt.trigger` (`normal` / `notify` / `continue`) is now consumed ahead
+  of a user-looking replay origin. The fixture's old implementation advanced the
+  user anchor to continue and shortened settled gen from 11,000 ms to 1,000 ms;
+  `src/metrics-turn.mjs` now preserves the original anchor, with normal as the
+  positive control and pre-trigger records unchanged.
+- Current hosts no longer write `tasks/<taskId>.json` lifecycle sidecars, but
+  `task.started` / `task.terminated` retain `info.taskId/kind/status`. The HUD's
+  wire path therefore covers 2.6.1; its bounded sidecar projection remains only
+  for legacy journals and resumed-agent reconciliation.
+- #4771 is released: an unset `tui_mode` renders as a commented regular guide,
+  `KIMI_CODE_TUI_FULL_SCREEN` is a per-process boolean override, the master
+  experimental flag can default to fullscreen, and tmux -CC / Termux / TERM=dumb
+  fall back to regular. KI-8 and both READMEs are updated; management and
+  SessionStart fixtures preserve the new comment, `[transcript]` and other keys.
+  Real 2.6.1 fullscreen/default/fallback acceptance remains open.
+- Fullscreen transcript grouping adds a conditional tip and suppresses the
+  host-owned `ctrl+o` footer hint. Permission labels, slash registry, thinking
+  rules, managed quota endpoints and managed credential storage remain unchanged;
+  SessionStart now receives the effective cwd, which the HUD hook does not read.
+- #4754 (prediction) and #4820 (step.end timing boundaries) are both diverged
+  from the 2.6.1 target, not released in it. They remain separate 2.7.0 prep
+  items; no prediction filter, timing fixture rewrite or threshold change is
+  presented as current-stable parity.
