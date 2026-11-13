@@ -25,11 +25,15 @@ export function applyTurnRow(state, row, agent = 'main') {
     if (bucket.lastTurnPromptAt === null || rowTime > bucket.lastTurnPromptAt) {
       bucket.lastTurnPromptAt = rowTime;
     }
-    // Records predating the origin field were all user prompts.
+    // Records predating the origin field were all user prompts. Since 2.6.0,
+    // an explicit trigger takes precedence over a user-looking replay origin.
     const originKind =
       row?.origin && typeof row.origin === 'object' ? row.origin.kind : undefined;
-    if (
+    const userInitiated =
       (originKind === undefined || USER_PROMPT_ORIGINS.has(originKind)) &&
+      (row.trigger === undefined || row.trigger === 'normal');
+    if (
+      userInitiated &&
       (bucket.lastUserPromptAt === null || rowTime > bucket.lastUserPromptAt)
     ) {
       bucket.lastUserPromptAt = rowTime;

@@ -168,3 +168,48 @@ test('a 2.3.x tui.toml keeps auto_session_title through install and uninstall', 
   uninstallHud(options);
   assert.equal(fs.readFileSync(paths.tuiTomlPath, 'utf8'), original);
 });
+
+test('a 2.6.1 tui.toml keeps commented defaults and transcript settings through install and uninstall', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-management-'));
+  const paths = {
+    configPath: path.join(root, 'hud', 'config.json'),
+    tuiTomlPath: path.join(root, 'kimi', 'tui.toml'),
+    configTomlPath: path.join(root, 'kimi', 'config.toml'),
+  };
+  fs.mkdirSync(path.dirname(paths.tuiTomlPath), { recursive: true });
+  const original = [
+    'theme = "auto"',
+    '# tui_mode = "regular" # "regular" | "fullscreen" ("fullscreen" is experimental)',
+    'copy_on_select = true # fullscreen only: false copies only when you press Ctrl-C',
+    '',
+    '[transcript]',
+    'tool_call_density = "compact" # "compact" | "balanced" | "detailed"',
+    'thinking = "grouped" # "grouped" | "ungrouped"',
+    '',
+    '[status_line]',
+    'items = ["model", "cwd"]',
+    '',
+  ].join('\n');
+  fs.writeFileSync(paths.tuiTomlPath, original);
+  const options = {
+    paths,
+    scriptPath: '/tmp/Kimi HUD/bin/kimi-hud.mjs',
+    hookScriptPath: '/tmp/Kimi HUD/hooks/sync-status-line.mjs',
+    stdout: { write() { return true; } },
+  };
+
+  installHud(options);
+  const installed = fs.readFileSync(paths.tuiTomlPath, 'utf8');
+  assert.equal(
+    inspectStatusLineCommand(installed).value,
+    nodeCommand('/tmp/Kimi HUD/bin/kimi-hud.mjs'),
+  );
+  assert.ok(installed.includes('# tui_mode = "regular"'));
+  assert.ok(installed.includes('[transcript]\ntool_call_density = "compact"'));
+
+  installHud(options);
+  assert.equal(fs.readFileSync(paths.tuiTomlPath, 'utf8'), installed);
+
+  uninstallHud(options);
+  assert.equal(fs.readFileSync(paths.tuiTomlPath, 'utf8'), original);
+});

@@ -36,7 +36,7 @@ test('sanitized host payload and wire fixtures lock every layout/theme/color con
   assert.deepEqual(Object.keys(remote).sort(), Object.keys(JSON.parse(payloadText)).sort());
   assert.equal(remote.cwd, '/remote/example/project');
   assert.equal(remote.gitBranch, 'feature/remote');
-  assert.equal(remote.version, '2.5.3');
+  assert.equal(remote.version, '2.6.1');
 
   const payload = parsePayload(payloadText);
   const sessionsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-contract-'));

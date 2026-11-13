@@ -1,8 +1,8 @@
 # Known issues
 
-- Last verified: 2026-11-11
+- Last verified: 2026-11-13
 - HUD behavior baseline: `v0.9.3` (`2be3e44`)
-- Kimi Code baseline: `2.5.3` (`5af9942e9fb789b6a1530830575b3768499932e9`)
+- Kimi Code baseline: `2.6.1` (`30e3ce442ae850a7461b80f2ce209cd73a301d02`)
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -95,6 +95,13 @@ can be borrowed. Neither the null-branch fallback nor the new guard is a remote
 detector. Removing that ambiguity requires an authoritative host signal; it is
 not claimed fixed here.
 
+In 2.6.1 the payload builder uses `sessionWorkDir(state)`: a remote binding's cwd,
+or the current local primary directory after a primary swap. The HUD already uses
+that payload cwd for its project name and Git cache key, so it follows the same
+selection without another local inference layer. The payload still has only 10
+fields and no environment marker; this source refinement does not remove the
+identical-local-path collision above.
+
 The dirty probe itself is now bounded by a cross-process 15-second, 64-cwd
 cache and runs with `GIT_OPTIONAL_LOCKS=0`; this closes the per-frame scan/lock-contention
 risk tracked separately in KI-11, but does not add the missing fidelity here.
@@ -175,7 +182,7 @@ Affected upstream slot: `model` / status-line payload
 The built-in footer renders the host's in-memory session state
 (`state.thinkingEffort`), so it always shows the current runtime effort. The
 custom status line has no such field: `StatusLinePayload` (10 fields,
-unchanged through 2.5.3) carries no thinking-effort entry.
+unchanged through 2.6.1) carries no thinking-effort entry.
 
 In-session switches: the original finding, verified against 0.34.0 wires, was
 that a switch emits no local event the HUD could read. That is no longer true:
@@ -293,13 +300,20 @@ Status: partially verified (Windows row recorded 2026-09-18)
 
 Affected area: Kimi Code fullscreen TUI (first reviewed at 0.36.0–0.38.0; 2.1.0 promoted it to the persistent `tui_mode` preference)
 
-Entry procedure at the 2.5.3 baseline: set `tui_mode = "fullscreen"` in
+Entry procedure at the 2.6.1 baseline: set `tui_mode = "fullscreen"` in
 `~/.kimi-code/tui.toml`, or pick the fullscreen layout in `/settings`; both
-take effect after restarting Kimi Code. The pre-2.1.0 switch
-`KIMI_CODE_TUI_FULL_SCREEN=1` is no longer part of the upstream documentation —
-the code keeps it only as a one-time migration that writes `tui_mode` when the
-key is still absent. The HUD's own install path (writes to `[status_line]`)
-round-trips through the same file, so a preference save keeps the custom line.
+take effect after restarting Kimi Code. `KIMI_CODE_TUI_FULL_SCREEN` is again a
+per-process, highest-priority boolean override (`1/true/yes/on` and
+`0/false/no/off`), not a one-time migration, and never writes the preference.
+With no explicit `tui_mode`, a true `KIMI_CODE_EXPERIMENTAL_FLAG` defaults to
+fullscreen. Fullscreen falls back to regular for tmux control mode, Termux and
+`TERM=dumb`; an explicit environment override wins over that fallback.
+
+An unset mode is rendered as the commented `# tui_mode = "regular"` guide, so
+saving another setting no longer persists an explicit regular choice. The HUD's
+install and SessionStart paths change only `[status_line]`; 2.6.1 fixtures prove
+that this comment, `[transcript]`, `copy_on_select` and existing `items` survive
+install/uninstall and hook repair byte-for-byte.
 
 Static release review through 0.38.0 confirms that fullscreen mode does not
 change the 10-field status-line payload, the first-stdout-line contract, the 300ms host
@@ -370,6 +384,12 @@ does not supersede this stable-baseline wording; its fixture and documentation
 changes remain prep for the release that actually contains it. No live 2.5.3
 fullscreen frame was exercised.
 
+2.6.1 review: #4771 shipped in 2.6.0 and supersedes the old entry semantics as
+documented above. `status-line-command.ts` is still blob `6482a4ac7c`; the new
+transcript grouping and conditional `ctrl+o` hint remain host-owned. Source and
+synthetic config regressions do not establish a real 2.6.1 fullscreen frame, an
+experimental-default launch, terminal fallback or an explicit env=0 override.
+
 Still open: resize behavior, `/reload-tui`, and failure-frame fallback are
 not yet exercised. The classic conhost window could not be produced on this
 host (every console delegates to Windows Terminal, including elevated
@@ -380,6 +400,8 @@ Acceptance criteria:
 
 - launch Kimi Code with fullscreen `tui_mode` in a real PTY (the 0.38.0
   env-gated wording is obsolete); ✅ 2026-09-18 via the then-current switch (host 2.0.0, WT 1.24, Win11)
+- on 2.6.1, exercise experimental-default fullscreen, tmux -CC / Termux /
+  `TERM=dumb` fallback, and `KIMI_CODE_TUI_FULL_SCREEN=0`; source-reviewed, live acceptance open
 - verify line 1 refresh, line 2 context ownership, resize, reload, and fallback; — line 1 refresh ✅, line 2 ownership ✅; resize/reload/fallback still open
 - record the terminal/OS matrix without weakening the 220ms HUD budget. — Windows row recorded ✅; macOS/Linux rows pending
 
@@ -812,7 +834,7 @@ countdowns, freshness and expiry. No real credentials or user data were used.
 
 ## KI-20: Git status probe still runs repository-configured clean filters
 
-Status: fixed in v0.8.5 (PR #50); real host acceptance pending (2.2.0–2.5.3)
+Status: fixed in v0.8.5 (PR #50); real host acceptance pending (2.2.0–2.6.1)
 
 Affected area: Git dirty probe / untrusted workspace execution
 
@@ -861,7 +883,7 @@ Acceptance criteria:
 - [x] isolated regression fails if either filter runs;
 - [x] bounded, silent fallback and a shared 150ms probe budget;
 - [x] keep branch/dirty output while the probe uses index metadata only;
-- [ ] trigger the relevant paths in a real host session (2.2.0 or 2.3.x) and record the result.
+- [ ] trigger the relevant paths in a real current-host session (2.6.1 remains unrecorded) and record the result.
 
 ## KI-21: Provider balance does not resolve `api_key_env`
 

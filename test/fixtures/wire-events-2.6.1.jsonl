@@ -1,0 +1,18 @@
+{"type":"metadata","protocol_version":"1.5","min_protocol_version":"1.5","created_at":1785456000000}
+{"type":"config.update","modelAlias":"kimi-code/k3","thinkingEffort":"high","time":1785456000000}
+{"type":"turn.prompt","origin":{"kind":"user"},"trigger":"normal","time":1785456001000}
+{"type":"llm.request","kind":"loop","time":1785456002000}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"redacted","usage":{"inputOther":100,"output":20,"inputCacheRead":300,"inputCacheCreation":100},"finishReason":"tool_use","llmFirstTokenLatencyMs":900,"llmStreamDurationMs":1000},"time":1785456003000}
+{"type":"task.waitDelivered","agentId":"main","keys":["bash-example-1234abcd"],"time":1785456003500}
+{"type":"llm.request","kind":"loop","time":1785456004000}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"redacted","usage":{"inputOther":100,"output":30,"inputCacheRead":300,"inputCacheCreation":100},"finishReason":"tool_use","llmFirstTokenLatencyMs":800,"llmStreamDurationMs":1000},"time":1785456005000}
+{"type":"turn.step.interrupted","agentId":"main","turnId":1,"step":2,"reason":"synthetic interruption","time":1785456005500}
+{"type":"llm.request","kind":"loop","time":1785456006000}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"redacted","usage":{"inputOther":100,"output":40,"inputCacheRead":300,"inputCacheCreation":100},"finishReason":"tool_use","llmFirstTokenLatencyMs":700,"llmStreamDurationMs":1000},"time":1785456007000}
+{"type":"turn.step.retrying","agentId":"main","turnId":1,"step":2,"failedAttempt":1,"nextAttempt":2,"maxAttempts":3,"delayMs":1000,"errorName":"SyntheticError","errorMessage":"synthetic retry","time":1785456007500}
+{"type":"llm.request","kind":"loop","time":1785456008000}
+{"type":"interruptionReminder.requested","agentId":"main","turnId":1,"ownerPromptId":"prompt-example","time":1785456008500}
+{"type":"turn.prompt","origin":{"kind":"user"},"trigger":"notify","input":[],"promptId":"prompt-notify","turnId":7,"time":1785456009000}
+{"type":"turn.ended","agentId":"main","turnId":7,"reason":"completed","time":1785456010000}
+{"type":"turn.prompt","origin":{"kind":"user"},"trigger":"continue","input":[],"promptId":"prompt-continue","turnId":8,"time":1785456011000}
+{"type":"turn.ended","agentId":"main","turnId":8,"reason":"completed","time":1785456012000}

@@ -28,6 +28,11 @@ official checkout HEAD was not moved and the working tree stayed clean.
 | PR #4013 (2.1.1) reverts the 2.1.0 trust hardening: `git-args.ts` is deleted and `git-status.ts` returns to plain synchronous Git calls | `src/git.mjs`, `src/git-safe-probe.mjs` probe Git themselves | **covered / HUD-held**: the HUD keeps `core.fsmonitor=false`, a null `core.hooksPath` and the index-metadata probe as its own pre-trust defense; the #3964 attribution was rewritten (KI-7, KI-20). |
 | PR #4201 (`perf(tui): stop blocking the footer on git status`, merged 2026-10-14T07:09Z) is **absent from the 2.2.0 tag**: its merge commit `83a39b49ed62627c7a604b39e26d8e9d17ade296` is not in the 40-commit range, `.changeset/footer-git-refresh.md` does not exist at the tag, and `git-status.ts` still calls `spawnSync` with 5 s/15 s caches | `src/render-runtime.mjs` branch resolution | **prep, off the normal path on 2.2.0**: when the payload carries no branch the HUD reads `.git/HEAD` itself and uses the cached probe, so a future `gitBranch: null` first frame cannot blink the segment. On 2.2.0 the host resolves the branch synchronously, so the fallback stays off normal rendering; it can still fire when the host's git read fails or times out (payload `null`), which only ever shows a branch that genuinely exists in the repository. |
 
+Post-review note (2.6.1): the `KIMI_CODE_TUI_FULL_SCREEN` one-time-migration
+statement above is historical. PR #4771, shipped in 2.6.0, restores it as a
+per-process boolean override that does not write `tui.toml`; the current entry
+and terminal-fallback rules live in KI-8 and the 2.6.1 review.
+
 Display parity search covered `README.md`, `README.en.md`, `CAPABILITIES.md`,
 `KNOWN_ISSUES.md`, `CHANGELOG.md`, `docs/`, `src/`, `test/` and the fixtures
 for the tokens the range replaced or removed:

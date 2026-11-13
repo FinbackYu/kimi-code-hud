@@ -620,6 +620,62 @@ const SCENARIOS = [
   },
   {
     /**
+     * Kimi Code 2.6.1 persists 67 manifest types and adds an explicit prompt
+     * trigger. Removed record classes and metadata remain no-ops; notify and
+     * continue prompts with a user origin must match their legacy non-user
+     * equivalents instead of re-anchoring the generation clock.
+     */
+    label: '2.6.1 manifest and prompt triggers',
+    fixture: 'wire-events-2.6.1.jsonl',
+    fixtureTitle: 'fixture covers the 2.6.1 manifest delta, journal metadata and prompt triggers',
+    fold: 'equivalence',
+    foldRows: 'all',
+    foldTitle: 'processWireChunk folds 2.6.1 rows like their legacy semantic equivalents',
+    baselineTitle: '2.6.1 records and prompt triggers preserve metrics, state and render parity',
+    rowsUnder(wireText) {
+      return wireText.split('\n').filter(
+        (line) => line && /"type":"(?:metadata|task\.waitDelivered|turn\.step\.(?:interrupted|retrying)|interruptionReminder\.requested)"|"trigger":/.test(line),
+      );
+    },
+    baseline(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && !/"type":"(?:metadata|task\.waitDelivered|turn\.step\.(?:interrupted|retrying)|interruptionReminder\.requested)"/.test(line))
+        .map((line) => line
+          .replace(',"trigger":"normal"', '')
+          .replace('"origin":{"kind":"user"},"trigger":"notify"', '"origin":{"kind":"task"}')
+          .replace('"origin":{"kind":"user"},"trigger":"continue"', '"origin":{"kind":"system_trigger"}'))
+        .join('\n') + '\n';
+    },
+    fixtureChecks(wireText, baselineText) {
+      const parsed = this.rowsUnder(wireText).map((line) => JSON.parse(line));
+      assert.deepEqual(parsed.map((row) => row.type), [
+        'metadata',
+        'turn.prompt',
+        'task.waitDelivered',
+        'turn.step.interrupted',
+        'turn.step.retrying',
+        'interruptionReminder.requested',
+        'turn.prompt',
+        'turn.prompt',
+      ]);
+      assert.deepEqual(parsed.filter((row) => row.type === 'turn.prompt').map((row) => row.trigger), [
+        'normal', 'notify', 'continue',
+      ]);
+      assert.equal(parsed[0].min_protocol_version, '1.5');
+      assert.equal(parsed[5].ownerPromptId, 'prompt-example');
+      assert.ok(baselineText.startsWith(REFERENCE));
+      assert.doesNotMatch(baselineText, /"trigger":|interruptionReminder\.requested|task\.waitDelivered|turn\.step\./);
+      assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
+    },
+    baselineReadings(metrics) {
+      assert.equal(metrics.tps, 30);
+      assert.equal(metrics.turnStartedAt, null);
+      assert.equal(metrics.genSettledMs, 11_000);
+    },
+  },
+  {
+    /**
      * Since Kimi Code 2.3.2, replay ignores legacy tool-triggered swarm enters
      * while retaining the record shape for old journals. The HUD must make the
      * same distinction so an unfinished historical run cannot revive [swarm].
