@@ -658,3 +658,31 @@ Baseline delta (2.5.3 → 2.6.1), reviewed 2026-11-13:
   from the 2.6.1 target, not released in it. They remain separate 2.7.0 prep
   items; no prediction filter, timing fixture rewrite or threshold change is
   presented as current-stable parity.
+
+Baseline delta (2.6.1 → 2.6.3), reviewed 2026-11-18:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.6.3`, tag object
+  `a9df46689649824abfdfff1528d7708a23fd3cf3`, peeled commit
+  `b0de2fbd2de04d87689225aafd3912e5d193b62d` (published 2026-11-17 15:15 UTC).
+  The range is linear: 25 commits / 232 changed files (+5,047/−2,232), covering
+  2.6.2 and 2.6.3. [Full review](upstream-2.6.3-review.md).
+- `status-line-command.ts`, `footer.ts`, `git-status.ts`, slash registry,
+  `tui/config.ts` and the 67-type wire manifest are byte-identical to 2.6.1.
+  The existing `wire-events-2.6.1.jsonl` therefore remains the current wire
+  fixture; no duplicated 2.6.3 fixture pretends to cover a schema delta.
+- Restored background-task notifications are prompt-only and non-user Tower
+  wakeups no longer cancel one another. The 2.6.1 explicit-trigger reducer
+  continues to protect the HUD's user-generation anchor. Subagent completion
+  now waits for loop idle, detached-task quiescence and wire flush; the HUD
+  keeps counting the agent until its durable `task.terminated` arrives.
+- External Stop-hook timing and invalid-user-config fallback change without
+  altering SessionStart, `[status_line]`, provider-table or quota contracts.
+  Custom-registry `search_url` / `feedback_url` and `/feedback` wording do not
+  reach HUD rendering. Choice-level OpenAI usage improves the host's persisted
+  usage values without changing the four-counter schema consumed by the HUD.
+- #4754 prediction and #4820 timing boundaries remain absent from stable
+  2.6.3. Their consumer work stays on `upstream/2.7.0-prep`; historical timing
+  fixtures and the 250 ms / 1000 t/s thresholds are not rewritten as if the
+  future timing semantics were already released.
+- Real 2.6.3 fullscreen/default/fallback, remote-environment, KI-20 and
+  managed-account/DeepSeek acceptance remain open.
