@@ -675,6 +675,41 @@ const SCENARIOS = [
     },
   },
   {
+    label: 'prompt prediction requests and usage',
+    fixture: 'wire-events-prompt-prediction.jsonl',
+    fixtureTitle: 'fixture places a prediction request and prediction usage after a completed turn',
+    fold: 'equivalence',
+    foldRows: 'all',
+    foldTitle: 'processWireChunk ignores prediction activity and metadata but retains its usage',
+    baselineTitle: 'prediction rows leave activity, model, cost ledger, state and render at baseline',
+    rowsUnder(wireText) {
+      return wireText.split('\n').filter(
+        (line) => line && /"type":"turn\.ended"|"kind":"prediction"|"usageScope":"prediction"/.test(line),
+      );
+    },
+    baseline(wireText) {
+      return wireText
+        .split('\n')
+        .filter((line) => line && !/"type":"llm\.request","kind":"prediction"/.test(line))
+        .map((line) => line.replace('"usageScope":"prediction"', '"usageScope":"turn"'))
+        .join('\n') + '\n';
+    },
+    fixtureChecks(wireText, baselineText) {
+      const parsed = this.rowsUnder(wireText).map((line) => JSON.parse(line));
+      assert.deepEqual(parsed.map((row) => row.type), ['turn.ended', 'llm.request', 'usage.record']);
+      assert.equal(parsed[1].kind, 'prediction');
+      assert.equal(parsed[2].usageScope, 'prediction');
+      assert.ok(baselineText.startsWith(REFERENCE));
+      assert.ok(baselineText.includes('"type":"turn.ended"'));
+      assert.ok(baselineText.includes('"usageScope":"turn"'));
+      assert.doesNotMatch(baselineText, /prediction/);
+      assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
+    },
+    baselineReadings(metrics) {
+      assert.equal(metrics.tps, 30);
+    },
+  },
+  {
     /**
      * Since Kimi Code 2.3.2, replay ignores legacy tool-triggered swarm enters
      * while retaining the record shape for old journals. The HUD must make the

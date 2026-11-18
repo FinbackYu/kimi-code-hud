@@ -38,6 +38,13 @@ test('usage.record folds model-scoped token deltas and ignores duplicate step.en
   });
 });
 
+test('prediction usage remains in the all-agent Session Cost ledger', () => {
+  const agentUsage = { reader: {}, byModel: {} };
+  const prediction = { ...record('openai/gpt-5.6', USAGE), usageScope: 'prediction' };
+  assert.equal(applySessionUsageRow(agentUsage, prediction), true);
+  assert.deepEqual(agentUsage.byModel['openai/gpt-5.6'], USAGE);
+});
+
 test('dedicated usage readers rebuild and combine the complete all-agent session', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-hud-session-usage-'));
   const state = { sessionUsage: emptySessionUsageState() };

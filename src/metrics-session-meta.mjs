@@ -30,12 +30,11 @@ export function applySessionMetaRow(state, row, agent = 'main') {
     if (level) state.thinkingLevel = level;
     return;
   }
-  if (row?.type === 'llm.request') {
-    // Per-request ground truth: hosts stamp every request with the model
-    // alias and thinking effort it actually ran with, so an in-session
-    // switch that emits no config.update/profile.bind row (the host's own
-    // footer can lag behind here) still surfaces on the next request.
-    // Last row wins, matching the META-row semantics above.
+  if (row?.type === 'llm.request' && row.kind !== 'prediction') {
+    // Per-request ground truth for conversational turns: hosts stamp every
+    // request with its actual model and effort. Side-channel prediction
+    // requests are excluded so they cannot replace the session's metadata.
+    // Last conversational row wins, matching the META-row semantics above.
     adoptModelAlias(state, row.modelAlias);
     if (typeof row.thinkingEffort === 'string' && row.thinkingEffort) {
       state.thinkingLevel = row.thinkingEffort;
