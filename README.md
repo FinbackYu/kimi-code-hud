@@ -87,6 +87,8 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 - 会话成本本地计算，价格表以 **2026-08-09** 官方定价核对，不含服务端工具费等修正所以始终带 `≈`；DeepSeek 缓存命中字段在宿主补齐映射前按未命中价保守估算，数值可能偏高；
 - 用量分级着色 <60% 绿 / <85% 黄 / ≥85% 红；可见宽度超过 200 字符自动 normal→compact 降级。
 
+本分支另含**未发布的 2.7.0 prep**：`kind = "prediction"` 的旁路请求不推进主回合活动态，也不覆盖正式回合的模型/thinking；其真实 `usageScope = "prediction"` 用量仍计入 Session Cost。#4820 若随 stable 发布，TTFT 将跟随宿主从 `generate` 入口（含 request-build）计时，TPS 的流式终点跟随 `decoder.end()`；250ms / 1000 t/s 门槛仍需真实样本复核，历史 fixture 不会被改写冒充新口径。详见 [2.7.0 prep 说明](docs/upstream-2.7.0-prep.md)。
+
 ## 工作原理
 
 宿主每秒通过 stdin 传一个 JSON 快照（读取上限 1 MiB、150ms 超时），命令 stdout 的**第一行**接管 footer line 1（line 2 固定由宿主绘制，插件无法接管）。**300ms** 是宿主截止时间（host deadline）：它约束包括 Node 进程启动在内的整个子进程生命周期，超时后进程树由宿主终止。HUD 自身在此之下把每帧工作限制在 **220ms** 的内部预算内（从脚本逻辑入口计时，不含 Node 启动），给宿主的调度与兜底留出余量。预算是协作式的：HUD 在步骤之间检查剩余时间、提前收手，但已在进行中的同步 I/O 无法被中途打断——单次慢读取最坏会越过内部预算，由宿主 300ms 截止兜底。失败/超时/空输出时宿主渲染内置行或重播上一帧，所以超时后旧帧可能继续显示一段时间（见 [KI-4](KNOWN_ISSUES.md#ki-4-a-failed-command-can-leave-a-stale-frame)）——脚本对所有错误静默降级、绝不打印日志（唯一的非零退出是"已禁用/已移除插件的托管副本"自我清除 `tui.toml` 条目，插件开关由此实现）。

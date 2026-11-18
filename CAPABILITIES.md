@@ -178,6 +178,33 @@ raw-journal versus active-chain boundary is tracked in
 | `[models."<alias>".upgrade]` | per-alias registry migration metadata added in 2.3.1: `model`, `migration_markdown`, optional `retirement_at` (the config table is a nested subtable like `[models."<alias>".overrides]`) | not rendered | migration copy and retirement dates are host-registry content, not footer material; the HUD keeps reading only `provider`/`model`/`display_name`/capability/effort keys from the same table, and a sibling `.upgrade` subtable does not truncate them |
 | upstream tip table | tip text, priority, solo/pair behavior | unused | it can be copied only with an explicit sync/drift strategy; it is not present in payload or wire data |
 
+## Unreleased 2.7.0 prep
+
+This section is deliberately outside the released 2.6.3 baseline. The
+implementation is inert unless the future records actually appear.
+
+- Upstream #4754's `llm.request.kind = "prediction"` is a side-channel request,
+  not a conversational turn: it does not advance `lastRequestAt`, create a false
+  active window, replace model/thinking, or reset the previous model's speed
+  samples. Its real `usageScope = "prediction"` record remains in the all-agent
+  Session Cost ledger because the provider did perform that model call. The
+  fixture proves equality with a baseline that deletes the prediction request
+  but retains the same usage as an ordinary turn-scope record.
+- Upstream #4820 moves TTFT/request-build timing to `generate` entry and ends
+  stream duration at `decoder.end()`, while keeping the `step.end` field names.
+  The HUD will therefore follow the host by continuing to read
+  `llmFirstTokenLatencyMs` and `llmStreamDurationMs`; no compensating arithmetic
+  is added. The 250ms minimum-stream and 1000 t/s plausibility thresholds stay
+  unchanged until released real samples justify a decision. Historical 2.5.3
+  fixtures remain historical rather than being relabeled as new-boundary data.
+- Upstream #4840's explicit effort binding is covered by a `profile.bind`
+  counterexample: later tool-selection refreshes and repeated `off` bindings do
+  not replace the HUD's explicit `off` value or persist tool content.
+
+The released-source comparison, old-implementation failures and remaining
+release-day checklist live in
+[docs/upstream-2.7.0-prep.md](docs/upstream-2.7.0-prep.md).
+
 ## Token meanings
 
 "Token statistics" is not one number. Any future component must name its layer:
