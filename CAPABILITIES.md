@@ -1,19 +1,17 @@
 # HUD capabilities
 
-- Last verified: 2026-11-13
+- Last verified: 2026-11-18
 - HUD behavior baseline: `v0.9.3` (`2be3e44`)
-- Kimi Code baseline: `2.6.1` (`30e3ce442ae850a7461b80f2ce209cd73a301d02`)
-- Release status (2026-11-13): 2.6.1 is the audited source/fixture baseline.
-  The range is not linear — its merge-base `244819a526` sits behind both
-  endpoints, and the 102 commits / 1,205 changed files (+74,207/−75,893) carry
-  2.6.0 and 2.6.1. The 10-field status-line payload and 300ms runner are
-  byte-identical. The persisted manifest drops 69 → 67; the new metadata and
-  `interruptionReminder.requested` fold as no-ops, while `turn.prompt.trigger`
-  now prevents notify/continue replays from resetting the user clock. The
-  footer adopts `sessionWorkDir` and conditional transcript-grouping hints;
-  #4771 makes fullscreen environment overrides per-process and leaves an unset
-  `tui_mode` as a commented default (see
-  [docs/upstream-2.6.1-review.md](docs/upstream-2.6.1-review.md)).
+- Kimi Code baseline: `2.6.3` (`b0de2fbd2de04d87689225aafd3912e5d193b62d`)
+- Release status (2026-11-18): 2.6.3 is the audited source/fixture baseline.
+  The 2.6.1 → 2.6.3 range is linear: 25 commits / 232 changed files
+  (+5,047/−2,232), covering 2.6.2 and 2.6.3. The 10-field status-line payload,
+  300ms runner, footer, slash registry, TUI config and 67-type persisted
+  manifest are byte-identical. Restored task notifications now stay prompt-only,
+  and subagent termination waits for loop/detached-task quiescence; the existing
+  prompt-trigger and task reducers consume those behaviors without new fields.
+  #4754 prediction and #4820 timing boundaries remain unreleased 2.7.0 prep
+  (see [docs/upstream-2.6.3-review.md](docs/upstream-2.6.3-review.md)).
   KI-20's real host acceptance, KI-8's current-version live fullscreen matrix,
   a real remote environment, and a real managed-account / DeepSeek smoke remain
   unverified.
@@ -26,16 +24,16 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/30e3ce442ae850a7461b80f2ce209cd73a301d02/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/30e3ce442ae850a7461b80f2ce209cd73a301d02/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/30e3ce442ae850a7461b80f2ce209cd73a301d02/apps/kimi-code/src/utils/git/git-status.ts)
-- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/30e3ce442ae850a7461b80f2ce209cd73a301d02/packages/agent-core-v2/docs/wire-manifest.d.ts) — 67 types in the released 2.6.1 manifest
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/30e3ce442ae850a7461b80f2ce209cd73a301d02/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/b0de2fbd2de04d87689225aafd3912e5d193b62d/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/b0de2fbd2de04d87689225aafd3912e5d193b62d/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/b0de2fbd2de04d87689225aafd3912e5d193b62d/apps/kimi-code/src/utils/git/git-status.ts)
+- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/b0de2fbd2de04d87689225aafd3912e5d193b62d/packages/agent-core-v2/docs/wire-manifest.d.ts) — 67 types in the released 2.6.3 manifest
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/b0de2fbd2de04d87689225aafd3912e5d193b62d/apps/kimi-code/src/tui/commands/registry.ts)
 
-Per-release baseline audit history (0.32.0 → 2.6.1, including the #3970
+Per-release baseline audit history (0.32.0 → 2.6.3, including the #3970
 prep) lives in
 [docs/capabilities-archive.md](docs/capabilities-archive.md). The sections
-below describe the current contract against the pinned 2.6.1 baseline; new
+below describe the current contract against the pinned 2.6.3 baseline; new
 release audits are appended to the archive instead of growing this file.
 
 ## Footer coverage
@@ -45,7 +43,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 2.6.1 | HUD reviewed branch | Status |
+| Official line-1 slot or state | Upstream 2.6.3 | HUD reviewed branch | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color; Never Ask still waits for Plan-mode plan review | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
 | plan mode | `plan` in the mode slot; only the user can enter Plan mode, and every plan waits for review | Reads `planMode` | covered, presentation variant |
@@ -63,7 +61,7 @@ does not need to be redrawn by the command.
 | Context and transient hint | context percentage and exact current/max tokens; transient hint at left | still rendered by the host on line 2 | host-owned, preserved; the reported value follows `[token_counting]` strategy |
 
 The two task rows share one implementation area (`src/metrics-tasks.mjs`).
-Kimi Code 2.6.1 no longer writes the `tasks/<taskId>.json` lifecycle sidecars;
+Kimi Code 2.6.3 no longer writes the `tasks/<taskId>.json` lifecycle sidecars;
 the durable `task.started` / `task.terminated` Ops retain their schema and cover
 current hosts, while the bounded sidecar reader remains a legacy fallback.
 They are not inferred from `metrics.activeAgents`: that value includes the
@@ -74,7 +72,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 2.6.1. HUD installation, configuration, and lifecycle
+built into Kimi Code 2.6.3. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 
@@ -154,7 +152,9 @@ None of those record classes feeds a HUD reducer. `turn.prompt` adds optional
 `trigger: normal | notify | continue`; the HUD consumes that field so a replayed
 user-looking origin cannot re-anchor generation for notify/continue turns.
 `wire-events-2.6.1.jsonl` covers all five deltas, the positive normal control,
-and a legacy-equivalent counterexample for the user clock.
+and a legacy-equivalent counterexample for the user clock. The 2.6.3 manifest is
+byte-identical to 2.6.1 (blob `45b493d7493e`), so that fixture remains the
+current wire baseline rather than being duplicated under a new version name.
 The physical schema stays append-only `{type, …payload, time}` lines, and every
 HUD reducer gates on exact known types, so these records fold as no-ops; the
 raw-journal versus active-chain boundary is tracked in
