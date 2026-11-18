@@ -1,7 +1,7 @@
 # HUD capabilities
 
 - Last verified: 2026-11-18
-- HUD behavior baseline: `v0.9.3` (`2be3e44`)
+- HUD behavior baseline: `v0.9.4` (`b8bb66b`)
 - Kimi Code baseline: `2.6.3` (`b0de2fbd2de04d87689225aafd3912e5d193b62d`)
 - Release status (2026-11-18): 2.6.3 is the audited source/fixture baseline.
   The 2.6.1 → 2.6.3 range is linear: 25 commits / 232 changed files

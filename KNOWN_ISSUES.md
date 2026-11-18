@@ -1,7 +1,7 @@
 # Known issues
 
 - Last verified: 2026-11-18
-- HUD behavior baseline: `v0.9.3` (`2be3e44`)
+- HUD behavior baseline: `v0.9.4` (`b8bb66b`)
 - Kimi Code baseline: `2.6.3` (`b0de2fbd2de04d87689225aafd3912e5d193b62d`)
 
 This file tracks open footer parity problems, information boundaries, and
@@ -85,9 +85,10 @@ The #69 fix applies the filesystem-only symbolic-HEAD precondition to every
 dirty probe, including frames with a payload branch. A locally unverifiable cwd
 now keeps the host branch as branch-only and never invokes Git; a verified local
 repository retains the existing dirty result and payload-branch priority. The
-null-branch fallback already used the same precondition. The fixture is
-`status-line-payload-remote.json`, with runtime proof that the old implementation
-probed while the fixed one does not, plus a real local-repository control.
+null-branch fallback already used the same precondition. This guard first shipped
+in HUD `v0.9.4`. The fixture is `status-line-payload-remote.json`, with runtime
+proof that the old implementation probed while the fixed one does not, plus a
+real local-repository control.
 
 Residual boundary: if a remote cwd also names a local symbolic-branch repository,
 the payload still cannot distinguish the two, so that repository's dirty state
