@@ -6,6 +6,31 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-11-18
+
+### Fixed
+
+- Keep a host-supplied remote Git branch without probing a locally unverifiable
+  cwd for dirty state. The HUD now requires a filesystem-verified local symbolic
+  HEAD before every dirty probe, so remote-only paths stay branch-only instead
+  of invoking Git locally (#69, PR #72).
+- Honor explicit `trigger: notify/continue` on Kimi Code 2.6.0+ prompt records:
+  tower notifications and goal continuations no longer re-anchor the user
+  generation timer when their replay origin looks user-initiated (#74, PR #76).
+
+### Changed
+
+- Advance the audited compatibility baseline from Kimi Code 2.4.0 to 2.6.3,
+  through 2.5.3 and 2.6.1. The status-line payload remains 10 fields with a
+  300ms host deadline; the current 67-type persisted wire manifest and new
+  prompt-trigger, environment, tool-selection and interruption records are
+  covered by released-source fixtures (PRs #71, #76 and #77;
+  `docs/upstream-2.5.3-review.md`, `docs/upstream-2.6.1-review.md` and
+  `docs/upstream-2.6.3-review.md`).
+- Preserve the 2.6.1 commented `tui_mode` default, `copy_on_select` and
+  `[transcript]` settings through install, uninstall and SessionStart
+  status-line repair (#70, PR #76).
+
 ## [0.9.3] - 2026-10-30
 
 ### Fixed
@@ -736,7 +761,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.4
 [0.9.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.3
 [0.9.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.2
 [0.9.1]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.1
