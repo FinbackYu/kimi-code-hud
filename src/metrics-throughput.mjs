@@ -28,6 +28,7 @@ export function applyThroughputRow(state, row, agent = 'main') {
   if (row?.type === 'llm.request') {
     if (
       row.kind !== 'compaction' &&
+      row.kind !== 'prediction' &&
       rowTime !== null &&
       (bucket.lastRequestAt === null || rowTime > bucket.lastRequestAt)
     ) {

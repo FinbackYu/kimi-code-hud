@@ -168,12 +168,13 @@ test('preserves other sections and status_line keys', () => {
   );
 });
 
-test('preserves 2.6.1 transcript settings and the commented tui_mode default', () => {
+test('preserves 2.7.0 follow-up and transcript settings and the commented tui_mode default', () => {
   const { home, pluginRoot, toml } = setup();
   const original = [
     'theme = "auto"',
     '# tui_mode = "regular" # "regular" | "fullscreen" ("fullscreen" is experimental)',
     'copy_on_select = true',
+    'follow_up_behavior = "steer"',
     '',
     '[transcript]',
     'tool_call_density = "compact"',

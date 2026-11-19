@@ -686,3 +686,39 @@ Baseline delta (2.6.1 → 2.6.3), reviewed 2026-11-18:
   future timing semantics were already released.
 - Real 2.6.3 fullscreen/default/fallback, remote-environment, KI-20 and
   managed-account/DeepSeek acceptance remain open.
+
+
+Baseline delta (2.6.3 → 2.7.0), reviewed 2026-11-20:
+
+- Target: annotated `@moonshot-ai/kimi-code@2.7.0`, tag object
+  `dc94b1adec6d5aa10b0fc5cd7872d450eb16eeff`, peeled commit
+  `a5e355e2718a2ebf70d8229fa5a05fe35d5f98a1` (published 2026-11-19 11:16 UTC).
+  The range is non-linear: merge-base `aa839f05fbc639e6d2fbb02cc8b3b5884011b4b5`,
+  72 target-side commits and 44 previous-only commits. The endpoint diff has
+  4,582 changed files (+433,863/−68,160). [Full review](upstream-2.7.0-review.md).
+- `status-line-command.ts`, `footer.ts` and `git-status.ts` change comments only;
+  the 10-field payload, 300ms runner, slot ownership and Git trust boundaries
+  carry over. `tui/config.ts` adds `follow_up_behavior`, which install, uninstall
+  and SessionStart preserve alongside the existing commented/mode/transcript keys.
+- The manifest stays at 67 record types while adding prediction to the existing
+  request-kind and usage-scope unions. Prediction requests cannot advance
+  activity or replace primary model/thinking; real prediction usage remains in
+  Session Cost. `wire-events-prompt-prediction.jsonl` covers the declared request
+  kind; `wire-events-2.7.0.jsonl` covers the actual released row shape and usage.
+- #4820 moves TTFT to `generate` entry and stream duration to `decoder.end()`.
+  Three real 2.7.0 normal steps measured TTFT 3238/1905/1986ms and streams
+  8313/6612/6786ms. The 250ms / 1000 t/s thresholds remain unchanged, and the
+  timing fixture normalizes only timestamps and model identifiers.
+- A real 2.7.0 TUI session produced and accepted ghost suggestions and persisted
+  two prediction usage records. Its complete Session Cost ledger includes them;
+  activity expires normally and the primary model/effort remains intact. Actual
+  normal and prediction wires did not emit `llm.request`, so the declared request
+  kind is intentionally covered by a separate synthetic counterexample.
+- Bedrock is listed in KI-24 instead of receiving a guessed usage adapter.
+  `/tasks` foreground-agent presentation, follow-up behavior and KAP/SSH changes
+  do not create a new HUD rendering contract. #4840 remains covered by the
+  explicit-off profile-binding counterexample.
+- Real 2.7.0 fullscreen/default/fallback, remote-environment, KI-20 and
+  managed-account/DeepSeek acceptance remain open. A usage-repo request-count
+  gap caused by relying on absent `llm.request` rows is a pre-existing separate
+  follow-up, not a 2.7.0 regression.

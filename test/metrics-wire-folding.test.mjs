@@ -4,6 +4,7 @@ import {
   median,
   processWireChunk,
 } from '../src/metrics.mjs';
+import { summarizeMetrics } from '../src/metrics-summary.mjs';
 import {
   EVENT_TIME,
   llmRequest,
@@ -305,6 +306,35 @@ test('processWireChunk tracks turn boundaries on the main agent', () => {
     stepEnd({ output: 100, streamMs: 1000, ttftMs: 100, time: EVENT_TIME + 2000 }) + '\n',
   );
   assert.equal(state.agents.main.lastTurnEndAt, EVENT_TIME + 2000);
+});
+
+test('processWireChunk keeps prediction requests out of activity and main model metadata', () => {
+  const state = makeState();
+  processWireChunk(
+    state,
+    '{"type":"profile.bind","modelAlias":"kimi-code/k3","thinkingEffort":"high","time":1}\n' +
+      llmRequest({ time: EVENT_TIME + 100 }) + '\n' +
+      turnEnded({ time: EVENT_TIME + 500 }) + '\n' +
+      '{"type":"llm.request","kind":"prediction","modelAlias":"prediction/model","thinkingEffort":"low","time":' + (EVENT_TIME + 1000) + '}\n',
+  );
+  assert.equal(state.agents.main.lastRequestAt, EVENT_TIME + 100);
+  assert.equal(state.agents.main.lastStepEndAt, EVENT_TIME + 500);
+  assert.equal(state.modelAlias, 'kimi-code/k3');
+  assert.equal(state.thinkingLevel, 'high');
+  const { metrics } = summarizeMetrics(state, { now: EVENT_TIME + 1000 });
+  assert.equal(metrics.activeAgents, 0);
+  assert.equal(metrics.mainActive, false);
+});
+
+test('processWireChunk keeps explicit off effort through later profile refreshes', () => {
+  const state = makeState();
+  processWireChunk(state, [
+    '{"type":"profile.bind","modelAlias":"kimi-code/k3","thinkingEffort":"off","time":1}',
+    '{"type":"tool_select.tools_changed","added":[{"name":"ExampleTool","description":"MUST_NOT_STORE_TOOL"}],"time":2}',
+    '{"type":"profile.bind","modelAlias":"kimi-code/k3","thinkingEffort":"off","time":3}',
+  ].join('\n') + '\n');
+  assert.equal(state.thinkingLevel, 'off');
+  assert.doesNotMatch(JSON.stringify(state), /MUST_NOT_STORE_TOOL/);
 });
 
 test('processWireChunk compaction never marks generating and its completion closes', () => {

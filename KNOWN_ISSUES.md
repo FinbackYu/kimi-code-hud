@@ -1,8 +1,8 @@
 # Known issues
 
-- Last verified: 2026-11-18
+- Last verified: 2026-11-20
 - HUD behavior baseline: `v0.9.4` (`b8bb66b`)
-- Kimi Code baseline: `2.6.3` (`b0de2fbd2de04d87689225aafd3912e5d193b62d`)
+- Kimi Code baseline: `2.7.0` (`a5e355e2718a2ebf70d8229fa5a05fe35d5f98a1`)
 
 This file tracks open footer parity problems, information boundaries, and
 resolved compatibility or security constraints worth keeping as regression
@@ -102,7 +102,7 @@ that payload cwd for its project name and Git cache key, so it follows the same
 selection without another local inference layer. The payload still has only 10
 fields and no environment marker; this source refinement does not remove the
 identical-local-path collision above. The payload and footer are byte-identical
-in 2.6.3, so this boundary is unchanged at the current baseline.
+in 2.7.0, so this boundary is unchanged at the current baseline.
 
 The dirty probe itself is now bounded by a cross-process 15-second, 64-cwd
 cache and runs with `GIT_OPTIONAL_LOCKS=0`; this closes the per-frame scan/lock-contention
@@ -184,7 +184,7 @@ Affected upstream slot: `model` / status-line payload
 The built-in footer renders the host's in-memory session state
 (`state.thinkingEffort`), so it always shows the current runtime effort. The
 custom status line has no such field: `StatusLinePayload` (10 fields,
-unchanged through 2.6.3) carries no thinking-effort entry.
+unchanged through 2.7.0) carries no thinking-effort entry.
 
 In-session switches: the original finding, verified against 0.34.0 wires, was
 that a switch emits no local event the HUD could read. That is no longer true:
@@ -302,7 +302,7 @@ Status: partially verified (Windows row recorded 2026-09-18)
 
 Affected area: Kimi Code fullscreen TUI (first reviewed at 0.36.0–0.38.0; 2.1.0 promoted it to the persistent `tui_mode` preference)
 
-Entry procedure at the 2.6.3 baseline: set `tui_mode = "fullscreen"` in
+Entry procedure at the 2.7.0 baseline: set `tui_mode = "fullscreen"` in
 `~/.kimi-code/tui.toml`, or pick the fullscreen layout in `/settings`; both
 take effect after restarting Kimi Code. `KIMI_CODE_TUI_FULL_SCREEN` is again a
 per-process, highest-priority boolean override (`1/true/yes/on` and
@@ -392,9 +392,10 @@ transcript grouping and conditional `ctrl+o` hint remain host-owned. Source and
 synthetic config regressions do not establish a real 2.6.1 fullscreen frame, an
 experimental-default launch, terminal fallback or an explicit env=0 override.
 
-2.6.3 review: `status-line-command.ts`, `footer.ts` and `tui/config.ts` are
-byte-identical to 2.6.1, so the entry procedure and ownership boundary carry
-over. No real 2.6.3 fullscreen/default/fallback frame was exercised.
+2.7.0 review: `status-line-command.ts` and `footer.ts` change comments only;
+`tui/config.ts` adds `follow_up_behavior` and changes compact transcript
+presentation without altering the fullscreen entry procedure or footer
+ownership boundary. No real 2.7.0 fullscreen/default/fallback frame was exercised.
 
 Still open: resize behavior, `/reload-tui`, and failure-frame fallback are
 not yet exercised. The classic conhost window could not be produced on this
@@ -406,7 +407,7 @@ Acceptance criteria:
 
 - launch Kimi Code with fullscreen `tui_mode` in a real PTY (the 0.38.0
   env-gated wording is obsolete); ✅ 2026-09-18 via the then-current switch (host 2.0.0, WT 1.24, Win11)
-- on 2.6.3, exercise experimental-default fullscreen, tmux -CC / Termux /
+- on 2.7.0, exercise experimental-default fullscreen, tmux -CC / Termux /
   `TERM=dumb` fallback, and `KIMI_CODE_TUI_FULL_SCREEN=0`; source-reviewed, live acceptance open
 - verify line 1 refresh, line 2 context ownership, resize, reload, and fallback; — line 1 refresh ✅, line 2 ownership ✅; resize/reload/fallback still open
 - record the terminal/OS matrix without weakening the 220ms HUD budget. — Windows row recorded ✅; macOS/Linux rows pending
@@ -840,7 +841,7 @@ countdowns, freshness and expiry. No real credentials or user data were used.
 
 ## KI-20: Git status probe still runs repository-configured clean filters
 
-Status: fixed in v0.8.5 (PR #50); real host acceptance pending (2.2.0–2.6.3)
+Status: fixed in v0.8.5 (PR #50); real host acceptance pending (2.2.0–2.7.0)
 
 Affected area: Git dirty probe / untrusted workspace execution
 
@@ -889,7 +890,7 @@ Acceptance criteria:
 - [x] isolated regression fails if either filter runs;
 - [x] bounded, silent fallback and a shared 150ms probe budget;
 - [x] keep branch/dirty output while the probe uses index metadata only;
-- [ ] trigger the relevant paths in a real current-host session (2.6.3 remains unrecorded) and record the result.
+- [ ] trigger the relevant paths in a real current-host session (2.7.0 remains unrecorded) and record the result.
 
 ## KI-21: Provider balance does not resolve `api_key_env`
 
@@ -959,7 +960,7 @@ record normal refresh backoff. A live GLM Coding Plan account with an active
 plan remains unverified — the expired-account path is the one exercised on a
 real key.
 
-## KI-24: Four providers have no supported usage source
+## KI-24: Five providers have no supported usage source
 
 Status: open (by design)
 
@@ -967,7 +968,7 @@ Affected area: provider usage adapters
 
 A provider-usage adapter reads an official JSON endpoint with the same
 inference credential the provider already uses and renders only what that
-payload states. Four providers cannot meet that bar, so they have no adapter,
+payload states. Five providers cannot meet that bar, so they have no adapter,
 and their segment hides instead of showing a guessed number:
 
 - **mimo / xiaomi** — the usage figures exist only behind a browser cookie
@@ -980,6 +981,10 @@ and their segment hides instead of showing a guessed number:
   request, which spends tokens and still never returns a balance.
 - **zenmux** — its quota endpoint accepts only a management key, which is a
   different credential from the inference key and cannot serve inference.
+- **Amazon Bedrock** — 2.7.0 uses an AWS bearer token or the ambient AWS
+  credential chain, not a provider inference key with a documented usage/balance
+  JSON endpoint. No compatible adapter is added by association; the segment
+  stays hidden until an endpoint satisfies the same credential and host rules.
 
 Admission criteria for a new adapter (enforced by review, not by code):
 

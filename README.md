@@ -30,7 +30,7 @@ Kimi Code CLI 的自定义底部状态栏（HUD）——零依赖 Node.js 脚本
 | 推荐运行时 | 处于上游维护窗口内的 Node.js LTS（撰写本文时为 22 / 24） | 日常开发与发布验证以此为准 |
 | 尽力兼容运行时 | 满足最低要求 **Node.js ≥ 18** 的所有版本（最低要求不变） | 已结束上游官方维护（EOL）的版本（如 18 / 20）不做主动测试；相关问题按尽力兼容处理 |
 | 操作系统 | macOS / Linux / Windows | macOS 是维护者的主要开发与动态验证环境；Linux 由 CI 自动化测试覆盖（实际矩阵以 [`.github/workflows/test.yml`](.github/workflows/test.yml) 为准）；Windows 为尽力兼容——Git 探针已按 Windows 约定做可信可执行解析（含 `PATHEXT`，见 [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)），**2026-09-18 已在 Windows 11 + Windows Terminal 真实环境完成 HUD 动态验证**（真实 PTY 下全屏模式的逐帧渲染、行 1 刷新、行 2 归属、额度刷新与冷启动耗时，当时用的是 2.0.0 与上线前的 `KIMI_CODE_TUI_FULL_SCREEN=1` 开关；当前可设置 `tui.toml` 的 `tui_mode = "fullscreen"`，也可用 `KIMI_CODE_TUI_FULL_SCREEN=1/0` 按进程覆盖（实验总开关开启且未显式配置时默认全屏），证据见 [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)）；窗口 resize、`/reload-tui` 热重载与失败回退仍未实测 |
-| Kimi Code 宿主 | 源码与合成 fixture 基线 **2.6.3**；真实 TUI 验收待完成 | 逐版本契约审计与固定的上游提交见 [CAPABILITIES.md](CAPABILITIES.md) |
+| Kimi Code 宿主 | 源码与合成 fixture 基线 **2.7.0**；真实 TUI 验收待完成 | 逐版本契约审计与固定的上游提交见 [CAPABILITIES.md](CAPABILITIES.md) |
 
 CI 矩阵的增删是测试覆盖的变化，不构成支持契约的扩张或收缩；支持范围以本节为准。跨操作系统的交互式宿主矩阵（真实 TUI、终端模拟器、插件生命周期）已补齐 Windows 一行（Windows 11 + Windows Terminal，见 [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)），macOS Terminal 与 Linux PTY 组合仍在补齐。
 
@@ -87,6 +87,8 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 - 会话成本本地计算，价格表以 **2026-08-09** 官方定价核对，不含服务端工具费等修正所以始终带 `≈`；DeepSeek 缓存命中字段在宿主补齐映射前按未命中价保守估算，数值可能偏高；
 - 用量分级着色 <60% 绿 / <85% 黄 / ≥85% 红；可见宽度超过 200 字符自动 normal→compact 降级。
 
+在 2.7.0 中，`kind = "prediction"` 的旁路请求不推进主回合活动态，也不覆盖正式回合的模型/thinking；其真实 `usageScope = "prediction"` 用量仍计入 Session Cost。TTFT 跟随宿主从 `generate` 入口（含 request-build）计时，TPS 的流式终点跟随 `decoder.end()`；真实 2.7.0 三轮样本已复核，250ms / 1000 t/s 门槛保持不变。详见 [2.7.0 审查](docs/upstream-2.7.0-review.md)。
+
 ## 工作原理
 
 宿主每秒通过 stdin 传一个 JSON 快照（读取上限 1 MiB、150ms 超时），命令 stdout 的**第一行**接管 footer line 1（line 2 固定由宿主绘制，插件无法接管）。**300ms** 是宿主截止时间（host deadline）：它约束包括 Node 进程启动在内的整个子进程生命周期，超时后进程树由宿主终止。HUD 自身在此之下把每帧工作限制在 **220ms** 的内部预算内（从脚本逻辑入口计时，不含 Node 启动），给宿主的调度与兜底留出余量。预算是协作式的：HUD 在步骤之间检查剩余时间、提前收手，但已在进行中的同步 I/O 无法被中途打断——单次慢读取最坏会越过内部预算，由宿主 300ms 截止兜底。失败/超时/空输出时宿主渲染内置行或重播上一帧，所以超时后旧帧可能继续显示一段时间（见 [KI-4](KNOWN_ISSUES.md#ki-4-a-failed-command-can-leave-a-stale-frame)）——脚本对所有错误静默降级、绝不打印日志（唯一的非零退出是"已禁用/已移除插件的托管副本"自我清除 `tui.toml` 条目，插件开关由此实现）。
@@ -121,7 +123,7 @@ provider 余额 / 用量窗口按**该 provider 的 `base_url` 官方 host** 选
 
 ## 能力与已知问题
 
-- [能力清单](CAPABILITIES.md)：Kimi Code 2.6.3 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
+- [能力清单](CAPABILITIES.md)：Kimi Code 2.7.0 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
 - [已知问题](KNOWN_ISSUES.md)：Git、终端宽度、失败帧与全屏动态验证缺口及验收条件。
 
 ## 隐私与安全
