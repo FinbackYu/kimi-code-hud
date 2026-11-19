@@ -6,6 +6,31 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-11-20
+
+### Fixed
+
+- Prevent experimental prompt-prediction side requests from creating false HUD
+  activity, replacing the primary model/thinking or resetting its speed samples.
+  Real prediction usage remains in the all-agent Session Cost estimate (#73,
+  PR #79).
+
+### Changed
+
+- Advance the audited compatibility baseline from Kimi Code 2.6.3 to 2.7.0
+  (non-linear range: 72 commits and 4,582 changed paths). The status-line
+  payload remains 10 fields with a 300ms host deadline; the 67-type persisted
+  wire manifest adds prediction request/usage scopes without adding a record
+  type (PR #79, `docs/upstream-2.7.0-review.md`).
+- Follow the released timing boundaries: TTFT starts at `generate` entry and
+  stream duration ends at `decoder.end()`. A real 2.7.0 synthetic session now
+  covers three normal turns and two prediction usage records, including ghost
+  text acceptance and complete Session Cost accounting; the 250ms and 1000 t/s
+  thresholds remain unchanged (#75, PR #79).
+- Preserve the 2.7.0 `follow_up_behavior` setting during install, uninstall and
+  SessionStart repair. Bedrock is documented in KI-24 instead of receiving a
+  guessed usage adapter (PR #79).
+
 ## [0.9.4] - 2026-11-18
 
 ### Fixed
@@ -761,7 +786,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Adopt and remove legacy unmarked SessionStart hook blocks without disturbing
   unrelated hook configuration.
 
-[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/FinbackYu/kimi-code-hud/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.5
 [0.9.4]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.4
 [0.9.3]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.3
 [0.9.2]: https://github.com/FinbackYu/kimi-code-hud/releases/tag/v0.9.2
