@@ -1,17 +1,19 @@
 # HUD capabilities
 
-- Last verified: 2026-11-18
+- Last verified: 2026-11-20
 - HUD behavior baseline: `v0.9.4` (`b8bb66b`)
-- Kimi Code baseline: `2.6.3` (`b0de2fbd2de04d87689225aafd3912e5d193b62d`)
-- Release status (2026-11-18): 2.6.3 is the audited source/fixture baseline.
-  The 2.6.1 → 2.6.3 range is linear: 25 commits / 232 changed files
-  (+5,047/−2,232), covering 2.6.2 and 2.6.3. The 10-field status-line payload,
-  300ms runner, footer, slash registry, TUI config and 67-type persisted
-  manifest are byte-identical. Restored task notifications now stay prompt-only,
-  and subagent termination waits for loop/detached-task quiescence; the existing
-  prompt-trigger and task reducers consume those behaviors without new fields.
-  #4754 prediction and #4820 timing boundaries remain unreleased 2.7.0 prep
-  (see [docs/upstream-2.6.3-review.md](docs/upstream-2.6.3-review.md)).
+- Kimi Code baseline: `2.7.0` (`a5e355e2718a2ebf70d8229fa5a05fe35d5f98a1`)
+- Release status (2026-11-20): 2.7.0 is the audited source/fixture and
+  released-host acceptance baseline. The 2.6.3 → 2.7.0 range is non-linear:
+  72 commits / 4,582 changed files (+433,863/−68,160), with 44 previous-only
+  commits around merge-base `aa839f05`. The 10-field status-line payload and
+  300ms runner are unchanged; the 67-type manifest adds prediction request and
+  usage scopes without adding a record type. Prediction side requests no longer
+  advance activity or replace primary model/thinking, while their real usage
+  remains in Session Cost. TTFT starts at `generate` entry and stream duration
+  ends at `decoder.end()`; three normal turns and two prediction records from a
+  real 2.7.0 synthetic session are covered, with the 250ms / 1000 t/s thresholds
+  unchanged (see [docs/upstream-2.7.0-review.md](docs/upstream-2.7.0-review.md)).
   KI-20's real host acceptance, KI-8's current-version live fullscreen matrix,
   a real remote environment, and a real managed-account / DeepSeek smoke remain
   unverified.
@@ -24,16 +26,16 @@ Open parity gaps and their acceptance criteria live in
 Upstream references are pinned to the audited commit so a later `main` change
 cannot silently change the baseline:
 
-- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/b0de2fbd2de04d87689225aafd3912e5d193b62d/apps/kimi-code/src/tui/components/chrome/footer.ts)
-- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/b0de2fbd2de04d87689225aafd3912e5d193b62d/apps/kimi-code/src/tui/utils/status-line-command.ts)
-- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/b0de2fbd2de04d87689225aafd3912e5d193b62d/apps/kimi-code/src/utils/git/git-status.ts)
-- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/b0de2fbd2de04d87689225aafd3912e5d193b62d/packages/agent-core-v2/docs/wire-manifest.d.ts) — 67 types in the released 2.6.3 manifest
-- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/b0de2fbd2de04d87689225aafd3912e5d193b62d/apps/kimi-code/src/tui/commands/registry.ts)
+- [footer slots and rendering](https://github.com/MoonshotAI/kimi-code/blob/a5e355e2718a2ebf70d8229fa5a05fe35d5f98a1/apps/kimi-code/src/tui/components/chrome/footer.ts)
+- [`status_line.command` payload](https://github.com/MoonshotAI/kimi-code/blob/a5e355e2718a2ebf70d8229fa5a05fe35d5f98a1/apps/kimi-code/src/tui/utils/status-line-command.ts)
+- [Git status model](https://github.com/MoonshotAI/kimi-code/blob/a5e355e2718a2ebf70d8229fa5a05fe35d5f98a1/apps/kimi-code/src/utils/git/git-status.ts)
+- [Event2 persisted record manifest (not the complete wire journal)](https://github.com/MoonshotAI/kimi-code/blob/a5e355e2718a2ebf70d8229fa5a05fe35d5f98a1/packages/agent-core-v2/docs/wire-manifest.d.ts) — 67 types in the released 2.7.0 manifest
+- [built-in slash-command registry](https://github.com/MoonshotAI/kimi-code/blob/a5e355e2718a2ebf70d8229fa5a05fe35d5f98a1/apps/kimi-code/src/tui/commands/registry.ts)
 
-Per-release baseline audit history (0.32.0 → 2.6.3, including the #3970
+Per-release baseline audit history (0.32.0 → 2.7.0, including the #3970
 prep) lives in
 [docs/capabilities-archive.md](docs/capabilities-archive.md). The sections
-below describe the current contract against the pinned 2.6.3 baseline; new
+below describe the current contract against the pinned 2.7.0 baseline; new
 release audits are appended to the archive instead of growing this file.
 
 ## Footer coverage
@@ -43,7 +45,7 @@ an intentional presentation choice; **degraded** loses useful upstream detail;
 **missing** is an open parity gap; **host-owned** remains on footer line 2 and
 does not need to be redrawn by the command.
 
-| Official line-1 slot or state | Upstream 2.6.3 | HUD reviewed branch | Status |
+| Official line-1 slot or state | Upstream 2.7.0 | HUD reviewed branch | Status |
 |---|---|---|---|
 | permission mode | `manual` has no badge; official naming "Always Ask" / "Ask When Needed" / "Never Ask"; `auto` / `yolo` use the warning color; Never Ask still waits for Plan-mode plan review | Reads `permissionMode`; always shows a badge with the official labels by default (`short` opt-out), paints `[Never Ask]` red and `[Always Ask]` faded blue | covered, presentation variant |
 | plan mode | `plan` in the mode slot; only the user can enter Plan mode, and every plan waits for review | Reads `planMode` | covered, presentation variant |
@@ -61,7 +63,7 @@ does not need to be redrawn by the command.
 | Context and transient hint | context percentage and exact current/max tokens; transient hint at left | still rendered by the host on line 2 | host-owned, preserved; the reported value follows `[token_counting]` strategy |
 
 The two task rows share one implementation area (`src/metrics-tasks.mjs`).
-Kimi Code 2.6.3 no longer writes the `tasks/<taskId>.json` lifecycle sidecars;
+Kimi Code 2.7.0 no longer writes the `tasks/<taskId>.json` lifecycle sidecars;
 the durable `task.started` / `task.terminated` Ops retain their schema and cover
 current hosts, while the bounded sidecar reader remains a legacy fallback.
 They are not inferred from `metrics.activeAgents`: that value includes the
@@ -72,7 +74,7 @@ main agent and means "recently generating or holding an LLM request", not
 
 The HUD is observational: once installed and enabled, it reacts to Kimi Code
 state and does not define its own slash commands. The slash commands below are
-built into Kimi Code 2.6.3. HUD installation, configuration, and lifecycle
+built into Kimi Code 2.7.0. HUD installation, configuration, and lifecycle
 commands are documented in [README.md](README.md#安装) and
 [README.en.md](README.en.md#install).
 
@@ -85,7 +87,7 @@ commands are documented in [README.md](README.md#安装) and
 | tower mode | start the Tower workflow with `/tower` | `[tower]`; a parked main is excluded and live workers retain fleet-style speed | available behind the upstream experimental flag |
 | goal lifecycle | start with `/goal <objective>`; inspect or manage with `/goal status`, `/goal pause`, `/goal resume`, `/goal cancel`, or `/goal replace <objective>` | goal status as the badge word's color, turns, and optional turn budget | available |
 | model and thinking | use `/model`; set thinking effort with `/effort` or its `/thinking` alias | model display name and thinking-effort suffix | available |
-| TPS, TTFT, and generation time | run normal prompts; no separate command is required | live `gen` anchored at the latest user prompt; tower notification and goal-continuation turns never reset it, and 2.6.0+ `trigger: notify/continue` wins over a user-looking replay origin; dimmed settled total afterwards; TPS and TTFT after enough valid samples exist | available, automatic |
+| TPS, TTFT, and generation time | run normal prompts; no separate command is required | live `gen` anchored at the latest user prompt; tower notification and goal-continuation turns never reset it, and 2.6.0+ `trigger: notify/continue` wins over a user-looking replay origin; dimmed settled total afterwards; TPS and TTFT after enough valid samples exist, with 2.7.0 TTFT measured from `generate` entry and stream duration ending at `decoder.end()` | available, automatic |
 | compaction | use `/compact [instruction]`, or allow automatic compaction | live and most recent compaction duration | available, automatic |
 | prompt-cache ratio | continue using the session normally; the first complete model-step usage record initializes it | rounded token-weighted `Cache N%` over the newest five main-agent model steps within the last 30 minutes, capped at 99%; fewer than five fresh steps still render, and the segment hides when none remain | available, automatic |
 | background tasks | start a background shell task or a detached subagent; no HUD action is required | `[N task(s) running]` and `[N agent(s) running]` between model and cwd | available, automatic |
@@ -152,12 +154,15 @@ None of those record classes feeds a HUD reducer. `turn.prompt` adds optional
 `trigger: normal | notify | continue`; the HUD consumes that field so a replayed
 user-looking origin cannot re-anchor generation for notify/continue turns.
 `wire-events-2.6.1.jsonl` covers all five deltas, the positive normal control,
-and a legacy-equivalent counterexample for the user clock. The 2.6.3 manifest is
-byte-identical to 2.6.1 (blob `45b493d7493e`), so that fixture remains the
-current wire baseline rather than being duplicated under a new version name.
-The physical schema stays append-only `{type, …payload, time}` lines, and every
-HUD reducer gates on exact known types, so these records fold as no-ops; the
-raw-journal versus active-chain boundary is tracked in
+and a legacy-equivalent counterexample for the user clock. In 2.7.0 the manifest
+stays at 67 record types but adds `llm.request.kind = "prediction"` and
+`usageScope = "prediction"` to its unions. `wire-events-2.7.0.jsonl` covers the
+released row shape, real timing samples and prediction usage; the separate
+`wire-events-prompt-prediction.jsonl` proves that a declared prediction request
+cannot change activity or primary model metadata. The physical schema stays
+append-only `{type, …payload, time}` lines, and every HUD reducer gates on exact
+known types, so unrelated records fold as no-ops; the raw-journal versus
+active-chain boundary is tracked in
 [KI-18](KNOWN_ISSUES.md#ki-18-undo-branch-records-stay-in-the-wire-journal-hud-folds-the-raw-stream).
 
 | Source | Available information | Current use | Unexposed capability / constraint |
@@ -165,7 +170,7 @@ raw-journal versus active-chain boundary is tracked in
 | status-line payload | full cwd, context ratio, current/max context tokens, session ID, host version, and a nullable branch | model/mode/cwd/branch display; session ID locates wire data; Context stays on host line 2; host version persists into metrics state for compatibility gating | host version is available for diagnostics; full cwd is deliberately shortened; context values follow `[token_counting]` strategy; the host fills `gitBranch` asynchronously since 2.3.1 and from the remote repository since 2.5.0, and `cwd` follows `sessionWorkDir` since 2.6.0, but no environment/remote field exists; the HUD's local HEAD/dirty reads retain the boundary in [KI-2](KNOWN_ISSUES.md#ki-2-git-is-lower-fidelity-than-the-built-in-footer) |
 | `step.end.usage` | `inputOther`, `inputCacheRead`, `inputCacheCreation`, `output` per model step | output + stream duration derive TPS; the three input fields derive Cache | not added to the cost ledger because `usage.record` duplicates the same request usage with a model identity |
 | Cache reducer state | exact `readTokens`, `inputTokens`, and step timestamp for the newest five main-agent model steps, the last message timestamp, and the fresh samples' combined ratio | renders only rounded `Cache N%` from samples inside the last 30 minutes; expired samples are excluded and no fresh samples means no Cache segment | exact `Cache N% (read/input)` is available without new wire parsing; token counts were removed with the full layout in HUD 0.6.0 |
-| `usage.record` | the same four usage counters, model, and optional session/turn scope | a dedicated all-agent cursor accumulates model-scoped session totals for supported DeepSeek / OpenAI / Anthropic local cost estimates | cursor and content-free counters persist; the estimate remains hidden until every visible wire is caught up and every nonzero row belongs to the active provider, and must never also add duplicate `step.end` usage |
+| `usage.record` | the same four usage counters, model, and optional session/turn/prediction scope | a dedicated all-agent cursor accumulates model-scoped session totals for supported DeepSeek / OpenAI / Anthropic local cost estimates, including real prediction calls | cursor and content-free counters persist; the estimate remains hidden until every visible wire is caught up and every nonzero row belongs to the active provider, and must never also add duplicate `step.end` usage |
 | per-agent wires | per-agent TPS samples, TTFT, request/turn timestamps, and agent directory identity | aggregates fleet total, contributing-agent count, average, and median TTFT | an expanded/debug view could expose per-agent rows; the one-line footer should stay aggregated |
 | goal records | objective, criterion, status/reason, turns, tokens, elapsed time, and turn/token/time budgets | status (the goal word's color), turns, and turn budget | numeric token/time budget progress is readable with a reducer extension; elapsed time is no longer rendered, since the badge carries no clock; objective, criterion, and reasons are content and should not enter the footer by default |
 | task records | task ID, kind, status, timestamps, timeout, plus kind-specific process/agent details | the two running counts (`tasks.bash` / `tasks.agents`) | command, PID, description, subagent type, stop reason, and output tail stay out of the footer; they belong in task/debug views |
@@ -178,32 +183,33 @@ raw-journal versus active-chain boundary is tracked in
 | `[models."<alias>".upgrade]` | per-alias registry migration metadata added in 2.3.1: `model`, `migration_markdown`, optional `retirement_at` (the config table is a nested subtable like `[models."<alias>".overrides]`) | not rendered | migration copy and retirement dates are host-registry content, not footer material; the HUD keeps reading only `provider`/`model`/`display_name`/capability/effort keys from the same table, and a sibling `.upgrade` subtable does not truncate them |
 | upstream tip table | tip text, priority, solo/pair behavior | unused | it can be copied only with an explicit sync/drift strategy; it is not present in payload or wire data |
 
-## Unreleased 2.7.0 prep
-
-This section is deliberately outside the released 2.6.3 baseline. The
-implementation is inert unless the future records actually appear.
+## 2.7.0 prediction and timing
 
 - Upstream #4754's `llm.request.kind = "prediction"` is a side-channel request,
   not a conversational turn: it does not advance `lastRequestAt`, create a false
   active window, replace model/thinking, or reset the previous model's speed
   samples. Its real `usageScope = "prediction"` record remains in the all-agent
-  Session Cost ledger because the provider did perform that model call. The
-  fixture proves equality with a baseline that deletes the prediction request
-  but retains the same usage as an ordinary turn-scope record.
+  Session Cost ledger because the provider did perform that model call. A real
+  2.7.0 synthetic TUI session produced ghost text, accepted it with Tab and
+  persisted two prediction usage records; the primary model and effort stayed
+  `kimi-code/k3.1-pro` / `high`. The declared request kind is covered separately
+  by a synthetic counterexample because this release's direct operations did not
+  emit `llm.request` in the captured normal or prediction wires.
 - Upstream #4820 moves TTFT/request-build timing to `generate` entry and ends
   stream duration at `decoder.end()`, while keeping the `step.end` field names.
-  The HUD will therefore follow the host by continuing to read
-  `llmFirstTokenLatencyMs` and `llmStreamDurationMs`; no compensating arithmetic
-  is added. The 250ms minimum-stream and 1000 t/s plausibility thresholds stay
-  unchanged until released real samples justify a decision. Historical 2.5.3
-  fixtures remain historical rather than being relabeled as new-boundary data.
+  The HUD continues to read `llmFirstTokenLatencyMs` and
+  `llmStreamDurationMs` without compensating arithmetic. Three real normal steps
+  measured TTFT 3238/1905/1986ms and streams 8313/6612/6786ms for 416/388/394
+  output tokens; all are valid under the unchanged 250ms minimum-stream and
+  1000 t/s plausibility thresholds. `wire-events-2.7.0.jsonl` retains those
+  numbers with normalized timestamps and model identifiers.
 - Upstream #4840's explicit effort binding is covered by a `profile.bind`
   counterexample: later tool-selection refreshes and repeated `off` bindings do
   not replace the HUD's explicit `off` value or persist tool content.
 
-The released-source comparison, old-implementation failures and remaining
-release-day checklist live in
-[docs/upstream-2.7.0-prep.md](docs/upstream-2.7.0-prep.md).
+The released-source comparison, old-implementation failures, real-host
+acceptance and remaining boundaries live in
+[docs/upstream-2.7.0-review.md](docs/upstream-2.7.0-review.md).
 
 ## Token meanings
 

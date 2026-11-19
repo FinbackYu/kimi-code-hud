@@ -30,14 +30,14 @@ const SENSITIVE_PATTERN =
   /\/Users\/\S+|\/home\/\S+|[A-Z]:\\Users\\\S+|access_token|authorization|bearer\s+\S+|cookie\s*[:=]/i;
 
 /** Run one fixture text through the full getMetrics pipeline. */
-function makeSessionMetrics(wireText) {
+function makeSessionMetrics(wireText, now = NOW) {
   const { sessionsRoot, stateDir, id, sessionDir } = makeSession({
     tmpPrefix: 'kimi-hud-row-class-',
     wd: 'workspace-redacted',
     stateDir: true,
   });
   fs.writeFileSync(path.join(sessionDir, 'agents', 'main', 'wire.jsonl'), wireText);
-  const metrics = getMetrics(id, { sessionsRoot, stateDir, now: NOW });
+  const metrics = getMetrics(id, { sessionsRoot, stateDir, now });
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, `metrics-${id}.json`), 'utf8'));
   return { metrics, state };
 }
@@ -896,4 +896,44 @@ test('fixture stays sanitized: no paths, credentials or user content', () => {
     assert.ok(Number.isInteger(time));
     assert.ok(time >= 1785456000000 && time <= 1785456060000);
   }
+});
+
+// --- released 2.7.0 timing and prediction usage ---
+
+test('2.7.0 fixture preserves the released row shape and real timing samples', () => {
+  const wireText = fs.readFileSync(path.join(FIXTURES, 'wire-events-2.7.0.jsonl'), 'utf8');
+  const rows = wireText.trimEnd().split('\n').map((line) => JSON.parse(line));
+  assert.equal(rows.filter((row) => row.type === 'llm.request').length, 0);
+  assert.equal(rows.filter((row) => row.usageScope === 'prediction').length, 2);
+  const steps = rows.filter((row) => row.event?.type === 'step.end');
+  assert.deepEqual(
+    steps.map((row) => [row.event.llmFirstTokenLatencyMs, row.event.llmStreamDurationMs]),
+    [[3238, 8313], [1905, 6612], [1986, 6786]],
+  );
+  assert.deepEqual(steps.map((row) => row.event.usage.output), [416, 388, 394]);
+  assert.doesNotMatch(wireText, SENSITIVE_PATTERN);
+  assert.doesNotMatch(wireText, /"input"\s*:/);
+});
+
+test('2.7.0 timing fields and prediction usage settle without changing the primary model', () => {
+  const wireText = fs.readFileSync(path.join(FIXTURES, 'wire-events-2.7.0.jsonl'), 'utf8');
+  const live = makeSessionMetrics(wireText);
+  assert.ok(Math.abs(live.metrics.tps - 394 / 6.786) < 1e-9);
+  assert.equal(live.metrics.ttftMs, 1986);
+
+  const settled = makeSessionMetrics(wireText, NOW + 120001);
+  assert.equal(settled.metrics.activeAgents, 0);
+  assert.equal(settled.metrics.mainActive, false);
+  assert.equal(settled.metrics.modelAlias, 'example/primary');
+  assert.equal(settled.metrics.thinkingLevel, 'high');
+  assert.deepEqual(settled.metrics.modelUsage.byModel['example-model'], {
+    inputOther: 32638,
+    inputCacheRead: 109312,
+    inputCacheCreation: 0,
+    output: 1456,
+  });
+  assert.deepEqual(
+    settled.state.agents.main.samples.map((sample) => sample.v),
+    [416 / 8.313, 388 / 6.612, 394 / 6.786],
+  );
 });

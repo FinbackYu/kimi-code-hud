@@ -30,7 +30,7 @@ Kimi Code CLI 的自定义底部状态栏（HUD）——零依赖 Node.js 脚本
 | 推荐运行时 | 处于上游维护窗口内的 Node.js LTS（撰写本文时为 22 / 24） | 日常开发与发布验证以此为准 |
 | 尽力兼容运行时 | 满足最低要求 **Node.js ≥ 18** 的所有版本（最低要求不变） | 已结束上游官方维护（EOL）的版本（如 18 / 20）不做主动测试；相关问题按尽力兼容处理 |
 | 操作系统 | macOS / Linux / Windows | macOS 是维护者的主要开发与动态验证环境；Linux 由 CI 自动化测试覆盖（实际矩阵以 [`.github/workflows/test.yml`](.github/workflows/test.yml) 为准）；Windows 为尽力兼容——Git 探针已按 Windows 约定做可信可执行解析（含 `PATHEXT`，见 [KI-7](KNOWN_ISSUES.md#ki-7-the-git-dirty-probe-used-a-bare-executable-name-before-trust)），**2026-09-18 已在 Windows 11 + Windows Terminal 真实环境完成 HUD 动态验证**（真实 PTY 下全屏模式的逐帧渲染、行 1 刷新、行 2 归属、额度刷新与冷启动耗时，当时用的是 2.0.0 与上线前的 `KIMI_CODE_TUI_FULL_SCREEN=1` 开关；当前可设置 `tui.toml` 的 `tui_mode = "fullscreen"`，也可用 `KIMI_CODE_TUI_FULL_SCREEN=1/0` 按进程覆盖（实验总开关开启且未显式配置时默认全屏），证据见 [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)）；窗口 resize、`/reload-tui` 热重载与失败回退仍未实测 |
-| Kimi Code 宿主 | 源码与合成 fixture 基线 **2.6.3**；真实 TUI 验收待完成 | 逐版本契约审计与固定的上游提交见 [CAPABILITIES.md](CAPABILITIES.md) |
+| Kimi Code 宿主 | 源码与合成 fixture 基线 **2.7.0**；真实 TUI 验收待完成 | 逐版本契约审计与固定的上游提交见 [CAPABILITIES.md](CAPABILITIES.md) |
 
 CI 矩阵的增删是测试覆盖的变化，不构成支持契约的扩张或收缩；支持范围以本节为准。跨操作系统的交互式宿主矩阵（真实 TUI、终端模拟器、插件生命周期）已补齐 Windows 一行（Windows 11 + Windows Terminal，见 [KI-8](KNOWN_ISSUES.md#ki-8-experimental-fullscreen-mode-lacks-a-live-hud-verification)），macOS Terminal 与 Linux PTY 组合仍在补齐。
 
@@ -87,7 +87,7 @@ HUD 自有设置保存在 `~/.kimi-code-hud/config.json`（JSON；容忍未知�
 - 会话成本本地计算，价格表以 **2026-08-09** 官方定价核对，不含服务端工具费等修正所以始终带 `≈`；DeepSeek 缓存命中字段在宿主补齐映射前按未命中价保守估算，数值可能偏高；
 - 用量分级着色 <60% 绿 / <85% 黄 / ≥85% 红；可见宽度超过 200 字符自动 normal→compact 降级。
 
-本分支另含**未发布的 2.7.0 prep**：`kind = "prediction"` 的旁路请求不推进主回合活动态，也不覆盖正式回合的模型/thinking；其真实 `usageScope = "prediction"` 用量仍计入 Session Cost。#4820 若随 stable 发布，TTFT 将跟随宿主从 `generate` 入口（含 request-build）计时，TPS 的流式终点跟随 `decoder.end()`；250ms / 1000 t/s 门槛仍需真实样本复核，历史 fixture 不会被改写冒充新口径。详见 [2.7.0 prep 说明](docs/upstream-2.7.0-prep.md)。
+在 2.7.0 中，`kind = "prediction"` 的旁路请求不推进主回合活动态，也不覆盖正式回合的模型/thinking；其真实 `usageScope = "prediction"` 用量仍计入 Session Cost。TTFT 跟随宿主从 `generate` 入口（含 request-build）计时，TPS 的流式终点跟随 `decoder.end()`；真实 2.7.0 三轮样本已复核，250ms / 1000 t/s 门槛保持不变。详见 [2.7.0 审查](docs/upstream-2.7.0-review.md)。
 
 ## 工作原理
 
@@ -123,7 +123,7 @@ provider 余额 / 用量窗口按**该 provider 的 `base_url` 官方 host** 选
 
 ## 能力与已知问题
 
-- [能力清单](CAPABILITIES.md)：Kimi Code 2.6.3 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
+- [能力清单](CAPABILITIES.md)：Kimi Code 2.7.0 第一行 slots 的覆盖情况、数据来源，以及已经可读但尚未展示的 Cache/token/goal/task/Git 等信息；
 - [已知问题](KNOWN_ISSUES.md)：Git、终端宽度、失败帧与全屏动态验证缺口及验收条件。
 
 ## 隐私与安全

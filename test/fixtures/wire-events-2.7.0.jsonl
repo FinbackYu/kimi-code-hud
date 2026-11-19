@@ -1,0 +1,16 @@
+{"type":"metadata","protocol_version":"1.5","min_protocol_version":"1.5","created_at":1785456000000}
+{"type":"profile.bind","agentId":"main","modelAlias":"example/primary","profileName":"agent","thinkingEffort":"high","time":1785456000001}
+{"type":"turn.prompt","agentId":"main","origin":{"kind":"user"},"trigger":"normal","promptId":"redacted-1","turnId":1,"time":1785456000100}
+{"type":"usage.record","model":"example-model","usage":{"inputOther":29820,"output":416,"inputCacheRead":768,"inputCacheCreation":0},"usageScope":"turn","time":1785456001000}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"1","step":0,"finishReason":"end_turn","usage":{"inputOther":29820,"output":416,"inputCacheRead":768,"inputCacheCreation":0},"llmFirstTokenLatencyMs":3238,"llmStreamDurationMs":8313},"time":1785456001001}
+{"type":"turn.ended","agentId":"main","turnId":1,"reason":"completed","time":1785456001002}
+{"type":"turn.prompt","agentId":"main","origin":{"kind":"user"},"trigger":"normal","promptId":"redacted-2","turnId":2,"time":1785456001100}
+{"type":"usage.record","model":"example-model","usage":{"inputOther":592,"output":388,"inputCacheRead":30464,"inputCacheCreation":0},"usageScope":"turn","time":1785456002000}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"2","step":0,"finishReason":"end_turn","usage":{"inputOther":592,"output":388,"inputCacheRead":30464,"inputCacheCreation":0},"llmFirstTokenLatencyMs":1905,"llmStreamDurationMs":6612},"time":1785456002001}
+{"type":"turn.ended","agentId":"main","turnId":2,"reason":"completed","time":1785456002002}
+{"type":"usage.record","model":"example-model","usage":{"inputOther":907,"output":157,"inputCacheRead":23296,"inputCacheCreation":0},"usageScope":"prediction","time":1785456002500}
+{"type":"turn.prompt","agentId":"main","origin":{"kind":"user"},"trigger":"normal","promptId":"redacted-3","turnId":3,"time":1785456003100}
+{"type":"usage.record","model":"example-model","usage":{"inputOther":499,"output":394,"inputCacheRead":30976,"inputCacheCreation":0},"usageScope":"turn","time":1785456004000}
+{"type":"context.append_loop_event","event":{"type":"step.end","turnId":"3","step":0,"finishReason":"end_turn","usage":{"inputOther":499,"output":394,"inputCacheRead":30976,"inputCacheCreation":0},"llmFirstTokenLatencyMs":1986,"llmStreamDurationMs":6786},"time":1785456004001}
+{"type":"turn.ended","agentId":"main","turnId":3,"reason":"completed","time":1785456004002}
+{"type":"usage.record","model":"example-model","usage":{"inputOther":820,"output":101,"inputCacheRead":23808,"inputCacheCreation":0},"usageScope":"prediction","time":1785456005000}
